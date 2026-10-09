@@ -1,4 +1,4 @@
-# NGene — kernel e WebGUI · v0.6.1
+# NGene — kernel e WebGUI · v0.6.2 (candidate)
 
 **NGene è la base funzionale e algoritmica di questo progetto.** L'evoluzione resta incrementale: frontend I/Q, conditioning, ring condiviso, scheduler e librerie DSP interne. La [mappa di migrazione](docs/LEGACY_MIGRATION.md) collega questo codice al ricevitore originale.
 
@@ -17,6 +17,8 @@ Questa versione riceve e registra I/Q e produce diagnostica. Acquisizione satell
 
 Ulteriore consolidamento 0.6.1: selezione corretta del triplet anche con piattaforma Visual Studio composta e host ARM64, riparazione del cache manifest, header import anche per SDK installati, controllo clang-tidy su produzione/test e verifica del vero archivio CPack. [Report finale](docs/ITERATION_06_COMPLETION.md).
 
+Consolidamento 0.6.2: correzione del percorso HTTP C4701 e della policy CMP0207 nello staging, runtime Debug/Release anche senza HackRF, preset Debug e verificatore da vero clone per tutte e quattro le combinazioni. **Accettazione nativa Windows ancora aperta:** [stato e prove](docs/WINDOWS_BUILD_062.md).
+
 ## Windows con HackRF
 
 Prerequisiti di sviluppo: Visual Studio 18/2026 con workload C/C++, Windows SDK, CMake che riconosca VS 2026 (4.2 o successivo) e Git. La prima configurazione scarica le dipendenze mancanti.
@@ -30,7 +32,7 @@ ctest --preset windows-msvc-x64-hackrf
 
 CMake seleziona il generatore Visual Studio installato. Per un cross-build MSVC da x64 ad ARM64 usare il preset `windows-msvc-arm64-hackrf` e il relativo toolset ARM64. Il build senza hardware è `windows-msvc-x64`; i test usano file registrati e fixture, senza un generatore nel ricevitore.
 
-La nuova automazione è verificata qui su Linux, inclusi download, pin e build HackRF. **La sua esecuzione nativa MSVC deve ancora essere verificata**: la CI comprende runner VS 2026 x64/ARM64 e uno script da checkout pulito, con Debug, Release e pacchetto rilocato.
+Le correzioni sono verificate qui su Linux, inclusi build Debug/Release OFF/ON e regressioni GUI/staging. **La sua esecuzione nativa MSVC deve ancora essere verificata**: la CI comprende runner VS 2026 x64/ARM64 e uno script da checkout pulito, con Debug, Release e pacchetto rilocato.
 
 ## Linux e macOS
 

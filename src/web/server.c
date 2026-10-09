@@ -899,7 +899,7 @@ static int Handle(struct mg_connection *connection, void *context)
         }
     } else if (strcmp(path, "/api/v1/config") == 0 ||
                strcmp(path, "/api/v1/config/validate") == 0) {
-        TNgConfig config;
+        TNgConfig config = {0};
         TNgError error = {{0}};
         uint64_t revision;
         FILE *file;
@@ -909,10 +909,11 @@ static int Handle(struct mg_connection *connection, void *context)
         } else if ((file = tmpfile()) == NULL) {
             code = Failure(connection, 500, "Cannot allocate configuration stream");
         } else {
-            int result;
+            int result = NG_ERROR;
             if (fputs(ini->valuestring, file) == EOF || fflush(file) != 0 ||
                 fseek(file, 0, SEEK_SET) != 0) {
-                result = NgFail(&error, "Cannot prepare configuration stream");
+                /* Keep failure explicit: an I/O error must never apply an unparsed config. */
+                (void)NgFail(&error, "Cannot prepare configuration stream");
             } else {
                 result = NgConfigRead(file, &config, &error);
             }

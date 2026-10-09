@@ -14,14 +14,22 @@
       "cacheVariables": {
         "NGENE_WITH_WEB": "ON",
         "NGENE_BUILD_TESTS": "ON",
-        "NGENE_REQUIRE_MSVC": "ON"
+        "NGENE_REQUIRE_MSVC": "ON",
+        "NGENE_WITH_HACKRF": "OFF"
       },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
       },
-      "description": "Use the installed Visual Studio default generator; no version or toolset hardcoded."
+      "description": "Use the installed Visual Studio default generator; no version or toolset hardcoded.",
+      "warnings": {
+        "dev": true,
+        "deprecated": true
+      },
+      "errors": {
+        "dev": true
+      }
     },
     {
       "name": "windows-msvc-arm64",
@@ -128,6 +136,26 @@
     {
       "name": "macos-release",
       "configurePreset": "macos-release"
+    },
+    {
+      "name": "windows-msvc-x64-debug",
+      "configurePreset": "windows-msvc-x64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-arm64-debug",
+      "configurePreset": "windows-msvc-arm64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-x64-hackrf-debug",
+      "configurePreset": "windows-msvc-x64-hackrf",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-arm64-hackrf-debug",
+      "configurePreset": "windows-msvc-arm64-hackrf",
+      "configuration": "Debug"
     }
   ],
   "testPresets": [
@@ -166,6 +194,38 @@
       "name": "windows-msvc-arm64-hackrf",
       "configurePreset": "windows-msvc-arm64-hackrf",
       "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-x64-debug",
+      "configurePreset": "windows-msvc-x64",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-arm64-debug",
+      "configurePreset": "windows-msvc-arm64",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-x64-hackrf-debug",
+      "configurePreset": "windows-msvc-x64-hackrf",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-arm64-hackrf-debug",
+      "configurePreset": "windows-msvc-arm64-hackrf",
+      "configuration": "Debug",
       "output": {
         "outputOnFailure": true
       }

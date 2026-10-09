@@ -1,6 +1,8 @@
-# Windows — build MSVC nativa e dipendenze, v0.6.1
+# Windows — build MSVC nativa e dipendenze, v0.6.2 (candidate)
 
 Il percorso standard parte da un checkout pulito: Visual Studio 18/2026 con workload C/C++, Windows SDK, Git e CMake >=4.2. Nessun file di progetto deve essere modificato. Il toolset ARM64 è richiesto soltanto per un target ARM64. Il minimo CMake generale resta 3.26 per gli altri generatori/OS.
+
+**Accettazione nativa ancora aperta.** Il log Windows della 0.6.1 ha evidenziato C4701 e CMP0207. Le correzioni sono nel sorgente della 0.6.2; questa revisione non è stata ancora eseguita su Windows. I test Linux e le fixture non certificano una build MSVC.
 
 ## Procedura standard
 
@@ -10,6 +12,15 @@ cmake --build --preset windows-msvc-x64-hackrf --parallel
 ctest --preset windows-msvc-x64-hackrf
 .\build\msvc-x64-hackrf\Release\ngene.exe --web
 ```
+
+Il preset senza suffisso seleziona Release. Debug usa gli stessi sorgenti e la stessa configurazione:
+
+```powershell
+cmake --build --preset windows-msvc-x64-hackrf-debug --parallel
+ctest --preset windows-msvc-x64-hackrf-debug
+```
+
+Per HackRF OFF utilizzare `windows-msvc-x64`, anche per configure; i relativi build/test Debug sono `windows-msvc-x64-debug`. È impostato esplicitamente `NGENE_WITH_HACKRF=OFF`, non soltanto affidato al default del cache. Configure non impone né generatore né toolset di una specifica versione Visual Studio. Gli errori di policy CMake durante configure non vengono silenziati.
 
 Il preset richiede MSVC e imposta HackRF, provider AUTO, bootstrap vcpkg, web e test. Il generatore Visual Studio disponibile viene scelto da CMake; nessun riferimento a v143 o VS 2022 viene imposto nel progetto. Non sono necessari MinGW, MSYS, WSL, Node, Python, un SDK HackRF preparato a mano o una Developer Prompt per queste chiamate al generatore Visual Studio.
 
@@ -33,11 +44,17 @@ Il provider mantiene librerie libusb Release/Debug distinte quando sono disponib
 
 NGene mantiene `/W4 /WX /utf-8 /external:W0`. Le soppressioni sono **PRIVATE** sui target esterni `ngene_hackrf_native` e `ngene_http`: `/w` su MSVC, `-w` sugli altri compilatori. Gli include esterni sono SYSTEM. Gli stessi flag severi non vengono propagati a libhackrf/libusb/pthreads; vcpkg costruisce gli ultimi due separatamente secondo i loro port.
 
+`_CRT_SECURE_NO_WARNINGS` rimane limitato ai target C interessati: permette le API ISO C portabili (`fopen`, `snprintf`, `localtime` dove protetta), invece di imporre sostituzioni `_s` specifiche di Microsoft. Non disabilita i controlli `/W4 /WX`, le conversioni, il flusso non inizializzato o i warning generali. Nessuna soppressione di C4701/C4703, C4244 o C4267 è stata aggiunta.
+
+Il ramo HTTP della configurazione inizializza il draft e mantiene `NG_ERROR` esplicito dopo un errore di scrittura/flush/seek del file temporaneo. Il risultato di `NgFail` non viene più usato per decidere se esiste una configurazione letta. Questo evita sia il percorso ambiguo per MSVC sia l'applicazione di un draft dopo un errore I/O. I test verificano che configurazioni malformate non cambino profilo o revisione.
+
 La release HackRF fissata definisce già `ADD_EXPORTS` nel proprio header: NGene non lo ridefinisce nella riga di compilazione. Per i consumatori della DLL genera una copia dell'header che elimina soltanto la definizione incondizionata, lasciando ABI, calling convention, licenza e ramo dllimport. Il target DLL continua a vedere l'header upstream originale. Anche il provider SYSTEM/AUTO con SDK installato usa un header consumer privato per NGene quando necessario; il target importato dello SDK rimane invariato. Nessun sorgente scaricato o SDK locale viene modificato. Questa trasformazione è coperta da test, anche con CRLF e header già corretti.
 
 ## DLL e pacchetto
 
-Dopo il link, CMake usa dumpbin per risolvere la chiusura delle dipendenze e raccoglie le DLL non di sistema accanto a programma e test. Un errore nel pacchetto non viene silenziato. Per il percorso standard vcpkg non servono percorsi aggiuntivi o copie manuali.
+Dopo il link, CMake usa `dumpbin` del compilatore selezionato per risolvere la chiusura delle dipendenze e raccoglie le DLL non di sistema accanto a programma e test, **anche con HackRF OFF**. Il runtime MSVC della configurazione selezionata viene individuato tramite `InstallRequiredSystemLibraries` e collocato automaticamente accanto agli eseguibili prima della risoluzione; Debug comprende l'UCRT di debug del Windows SDK. Il package Release non include il CRT di debug. Gli archivi Debug servono per verifica/development locale, non per distribuzione del runtime di debug Microsoft.
+
+`StageRuntime.cmake` dichiara il minimo CMake e imposta `CMP0207=NEW` quando disponibile. Il processo `cmake -P` ha un proprio scope di policy: la policy nel solo progetto principale non sarebbe sufficiente. I filtri rimangono compatibili anche con CMake precedenti a 4.3. Un lock per directory serializza le copie degli stessi runtime durante i link paralleli di programma e test. Un errore nel pacchetto non viene silenziato. Per il percorso standard vcpkg non servono percorsi aggiuntivi o copie manuali.
 
 ```powershell
 cmake --install build/msvc-x64-hackrf --config Release --prefix package
@@ -54,10 +71,34 @@ cmake --preset windows-msvc-arm64-hackrf
 cmake --build --preset windows-msvc-arm64-hackrf --parallel
 ```
 
-Un host x64 può compilare ARM64 con MSVC/ARMASM64; i relativi test vanno eseguiti su ARM64. Le CI native usano runner Visual Studio 2026 x64 e ARM64. `scripts/verify-windows.ps1` configura con i sei flag richiesti, costruisce Debug/Release, esegue i test sul target nativo e estrae il vero ZIP prodotto da CPack e lo prova in una directory nuova con PATH privo delle directory SDK. Richiede una directory di build nuova e non modifica il checkout.
+Un host x64 può compilare ARM64 con MSVC/ARMASM64; i relativi test vanno eseguiti su ARM64. Le CI definite usano runner Visual Studio 2026 x64 e ARM64; la nuova esecuzione non è stata avviata in questo ambiente.
+
+Per la verifica completa su Windows nativo, dal checkout Git **con le correzioni già committate**:
+
+```powershell
+./scripts/verify-windows.ps1
+```
+
+Lo script rifiuta una working tree sporca per non certificare per errore una revisione precedente. Chi usa l'archivio consegnato può ottenere il checkout con `git clone ngene-0.6.2.bundle NGene`, poi eseguire lo script dentro `NGene`. Non occorre inizializzare o aggiornare il baseline.
+
+Lo script:
+
+1. Crea un nuovo clone e nuove build; conserva la revisione Git esatta nei risultati.
+2. Rimuove temporaneamente override di SDK, toolchain, generatore e flag del compilatore, ripristinandoli alla fine.
+3. Configura entrambi i preset OFF/ON e verifica generatore VS 2026+, compilatore MSVC e `ml64` per x64.
+4. Compila **OFF/ON × Debug/Release**, esegue CTest e intercetta anche warning di compiler/linker/CMake nei log completi.
+5. Prova `--help`, `--version` e, con HackRF ON, `--list-devices` da build, install e ZIP realmente estratto, con PATH limitato alle directory Windows di sistema.
+6. Conserva log, build, pacchetti ed `acceptance.json` in una nuova directory temporanea indicata in console. `-WorkRoot` permette di sceglierne una nuova senza modificare file del progetto.
+7. Continua sulle altre combinazioni in caso di fallimento e non restituisce accettazione positiva se una combinazione fallisce oppure se il vcpkg integrato di Visual Studio non è stato effettivamente usato.
+
+Un Visual Studio senza vcpkg integrato utilizza comunque il fallback automatico previsto dal build. Lo script di accettazione segnala in quel caso la specifica prova "vcpkg integrato" ancora non effettuata, senza trasformare il fallback in una certificazione di quel requisito.
+
+Su ARM64 nativo usare `-Architecture ARM64`. Il verificatore rifiuta l'esecuzione su un host di architettura diversa; la compilazione cross resta disponibile tramite i preset ma non sostituisce i test runtime nativi.
 
 ## Stato della validazione
 
-Questa iterazione ha verificato localmente download/pin e build upstream HackRF su Linux, test C, browser, Doxygen e cross-build ARM64. **Non dispone di un host Windows/MSVC e non dichiara eseguita la nuova CI.** Il precedente recap Windows dell'utente non valida automaticamente questa revisione. Il risultato definitivo zero-touch Windows richiede il passaggio della CI o dello script sul target nativo.
+Sono disponibili build/test reali Linux della 0.6.2 nelle quattro combinazioni e la regressione browser della configurazione. Il contratto dello staging usa output `dumpbin` simulato per testare policy, dipendenze transitive, spazi nei path, CRT, esclusione dei file OS e fallimento per DLL mancanti. Il test PowerShell verifica parsing e cattura di exit/warning, anche localizzati. **Nessuna di queste prove è un build nativo Windows.**
+
+Mancano un host/runner Windows accessibile e i quattro risultati MSVC con smoke test e clone pulito. L'acceptance resta aperta; il report [WINDOWS_BUILD_062.md](WINDOWS_BUILD_062.md) distingue implementazione, prove eseguite e prove mancanti. La nuova CI è configurata, non dichiarata eseguita.
 
 Driver USB, dispositivo collegato e validazione RF restano prove sul computer ricevitore: `ngene --list-devices`. Il build non installa driver o firmware. Il supporto Unicode dei percorsi Windows rimane quello precedente, basato sulle API narrow: usare percorsi ASCII in questa revisione.

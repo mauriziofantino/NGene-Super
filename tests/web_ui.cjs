@@ -65,6 +65,12 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert(persisted.includes(`directory=${output}`));
     let cfg = await (await fetch(`${base}/api/v1/config`)).json();
     assert.equal((await post('config/validate',{revision:cfg.revision,ini:'[buffer]\nwindow_samples=0\n'})).status,400);
+    for (const route of ['config','config/validate']) {
+      assert.equal((await post(route,{revision:cfg.revision,ini:'[buffer]\nwindow_samples=invalid\n'})).status,400);
+      assert.deepEqual(await (await fetch(`${base}/api/v1/config`)).json(),cfg,
+        'Rejected configuration must not change the saved profile or revision');
+      assert.equal(fs.readFileSync(path.join(profile,'receiver.ini'),'utf8'),persisted);
+    }
     assert.equal((await post('receiver/start',{revision:cfg.revision},'invalid')).status,403);
     assert.equal((await fetch(`${base}/api/v1/status`,{headers:{Origin:'http://other.example'}})).status,403);
     await page.locator('#start').click(); await state('running');

@@ -33,36 +33,35 @@ jobs:
     runs-on: windows-2025-vs2026
     steps:
       - uses: actions/checkout@v4
-      - run: cmake --preset windows-msvc-x64
-      - run: cmake --build --preset windows-msvc-x64 --parallel 2
-      - run: ctest --preset windows-msvc-x64
-      - run: cmake --preset windows-msvc-arm64
-      - run: cmake --build --preset windows-msvc-arm64 --parallel 2
-        # ARM64 binaries are compiled with MSVC/ARMASM; execute on a native ARM64 runner.
-
-  windows-hackrf-native:
-    runs-on: windows-2025-vs2026
-    steps:
-      - uses: actions/checkout@v4
-      # Fresh checkout and build tree; no dependency SDK or cache preparation.
       - shell: pwsh
-        run: ./scripts/verify-windows.ps1
+        run: ./scripts/verify-windows.ps1 -WorkRoot "$env:RUNNER_TEMP/ngene-msvc-evidence"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-native-build-evidence
+          name: windows-msvc-x64-evidence
           path: |
-            build/zero-touch-x64/CMakeCache.txt
-            build/zero-touch-x64/CMakeFiles/CMakeConfigureLog.yaml
-            build/zero-touch-x64/Testing/Temporary/LastTest.log
-            build/zero-touch-x64/vcpkg-manifest-install.log
-            build/package-x64/*.zip
+            ${{ runner.temp }}/ngene-msvc-evidence/acceptance.json
+            ${{ runner.temp }}/ngene-msvc-evidence/logs/
+            ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/CMakeCache.txt
+            ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/CMakeConfigureLog.yaml
+            ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/LastTest.log
+            ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/vcpkg-manifest-install.log
+            ${{ runner.temp }}/ngene-msvc-evidence/*-package/*.zip
   windows-arm64-native:
     runs-on: windows-11-vs2026-arm
     steps:
       - uses: actions/checkout@v4
       - shell: pwsh
-        run: ./scripts/verify-windows.ps1 -Architecture ARM64
+        run: ./scripts/verify-windows.ps1 -Architecture ARM64 -WorkRoot "$env:RUNNER_TEMP/ngene-msvc-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-msvc-arm64-evidence
+          path: |
+            ${{ runner.temp }}/ngene-msvc-evidence/acceptance.json
+            ${{ runner.temp }}/ngene-msvc-evidence/logs/
+            ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/CMakeCache.txt
+            ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/LastTest.log
   documentation:
     runs-on: ubuntu-24.04
     steps:
