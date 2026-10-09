@@ -1,0 +1,15 @@
+/build*/
+/out/
+/.vs/
+*.user
+*.cs8
+*.index.csv
+*.meta.ini
+*.log
+
+/captures/
+/ngene_control_test_*/
+/node_modules/
+
+/CMakeUserPresets.json
+/vcpkg_installed/

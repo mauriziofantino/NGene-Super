@@ -1,0 +1,38 @@
+NGene 0.6 — riepilogo della revisione
+
+Build Windows/HackRF:
+- baseline vcpkg e port fissati nel repository;
+- bootstrap vcpkg automatico prima del rilevamento compiler;
+- HackRF AUTO con sorgente/tag/hash fissati come fallback;
+- ADD_EXPORTS non ridefinita e header import generato per i consumer;
+- warning disabilitati solo sui target esterni, NGene /W4 /WX;
+- libusb Debug/Release e dipendenze DLL gestite automaticamente;
+- script/CI Visual Studio 18/2026 x64/ARM64, niente MinGW.
+
+Comando di verifica da checkout pulito con VS C++/SDK, CMake >=4.2 e Git:
+  ./scripts/verify-windows.ps1
+Nessuna modifica CMake, x-update-baseline o copia DLL manuale prevista.
+
+Codice: naming ESA uniforme per tipi/tag/funzioni/membri/variabili/parametri,
+Doxygen verificato senza warning, formatter e audit AST senza violazioni.
+La conformità formale a tutte le regole ESA oltre al naming non è certificata.
+
+Replay: synthetic rimosso dal prodotto, file CI8 con range/pacing/loop;
+sessione replay indipendente utilizzabile in parallelo al primario nella GUI.
+Fs e riferimenti RF espliciti. File chiusi immutabili, no auto-concatenazione.
+
+Prove: Linux HackRF SOURCE 10/10, ASan/UBSan 9/9 senza LeakSanitizer,
+ARM64 QEMU 9/9, headless 8/8, browser desktop/mobile superato.
+Windows MSVC nativo e HackRF fisica non disponibili qui: nuova procedura
+zero-touch da confermare con script/job Windows. Report ITERATION_06.md.
+
+Chiusura 0.6.1:
+- triplet corretto anche con default ARM64 e piattaforme VS composte;
+- cache manifest riallineato dal bootstrap e feature conservate;
+- consumer header import anche con SDK Windows installato;
+- clang-tidy eseguito su produzione/test: zero violazioni;
+- CI naming configurata anche con HackRF;
+- script PowerShell verificato sintatticamente, smoke test sul vero ZIP CPack;
+- Linux SOURCE/AUTO 10/10 e browser superati.
+MSVC nativo rimane da eseguire: nessun host Windows/remote CI accessibile qui.
+Dettagli: ITERATION_06_COMPLETION.md.

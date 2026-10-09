@@ -1,0 +1,9 @@
+* text=auto
+*.c text eol=lf
+*.h text eol=lf
+*.cmake text eol=lf
+*.md text eol=lf
+*.ini text eol=lf
+*.csv text eol=lf
+# Preserve exact upstream bytes, including their existing line endings.
+third_party/** -text

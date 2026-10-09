@@ -1,0 +1,14 @@
+{
+  "counts": {
+    "ENUM_DECL": 10,
+    "ENUM_CONSTANT_DECL": 37,
+    "TYPEDEF_DECL": 54,
+    "STRUCT_DECL": 43,
+    "FIELD_DECL": 331,
+    "FUNCTION_DECL": 313,
+    "PARM_DECL": 719,
+    "VAR_DECL": 611
+  },
+  "violations": [],
+  "parseErrors": []
+}

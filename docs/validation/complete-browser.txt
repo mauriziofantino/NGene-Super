@@ -1,0 +1,1 @@
+PASS: parallel sessions/GUI selection, recording deletion/active protection/token/revision/path/symlink checks, topic settings and mobile; PSD integrity/corruption, sequence skips without separator rows, slow/latest-frame GUI, 30 Hz polling, dormant producers, independent histogram, tuning axes, gain steps; recording, transfer, persistence, mobile and shutdown.

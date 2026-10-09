@@ -1,0 +1,21 @@
+Test project /workspace/scratch/4b1b6222cc2b/maintenance/source-package06/build
+    Start 1: build_dependency_contract
+1/8 Test #1: build_dependency_contract ........   Passed    0.00 sec
+    Start 2: file_replay_contract
+2/8 Test #2: file_replay_contract .............   Passed    0.00 sec
+    Start 3: sample_math_and_dc
+3/8 Test #3: sample_math_and_dc ...............   Passed    0.03 sec
+    Start 4: analysis_worker_contract
+4/8 Test #4: analysis_worker_contract .........   Passed    0.15 sec
+    Start 5: fft_integer_contract
+5/8 Test #5: fft_integer_contract .............   Passed    0.01 sec
+    Start 6: core_contracts
+6/8 Test #6: core_contracts ...................   Passed    1.82 sec
+    Start 7: cli_help
+7/8 Test #7: cli_help .........................   Passed    0.00 sec
+    Start 8: cli_version
+8/8 Test #8: cli_version ......................   Passed    0.00 sec
+
+100% tests passed out of 8
+
+Total Test time (real) =   2.03 sec

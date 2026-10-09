@@ -1,0 +1,174 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 26,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-msvc-x64",
+      "displayName": "Windows native MSVC x64",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/msvc-x64",
+      "cacheVariables": {
+        "NGENE_WITH_WEB": "ON",
+        "NGENE_BUILD_TESTS": "ON",
+        "NGENE_REQUIRE_MSVC": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "description": "Use the installed Visual Studio default generator; no version or toolset hardcoded."
+    },
+    {
+      "name": "windows-msvc-arm64",
+      "displayName": "Windows native MSVC ARM64 (also x64 host cross-build)",
+      "inherits": "windows-msvc-x64",
+      "architecture": "ARM64",
+      "binaryDir": "${sourceDir}/build/msvc-arm64",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "description": "Use the installed Visual Studio default generator; no version or toolset hardcoded."
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux native release",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-arm64",
+      "displayName": "Linux ARM64 cross-build",
+      "inherits": "linux-release",
+      "binaryDir": "${sourceDir}/build/linux-arm64",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64.cmake",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "windows-msvc-x64-hackrf",
+      "inherits": "windows-msvc-x64",
+      "binaryDir": "${sourceDir}/build/msvc-x64-hackrf",
+      "cacheVariables": {
+        "NGENE_WITH_HACKRF": "ON",
+        "NGENE_HACKRF_PROVIDER": "AUTO",
+        "NGENE_BOOTSTRAP_VCPKG": "ON"
+      }
+    },
+    {
+      "name": "windows-msvc-arm64-hackrf",
+      "inherits": "windows-msvc-arm64",
+      "binaryDir": "${sourceDir}/build/msvc-arm64-hackrf",
+      "cacheVariables": {
+        "NGENE_WITH_HACKRF": "ON",
+        "NGENE_HACKRF_PROVIDER": "AUTO",
+        "NGENE_BOOTSTRAP_VCPKG": "ON"
+      }
+    },
+    {
+      "name": "macos-release",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/macos",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc-x64",
+      "configurePreset": "windows-msvc-x64",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-arm64",
+      "configurePreset": "windows-msvc-arm64",
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
+    },
+    {
+      "name": "linux-arm64",
+      "configurePreset": "linux-arm64"
+    },
+    {
+      "name": "windows-msvc-x64-hackrf",
+      "configurePreset": "windows-msvc-x64-hackrf",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-arm64-hackrf",
+      "configurePreset": "windows-msvc-arm64-hackrf",
+      "configuration": "Release"
+    },
+    {
+      "name": "macos-release",
+      "configurePreset": "macos-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc-x64",
+      "configurePreset": "windows-msvc-x64",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-arm64",
+      "configurePreset": "windows-msvc-arm64",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-x64-hackrf",
+      "configurePreset": "windows-msvc-x64-hackrf",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-arm64-hackrf",
+      "configurePreset": "windows-msvc-arm64-hackrf",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

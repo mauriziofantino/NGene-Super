@@ -1,0 +1,6 @@
+#ifndef NGENE_BUILD_H
+#define NGENE_BUILD_H
+#define NGENE_VERSION "@PROJECT_VERSION@"
+#define NGENE_OS "@CMAKE_SYSTEM_NAME@"
+#define NGENE_ARCH "@NGENE_ARCH@"
+#endif

@@ -1,0 +1,21 @@
+---
+Checks: '-*,readability-identifier-naming'
+WarningsAsErrors: 'readability-identifier-naming'
+HeaderFilterRegex: '.*/(include/ngene|src)/.*'
+CheckOptions:
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TypedefPrefix: TNg
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.StructPrefix: TNg
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.EnumPrefix: TNg
+  readability-identifier-naming.FunctionCase: CamelCase
+  readability-identifier-naming.FunctionIgnoredRegexp: '^(main|hackrf_.*|libusb_.*)$'
+  readability-identifier-naming.LocalFunctionCase: CamelCase
+  readability-identifier-naming.VariableCase: camelBack
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.MemberCase: camelBack
+  readability-identifier-naming.EnumConstantCase: UPPER_CASE
+  readability-identifier-naming.EnumConstantPrefix: NG_
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(_WIN32_WINNT|WIN32_LEAN_AND_MEAN)$'

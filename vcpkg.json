@@ -1,0 +1,33 @@
+{
+  "name": "ngene",
+  "version-string": "0.6.1",
+  "description": "Native optional USB frontend dependencies; internal FFT has no FFTW dependency.",
+  "dependencies": [],
+  "features": {
+    "hackrf": {
+      "description": "Dependencies for native libhackrf source builds on Windows",
+      "dependencies": [
+        {
+          "name": "libusb",
+          "platform": "windows"
+        },
+        {
+          "name": "pthreads",
+          "platform": "windows"
+        }
+      ]
+    }
+  },
+  "builtin-baseline": "0699a19d0c6386247ce50d4dedbb8217d484d536",
+  "overrides": [
+    {
+      "name": "libusb",
+      "version": "1.0.30"
+    },
+    {
+      "name": "pthreads",
+      "version": "3.0.0",
+      "port-version": 14
+    }
+  ]
+}

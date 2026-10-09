@@ -1,0 +1,25 @@
+Test project /workspace/scratch/4b1b6222cc2b/build-clean06-hackrf
+      Start  1: build_dependency_contract
+ 1/10 Test  #1: build_dependency_contract ........   Passed    0.00 sec
+      Start  2: file_replay_contract
+ 2/10 Test  #2: file_replay_contract .............   Passed    0.00 sec
+      Start  3: sample_math_and_dc
+ 3/10 Test  #3: sample_math_and_dc ...............   Passed    0.03 sec
+      Start  4: analysis_worker_contract
+ 4/10 Test  #4: analysis_worker_contract .........   Passed    0.15 sec
+      Start  5: fft_integer_contract
+ 5/10 Test  #5: fft_integer_contract .............   Passed    0.01 sec
+      Start  6: core_contracts
+ 6/10 Test  #6: core_contracts ...................   Passed    1.46 sec
+      Start  7: cli_help
+ 7/10 Test  #7: cli_help .........................   Passed    0.00 sec
+      Start  8: cli_version
+ 8/10 Test  #8: cli_version ......................   Passed    0.00 sec
+      Start  9: controller_lifecycle
+ 9/10 Test  #9: controller_lifecycle .............   Passed    0.30 sec
+      Start 10: native_hackrf_contract
+10/10 Test #10: native_hackrf_contract ...........   Passed    0.00 sec
+
+100% tests passed out of 10
+
+Total Test time (real) =   1.96 sec
