@@ -103,6 +103,28 @@ function Resolve-CMakeTools {
     # Never mix CMake with ctest/cpack from another installation or select an older PATH copy.
     return ($usable | Sort-Object -Property version -Descending | Select-Object -First 1)
 }
+function Assert-VsWarningPolicy {
+    param([string]$ProjectFile, [bool]$External)
+    if (-not (Test-Path -LiteralPath $ProjectFile -PathType Leaf)) { throw "Missing MSBuild project: $ProjectFile" }
+    [xml]$projectXml = Get-Content -LiteralPath $ProjectFile -Raw
+    $settings = @($projectXml.SelectNodes("//*[local-name()='ItemDefinitionGroup']/*[local-name()='ClCompile']"))
+    if ($settings.Count -eq 0) { throw "No compiler settings in MSBuild project: $ProjectFile" }
+    $expectedLevel = if ($External) { 'TurnOffAllWarnings' } else { 'Level4' }
+    foreach ($setting in $settings) {
+        $level = $setting.SelectSingleNode("*[local-name()='WarningLevel']")
+        $extra = $setting.SelectSingleNode("*[local-name()='AdditionalOptions']")
+        if ($null -eq $level -or $level.InnerText -ne $expectedLevel -or
+            ($null -ne $extra -and $extra.InnerText -cmatch '(?<!\S)/w(?!\S)')) {
+            throw "Conflicting or incorrect MSVC warning level in $ProjectFile (expected $expectedLevel)."
+        }
+        if (-not $External) {
+            $asError = $setting.SelectSingleNode("*[local-name()='TreatWarningAsError']")
+            if ($null -eq $asError -or $asError.InnerText -ne 'true') {
+                throw "NGene must retain /WX in $ProjectFile."
+            }
+        }
+    }
+}
 function Invoke-Checked {
     param([string]$Label, [string]$Program, [string[]]$Arguments)
     $script:commandNumber++
@@ -189,6 +211,12 @@ try {
                 if ($cache -notmatch 'CMAKE_GENERATOR:INTERNAL=Visual Studio (\d+) ' -or [int]$Matches[1] -lt 18) {
                     throw 'Acceptance requires Visual Studio 2026 or newer, discovered automatically by CMake.'
                 }
+                foreach ($target in @('ngene', 'ngene_core', 'ngene_control')) {
+                    Assert-VsWarningPolicy (Join-Path $build "$target.vcxproj") $false
+                }
+                Assert-VsWarningPolicy (Join-Path $build 'ngene_http.vcxproj') $true
+                $hackrfProject = Join-Path $build 'ngene_hackrf_native.vcxproj'
+                if (Test-Path -LiteralPath $hackrfProject) { Assert-VsWarningPolicy $hackrfProject $true }
                 $compilerFiles = @(Get-ChildItem (Join-Path $build 'CMakeFiles') -Filter 'CMakeCCompiler.cmake' -Recurse -File)
                 if ($compilerFiles.Count -ne 1 -or (Get-Content $compilerFiles[0].FullName -Raw) -notmatch 'CMAKE_C_COMPILER_ID "MSVC"') {
                     throw 'The configured C compiler is not native MSVC.'

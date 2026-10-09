@@ -93,6 +93,33 @@ try {
     $expectedTool = Join-Path $installationFixture 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     if ($candidates -notcontains $expectedTool) { throw 'Visual Studio CMake was not found when absent from PATH.' }
 } finally { Remove-Item Function:Get-Command }
+$policyHelper = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-VsWarningPolicy'
+}, $true)
+if ($null -eq $policyHelper) { throw 'Missing generated MSBuild warning policy guard.' }
+Invoke-Expression $policyHelper.Extent.Text
+$projectFixture = Join-Path $toolRoot 'warnings.vcxproj'
+$vendorProject = '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' +
+    '<ItemDefinitionGroup><ClCompile><WarningLevel>TurnOffAllWarnings</WarningLevel>' +
+    '<AdditionalOptions>%(AdditionalOptions)</AdditionalOptions></ClCompile></ItemDefinitionGroup></Project>'
+$ownProject = $vendorProject.Replace('TurnOffAllWarnings', 'Level4').Replace(
+    '</WarningLevel>', '</WarningLevel><TreatWarningAsError>true</TreatWarningAsError>')
+Set-Content -LiteralPath $projectFixture -Value $vendorProject -Encoding UTF8
+Assert-VsWarningPolicy $projectFixture $true
+Set-Content -LiteralPath $projectFixture -Value $ownProject -Encoding UTF8
+Assert-VsWarningPolicy $projectFixture $false
+foreach ($case in @(
+    @{ xml = $vendorProject.Replace('TurnOffAllWarnings','Level1'); external = $true },
+    @{ xml = $vendorProject.Replace('%(AdditionalOptions)', '/w %(AdditionalOptions)'); external = $true },
+    @{ xml = $ownProject.Replace('Level4','Level1'); external = $false },
+    @{ xml = $ownProject.Replace('>true<','>false<'); external = $false }
+)) {
+    Set-Content -LiteralPath $projectFixture -Value $case.xml -Encoding UTF8
+    $caught = $false
+    try { Assert-VsWarningPolicy $projectFixture $case.external } catch { $caught = $true }
+    if (-not $caught) { throw 'Conflicting/relaxed generated MSVC warning policy was accepted.' }
+}
 $helper = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-Checked'
@@ -144,4 +171,4 @@ foreach ($invalid in @(
     try { Assert-TestReport $report } catch { $caught = $true }
     if (-not $caught) { throw 'Incomplete, failed or skipped CTest report was accepted.' }
 }
-Write-Host 'PASS: verifier entry point, CMake discovery/selection, syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)'
+Write-Host 'PASS: verifier entry point, CMake discovery/selection, MSBuild warning policy, syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)'

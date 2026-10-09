@@ -60,7 +60,7 @@ Il provider mantiene librerie libusb Release/Debug distinte quando sono disponib
 
 ## Warning e header DLL
 
-NGene mantiene `/W4 /WX /utf-8 /external:W0`. Le soppressioni sono **PRIVATE** sui target esterni `ngene_hackrf_native` e `ngene_http`: `/w` su MSVC, `-w` sugli altri compilatori. Gli include esterni sono SYSTEM. Gli stessi flag severi non vengono propagati a libhackrf/libusb/pthreads; vcpkg costruisce gli ultimi due separatamente secondo i loro port.
+NGene mantiene `/W4 /WX /utf-8 /external:W0`. Le soppressioni sono **PRIVATE** sui target esterni `ngene_hackrf_native` e `ngene_http`: `/W0` su MSVC, `-w` sugli altri compilatori. Gli include esterni sono SYSTEM. Gli stessi flag severi non vengono propagati a libhackrf/libusb/pthreads; vcpkg costruisce gli ultimi due separatamente secondo i loro port.
 
 `_CRT_SECURE_NO_WARNINGS` rimane limitato ai target C interessati: permette le API ISO C portabili (`fopen`, `snprintf`, `tmpfile`), invece di imporre sostituzioni `_s` specifiche di Microsoft. Non disabilita i controlli `/W4 /WX`, le conversioni, il flusso non inizializzato o i warning generali. Nessuna soppressione di C4701/C4703, C4244 o C4267 è stata aggiunta.
 
@@ -149,3 +149,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ..\verify-windows.ps1 -Sourc
 Il verificatore esterno compila il commit del clone indicato e ne registra il
 hash; non applica automaticamente modifiche al progetto. Il bundle aggiornato
 contiene la stessa correzione per i checkout futuri.
+
+### Warning D9025 delle dipendenze esterne
+
+Il log nativo fornito durante questa iterazione mostra HackRF ON / Release con
+zero errori e due warning D9025. La verifica resta fallita: il frammento non
+certifica né CTest né le altre configurazioni. La precedente opzione `/w`
+finiva in AdditionalOptions accanto al WarningLevel predefinito `/W1` di MSBuild.
+Ora solo i target esterni ricevono `/W0`, che CMake mappa a
+`WarningLevel=TurnOffAllWarnings`. NGene conserva `/W4 /WX`; il verificatore
+continua a rifiutare D9025 e controlla i progetti .vcxproj dopo configure.
+
+Per aggiornare un checkout del bundle precedente, salvare il nuovo bundle
+nella directory che contiene `NGene-git` (sostituendo il vecchio bundle), quindi
+eseguire dal checkout:
+
+```powershell
+git fetch ..\ngene-0.6.2.bundle main
+git merge --ff-only FETCH_HEAD
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1
+```
+
+La nuova verifica esegue un clone pulito del commit aggiornato; non riutilizza
+la build precedente. Non occorre modificare file CMake, warning level o DLL a mano.

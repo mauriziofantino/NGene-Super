@@ -63,3 +63,22 @@ Acceptance closes only when the Windows results verify every requested criterion
 - [Visual Studio 18 2026 generator](https://cmake.org/cmake/help/latest/generator/Visual%20Studio%2018%202026.html)
 - [Compiler runtime discovery](https://cmake.org/cmake/help/latest/module/InstallRequiredSystemLibraries.html)
 - [Microsoft C4701](https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-4-c4701)
+
+## Native feedback: D9025
+
+The user-supplied Windows excerpt reports HackRF ON / Release with **2 warnings,
+0 errors**, followed by verifier rejection of D9025. The full four-configuration
+results, CTest, runtime and package logs have not been supplied; acceptance is
+still OPEN. This is partial native evidence, not a successful acceptance run.
+
+`cmake/ThirdParty.cmake` previously added `/w`, which coexisted with MSBuild's
+implicit `/W1`. It now adds PRIVATE `/W0` for both ngene_http and
+ngene_hackrf_native. CMake's installed v145/v143 CL flag tables map `/W0` to
+WarningLevel=TurnOffAllWarnings, while `/w` is absent from that mapping.
+Receiver `/W4 /WX`, vendor source bytes and all receiver C/ASM remain unchanged.
+The native verifier checks generated warning properties for vendor and receiver
+targets before compilation and continues rejecting every D9025 diagnostic.
+Configure-only target isolation and XML helper fixtures are explicitly host
+contracts; the replacement still needs a native Windows run.
+
+Reference: https://learn.microsoft.com/en-us/cpp/error-messages/tool-errors/command-line-warning-d9025
