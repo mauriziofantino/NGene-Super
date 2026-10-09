@@ -1,0 +1,78 @@
+Linux / PowerShell 7.5.3. Tool discovery fixtures and script helpers only; not native Windows/MSVC acceptance.
+
+Command: ['/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/cmake', '-S', '/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/candidate-repo', '-B', '/workspace/scratch/4b1b6222cc2b/maintenance/cmake-discovery/ctest-build', '-DNGENE_WITH_HACKRF=OFF', '-DNGENE_BUILD_TESTS=ON', '-DNGENE_POWERSHELL=/workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh']
+-- The C compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Performing Test NG_TARGET_ARM64
+-- Performing Test NG_TARGET_ARM64 - Failed
+-- Performing Test NG_TARGET_X64
+-- Performing Test NG_TARGET_X64 - Success
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- The ASM compiler identification is GNU
+-- Found assembler: /usr/bin/cc
+-- NGene target Linux/x86_64; native HackRF=OFF
+-- Configuring done (0.6s)
+-- Generating done (0.0s)
+-- Build files have been written to: /workspace/scratch/4b1b6222cc2b/maintenance/cmake-discovery/ctest-build
+
+Exit: 0
+
+Command: ['/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/ctest', '--test-dir', '/workspace/scratch/4b1b6222cc2b/maintenance/cmake-discovery/ctest-build', '-R', '^windows_verifier_helper_contract$', '--output-on-failure', '--verbose']
+UpdateCTestConfiguration  from :/workspace/scratch/4b1b6222cc2b/maintenance/cmake-discovery/ctest-build/DartConfiguration.tcl
+Test project /workspace/scratch/4b1b6222cc2b/maintenance/cmake-discovery/ctest-build
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 3
+    Start 3: windows_verifier_helper_contract
+
+3: Test command: /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh "-NoLogo" "-NoProfile" "-File" "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/candidate-repo/tests/windows_verifier.ps1" "-Source" "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/candidate-repo" "-Work" "/workspace/scratch/4b1b6222cc2b/maintenance/cmake-discovery/ctest-build/build-contract"
+3: Working Directory: /workspace/scratch/4b1b6222cc2b/maintenance/cmake-discovery/ctest-build
+3: Test timeout computed to be: 10000000
+3: [success] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('OK')
+3: OK
+3: [warning] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('source.c: warning C4701: test warning')
+3: source.c: warning C4701: test warning
+3: [localized] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('source.c: avviso C4244: test warning')
+3: source.c: avviso C4244: test warning
+3: [failure] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::Error.WriteLine('failure'); exit 9
+3: failure
+3: [policy] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::Error.WriteLine('CMake Warning (dev): test policy')
+3: CMake Warning (dev): test policy
+3: PASS: verifier entry point, CMake discovery/selection, syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)
+1/1 Test #3: windows_verifier_helper_contract ...   Passed    2.66 sec
+
+The following tests passed:
+	windows_verifier_helper_contract
+
+100% tests passed out of 1
+
+Total Test time (real) =   2.66 sec
+
+Exit: 0
+
+Actual installed Linux tool-suite selection:
+{
+  "cmake": "/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/cmake",
+  "ctest": "/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/ctest",
+  "cpack": "/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/cpack",
+  "version": {
+    "Major": 4,
+    "Minor": 4,
+    "Build": 3,
+    "Revision": -1,
+    "MajorRevision": -1,
+    "MinorRevision": -1
+  }
+}
+
+Exit: 0

@@ -41,6 +41,58 @@ try {
         if ($resolvedSource -ne $explicitSource) { throw 'Explicit repository path or URL was changed.' }
     }
 } finally { Pop-Location }
+foreach ($name in @('Get-CMakeCandidates', 'Get-CMakeToolVersion', 'Resolve-CMakeTools')) {
+    $definition = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+    }, $true)
+    if ($null -eq $definition) { throw "Missing tool discovery helper: $name" }
+    Invoke-Expression $definition.Extent.Text
+}
+$toolRoot = Join-Path $Work 'tool discovery with spaces'
+function New-ToolFixture {
+    param([string]$Directory, [string]$Version, [string]$PackVersion = $Version)
+    $null = New-Item -Path $Directory -ItemType Directory -Force
+    foreach ($name in @('cmake', 'ctest', 'cpack')) {
+        $toolVersion = if ($name -eq 'cpack') { $PackVersion } else { $Version }
+        $content = "Write-Output '$name version $toolVersion'; exit 0"
+        Set-Content -LiteralPath (Join-Path $Directory "$name.ps1") -Value $content -Encoding UTF8
+    }
+    return (Join-Path $Directory 'cmake.ps1')
+}
+$oldTool = New-ToolFixture (Join-Path $toolRoot 'old PATH copy') '3.31.0'
+$goodTool = New-ToolFixture (Join-Path $toolRoot 'Visual Studio') '4.2.0'
+$newTool = New-ToolFixture (Join-Path $toolRoot 'standalone') '4.4.0'
+$mixedTool = New-ToolFixture (Join-Path $toolRoot 'mismatched') '4.5.0' '4.4.0'
+$missingTool = New-ToolFixture (Join-Path $toolRoot 'incomplete') '4.6.0'
+Remove-Item -LiteralPath (Join-Path (Split-Path $missingTool -Parent) 'ctest.ps1')
+$selected = Resolve-CMakeTools -Candidates @($oldTool, $mixedTool, $missingTool, $goodTool, $newTool)
+if ($selected.cmake -ne $newTool -or $selected.ctest -ne (Join-Path (Split-Path $newTool -Parent) 'ctest.ps1')) {
+    throw 'Failed to select one complete compatible suite from the discovered tools.'
+}
+$selected = Resolve-CMakeTools -Candidates @($oldTool, $goodTool)
+if ($selected.cmake -ne $goodTool) { throw 'An old PATH copy hides compatible Visual Studio CMake.' }
+$caught = $false
+try { Resolve-CMakeTools -Candidates @($oldTool, $mixedTool, $missingTool) | Out-Null }
+catch {
+    $caught = $_.Exception.Message.Contains('No complete CMake >=4.2 installation found')
+}
+if (-not $caught) { throw 'Missing/incompatible tools were not rejected with an actionable error.' }
+# Query a real fixture locator with no cmake command available: exercise discovery
+# separately from tool selection, without depending on the test host's installations.
+$locatorFixture = Join-Path $toolRoot 'vswhere fixture.ps1'
+$installationFixture = Join-Path $toolRoot 'VS arbitrary edition'
+Set-Content -LiteralPath $locatorFixture -Encoding UTF8 -Value (
+    "Write-Output '$($installationFixture.Replace("'", "''"))'; exit 0")
+function Get-Command {
+    param([string]$Name, [string]$CommandType, [switch]$All, [string]$ErrorAction)
+    if ($Name -eq 'vswhere') { return [pscustomobject]@{ Source = $locatorFixture } }
+}
+try {
+    $candidates = @(Get-CMakeCandidates)
+    $expectedTool = Join-Path $installationFixture 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
+    if ($candidates -notcontains $expectedTool) { throw 'Visual Studio CMake was not found when absent from PATH.' }
+} finally { Remove-Item Function:Get-Command }
 $helper = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-Checked'
@@ -92,4 +144,4 @@ foreach ($invalid in @(
     try { Assert-TestReport $report } catch { $caught = $true }
     if (-not $caught) { throw 'Incomplete, failed or skipped CTest report was accepted.' }
 }
-Write-Host 'PASS: verifier entry point, syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)'
+Write-Host 'PASS: verifier entry point, CMake discovery/selection, syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)'

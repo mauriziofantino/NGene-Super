@@ -6,6 +6,24 @@ Il percorso standard parte da un checkout pulito: Visual Studio 18/2026 con work
 
 ## Procedura standard
 
+Da un normale PowerShell, il verificatore scopre automaticamente anche CMake
+incluso in Visual Studio, senza modificare il PATH o aprire una Developer Prompt:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1
+```
+
+Cerca nel PATH, nelle installazioni standalone standard e nelle installazioni
+Visual Studio individuate da vswhere (incluse Build Tools/preview). Richiede
+una suite completa >=4.2 e usa i percorsi assoluti di cmake/ctest/cpack della
+stessa versione, preferendo la più recente compatibile. Riporta i percorsi
+in console e in acceptance.json. Se CMake non è installato, segnala precisamente
+il componente «C++ CMake tools for Windows» da installare/aggiornare in Visual
+Studio, oppure il prerequisito CMake standalone >=4.2. Non installa software
+sistema né modifica il PATH persistente.
+
+I comandi diretti seguenti sono disponibili quando CMake è già nel PATH:
+
 ```powershell
 cmake --preset windows-msvc-x64-hackrf
 cmake --build --preset windows-msvc-x64-hackrf --parallel
@@ -117,3 +135,17 @@ Il pacchetto aggiornato include la correzione e non richiede questo argomento.
 Il test del punto di ingresso copre cartelle con spazi, directory corrente diversa
 e repository espliciti; la sua esecuzione su PowerShell 7/Linux non certifica
 Windows PowerShell 5.1 o una build MSVC.
+
+### Continuare dal clone precedente con il verificatore aggiornato
+
+Per evitare modifiche nella working tree, salvare la copia autonoma consegnata
+`verify-windows.ps1` accanto alla cartella `NGene-git`, non dentro il repository.
+Dal terminale già aperto in `NGene-git`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ..\verify-windows.ps1 -SourceRepository "$PWD"
+```
+
+Il verificatore esterno compila il commit del clone indicato e ne registra il
+hash; non applica automaticamente modifiche al progetto. Il bundle aggiornato
+contiene la stessa correzione per i checkout futuri.

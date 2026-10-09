@@ -18,7 +18,7 @@ if ($env:OS -ne 'Windows_NT') { throw 'Native Windows/MSVC is required. Linux, W
 $hostArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $expectedHost = if ($Architecture -eq 'x64') { 'AMD64' } else { 'ARM64' }
 if ($hostArchitecture -ne $expectedHost) { throw 'Use a native target host for acceptance tests. Cross-builds use the ARM64 CMake presets.' }
-foreach ($program in @('git', 'cmake', 'ctest', 'cpack')) { $null = Get-Command $program -ErrorAction Stop }
+$null = Get-Command git -CommandType Application -ErrorAction Stop
 $WorkRoot = [IO.Path]::GetFullPath($WorkRoot)
 if (Test-Path -LiteralPath $WorkRoot) { throw 'WorkRoot must not already exist: acceptance requires a fresh clone and build trees.' }
 $null = New-Item -ItemType Directory -Path $WorkRoot
@@ -29,7 +29,79 @@ $script:commandNumber = 0
 $script:evidence = [ordered]@{
     acceptance = 'pending'; platform = 'Windows'; architecture = $Architecture
     source = $SourceRepository; commit = ''; integratedVcpkgVerified = $false
-    commands = @(); configurations = @(); failure = ''
+    tools = @{}; commands = @(); configurations = @(); failure = ''
+}
+function Get-CMakeCandidates {
+    # CMake supplied by Visual Studio is commonly absent from a normal PowerShell PATH.
+    # Query all installed editions, including Build Tools and preview installations.
+    $onPath = @(Get-Command cmake -CommandType Application -All -ErrorAction SilentlyContinue)
+    foreach ($command in $onPath) { $command.Source }
+    $programRoots = @([Environment]::GetEnvironmentVariable('ProgramFiles'),
+                     [Environment]::GetEnvironmentVariable('ProgramFiles(x86)'),
+                     [Environment]::GetEnvironmentVariable('ProgramW6432'))
+    $locators = @()
+    foreach ($root in $programRoots) {
+        if ($root) {
+            Join-Path $root 'CMake/bin/cmake.exe'
+            $locators += Join-Path $root 'Microsoft Visual Studio/Installer/vswhere.exe'
+        }
+    }
+    $locatorCommands = @(Get-Command vswhere -CommandType Application -All -ErrorAction SilentlyContinue)
+    foreach ($command in $locatorCommands) { $locators += $command.Source }
+    foreach ($locator in @($locators | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $locator -PathType Leaf)) { continue }
+        $savedPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $installations = @(& $locator -all -prerelease -products '*' -property installationPath 2>$null)
+            if ($LASTEXITCODE -ne 0) { continue }
+            foreach ($installation in $installations) {
+                $path = ([string]$installation).Trim()
+                if ($path) { Join-Path $path 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe' }
+            }
+        } finally { $ErrorActionPreference = $savedPreference }
+    }
+}
+function Get-CMakeToolVersion {
+    param([string]$Executable, [string]$Name)
+    $savedPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $Executable --version 2>&1)
+        if ($LASTEXITCODE -ne 0) { return $null }
+        $match = [regex]::Match(($output -join "`n"), "(?m)^$Name version (\d+\.\d+\.\d+)")
+        if ($match.Success) { return [version]$match.Groups[1].Value }
+    } catch { return $null }
+    finally { $ErrorActionPreference = $savedPreference }
+    return $null
+}
+function Resolve-CMakeTools {
+    param([string[]]$Candidates = @(Get-CMakeCandidates))
+    $usable = @()
+    $examined = @()
+    foreach ($candidate in @($Candidates | Select-Object -Unique)) {
+        if (-not $candidate -or -not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        $directory = Split-Path -Path $candidate -Parent
+        $extension = [IO.Path]::GetExtension($candidate)
+        $ctest = Join-Path $directory ('ctest' + $extension)
+        $cpack = Join-Path $directory ('cpack' + $extension)
+        $version = Get-CMakeToolVersion $candidate 'cmake'
+        $examined += "$candidate [$version]"
+        if ($null -eq $version -or $version -lt [version]'4.2.0') { continue }
+        if (-not (Test-Path -LiteralPath $ctest -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $cpack -PathType Leaf)) { continue }
+        $testVersion = Get-CMakeToolVersion $ctest 'ctest'
+        $packVersion = Get-CMakeToolVersion $cpack 'cpack'
+        if ($version -ne $testVersion -or $version -ne $packVersion) { continue }
+        $usable += [pscustomobject]@{ cmake = $candidate; ctest = $ctest; cpack = $cpack; version = $version }
+    }
+    if ($usable.Count -eq 0) {
+        throw ('No complete CMake >=4.2 installation found in PATH, Program Files or Visual Studio. ' +
+               'Install/update Visual Studio component "C++ CMake tools for Windows" or standalone CMake >=4.2. ' +
+               'No PATH edit or Developer Prompt is required. Examined: ' + ($examined -join '; '))
+    }
+    # Never mix CMake with ctest/cpack from another installation or select an older PATH copy.
+    return ($usable | Sort-Object -Property version -Descending | Select-Object -First 1)
 }
 function Invoke-Checked {
     param([string]$Label, [string]$Program, [string[]]$Arguments)
@@ -86,6 +158,9 @@ foreach ($name in $overrides) {
     [Environment]::SetEnvironmentVariable($name, $null, 'Process')
 }
 try {
+    $tools = Resolve-CMakeTools
+    $script:evidence.tools = @{ cmake = $tools.cmake; ctest = $tools.ctest; cpack = $tools.cpack; version = $tools.version.ToString() }
+    Write-Host "Using CMake $($tools.version): $($tools.cmake)"
     if (Test-Path -LiteralPath $SourceRepository) {
         $SourceRepository = [IO.Path]::GetFullPath($SourceRepository)
         $dirty = @(& git -C $SourceRepository status --porcelain --untracked-files=normal)
@@ -100,7 +175,7 @@ try {
     if ($Revision) { Invoke-Checked 'checkout' git @('-C', $checkout, 'checkout', '--detach', $Revision) }
     $script:evidence.commit = (& git -C $checkout rev-parse HEAD)
     if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the cloned revision.' }
-    Invoke-Checked 'tools' cmake @('--version')
+    Invoke-Checked 'tools' $tools.cmake @('--version')
     Push-Location $checkout
     try {
         foreach ($hackrf in @($false, $true)) {
@@ -109,7 +184,7 @@ try {
             $build = Join-Path $checkout ('build/msvc-' + $Architecture.ToLowerInvariant() + $(if ($hackrf) { '-hackrf' } else { '' }))
             $configureFailure = ''
             try {
-                Invoke-Checked "$preset-configure" cmake @('--preset', $preset)
+                Invoke-Checked "$preset-configure" $tools.cmake @('--preset', $preset)
                 $cache = Get-Content -LiteralPath (Join-Path $build 'CMakeCache.txt') -Raw
                 if ($cache -notmatch 'CMAKE_GENERATOR:INTERNAL=Visual Studio (\d+) ' -or [int]$Matches[1] -lt 18) {
                     throw 'Acceptance requires Visual Studio 2026 or newer, discovered automatically by CMake.'
@@ -134,9 +209,9 @@ try {
                 try {
                     if ($configureFailure) { throw $configureFailure }
                     $buildPreset = $preset + $(if ($configuration -eq 'Debug') { '-debug' } else { '' })
-                    Invoke-Checked "$label-build" cmake @('--build', '--preset', $buildPreset, '--parallel', '2', '--verbose')
+                    Invoke-Checked "$label-build" $tools.cmake @('--build', '--preset', $buildPreset, '--parallel', '2', '--verbose')
                     $testReport = Join-Path $build "$configuration-junit.xml"
-                    Invoke-Checked "$label-tests" ctest @('--preset', $buildPreset, '--no-tests=error', '--output-junit', $testReport)
+                    Invoke-Checked "$label-tests" $tools.ctest @('--preset', $buildPreset, '--no-tests=error', '--output-junit', $testReport)
                     Assert-TestReport $testReport
                     $executable = Join-Path $build "$configuration/ngene.exe"
                     Invoke-Smoke "$label-build-runtime" $executable $hackrf
@@ -145,9 +220,9 @@ try {
                         throw 'The clean SOURCE build must stage HackRF and libusb app-locally.'
                     }
                     $package = Join-Path $WorkRoot "$label-package"
-                    Invoke-Checked "$label-install" cmake @('--install', $build, '--config', $configuration, '--prefix', (Join-Path $package 'installed'))
+                    Invoke-Checked "$label-install" $tools.cmake @('--install', $build, '--config', $configuration, '--prefix', (Join-Path $package 'installed'))
                     Invoke-Smoke "$label-installed-runtime" (Join-Path $package 'installed/bin/ngene.exe') $hackrf
-                    Invoke-Checked "$label-package" cpack @('--config', (Join-Path $build 'CPackConfig.cmake'), '-C', $configuration, '-B', $package)
+                    Invoke-Checked "$label-package" $tools.cpack @('--config', (Join-Path $build 'CPackConfig.cmake'), '-C', $configuration, '-B', $package)
                     $archives = @(Get-ChildItem $package -Filter '*.zip' -File)
                     if ($archives.Count -ne 1) { throw 'Expected exactly one CPack ZIP.' }
                     $relocated = Join-Path $WorkRoot "$label-relocated"
