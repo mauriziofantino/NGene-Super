@@ -44,7 +44,7 @@ Il provider mantiene librerie libusb Release/Debug distinte quando sono disponib
 
 NGene mantiene `/W4 /WX /utf-8 /external:W0`. Le soppressioni sono **PRIVATE** sui target esterni `ngene_hackrf_native` e `ngene_http`: `/w` su MSVC, `-w` sugli altri compilatori. Gli include esterni sono SYSTEM. Gli stessi flag severi non vengono propagati a libhackrf/libusb/pthreads; vcpkg costruisce gli ultimi due separatamente secondo i loro port.
 
-`_CRT_SECURE_NO_WARNINGS` rimane limitato ai target C interessati: permette le API ISO C portabili (`fopen`, `snprintf`, `localtime` dove protetta), invece di imporre sostituzioni `_s` specifiche di Microsoft. Non disabilita i controlli `/W4 /WX`, le conversioni, il flusso non inizializzato o i warning generali. Nessuna soppressione di C4701/C4703, C4244 o C4267 è stata aggiunta.
+`_CRT_SECURE_NO_WARNINGS` rimane limitato ai target C interessati: permette le API ISO C portabili (`fopen`, `snprintf`, `tmpfile`), invece di imporre sostituzioni `_s` specifiche di Microsoft. Non disabilita i controlli `/W4 /WX`, le conversioni, il flusso non inizializzato o i warning generali. Nessuna soppressione di C4701/C4703, C4244 o C4267 è stata aggiunta.
 
 Il ramo HTTP della configurazione inizializza il draft e mantiene `NG_ERROR` esplicito dopo un errore di scrittura/flush/seek del file temporaneo. Il risultato di `NgFail` non viene più usato per decidere se esiste una configurazione letta. Questo evita sia il percorso ambiguo per MSVC sia l'applicazione di un draft dopo un errore I/O. I test verificano che configurazioni malformate non cambino profilo o revisione.
 
@@ -76,7 +76,7 @@ Un host x64 può compilare ARM64 con MSVC/ARMASM64; i relativi test vanno esegui
 Per la verifica completa su Windows nativo, dal checkout Git **con le correzioni già committate**:
 
 ```powershell
-./scripts/verify-windows.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1
 ```
 
 Lo script rifiuta una working tree sporca per non certificare per errore una revisione precedente. Chi usa l'archivio consegnato può ottenere il checkout con `git clone ngene-0.6.2.bundle NGene`, poi eseguire lo script dentro `NGene`. Non occorre inizializzare o aggiornare il baseline.

@@ -41,10 +41,14 @@ function(ngene_prepare_dependencies)
                 COMMAND_ERROR_IS_FATAL ANY)
             set(CMAKE_TOOLCHAIN_FILE "${root}/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "Dependency toolchain bootstrapped by NGene")
         endif()
+    endif()
+    # Check even on a configure retry, when the discovered toolchain is already cached.
+    get_filename_component(toolchain_name "${CMAKE_TOOLCHAIN_FILE}" NAME)
+    if(toolchain_name STREQUAL "vcpkg.cmake")
         get_filename_component(toolchain_directory "${CMAKE_TOOLCHAIN_FILE}" DIRECTORY)
         get_filename_component(root "${toolchain_directory}/../.." ABSOLUTE)
         if(NOT EXISTS "${root}/vcpkg.exe")
-            execute_process(COMMAND cmd /c "${root}/bootstrap-vcpkg.bat" -disableMetrics
+            execute_process(COMMAND cmd /c call "${root}/bootstrap-vcpkg.bat" -disableMetrics
                 WORKING_DIRECTORY "${root}" COMMAND_ERROR_IS_FATAL ANY)
         endif()
     endif()

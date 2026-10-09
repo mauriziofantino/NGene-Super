@@ -117,7 +117,17 @@ try {
                     if ($configureFailure) { throw $configureFailure }
                     $buildPreset = $preset + $(if ($configuration -eq 'Debug') { '-debug' } else { '' })
                     Invoke-Checked "$label-build" cmake @('--build', '--preset', $buildPreset, '--parallel', '2', '--verbose')
-                    Invoke-Checked "$label-tests" ctest @('--preset', $buildPreset, '--no-tests=error')
+                    $testReport = Join-Path $build "$configuration-junit.xml"
+                    Invoke-Checked "$label-tests" ctest @('--preset', $buildPreset, '--no-tests=error', '--output-junit', $testReport)
+                    if (-not (Test-Path -LiteralPath $testReport)) { throw 'CTest did not produce its completion report.' }
+                    [xml]$testXml = Get-Content -LiteralPath $testReport -Raw
+                    $suite = $testXml.DocumentElement
+                    if ($suite.Name -ne 'testsuite' -or [int]$suite.GetAttribute('tests') -lt 9 -or
+                        [int]$suite.GetAttribute('failures') -ne 0 -or
+                        $suite.GetElementsByTagName('skipped').Count -ne 0 -or
+                        $suite.GetElementsByTagName('testcase').Count -ne [int]$suite.GetAttribute('tests')) {
+                        throw 'CTest report is incomplete, failed or skipped tests. Acceptance requires the whole suite.'
+                    }
                     $executable = Join-Path $build "$configuration/ngene.exe"
                     Invoke-Smoke "$label-build-runtime" $executable $hackrf
                     $result.dlls = @(Get-ChildItem (Split-Path $executable -Parent) -Filter '*.dll' -File | Select-Object -ExpandProperty Name)

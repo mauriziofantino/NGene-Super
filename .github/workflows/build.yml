@@ -45,6 +45,7 @@ jobs:
             ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/CMakeCache.txt
             ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/CMakeConfigureLog.yaml
             ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/LastTest.log
+            ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/*/*-junit.xml
             ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/vcpkg-manifest-install.log
             ${{ runner.temp }}/ngene-msvc-evidence/*-package/*.zip
   windows-arm64-native:
@@ -62,6 +63,7 @@ jobs:
             ${{ runner.temp }}/ngene-msvc-evidence/logs/
             ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/CMakeCache.txt
             ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/**/LastTest.log
+            ${{ runner.temp }}/ngene-msvc-evidence/checkout/build/*/*-junit.xml
   documentation:
     runs-on: ubuntu-24.04
     steps:
