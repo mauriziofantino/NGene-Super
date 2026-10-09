@@ -1,0 +1,209 @@
+Start testing: Oct 09 20:25 BST
+----------------------------------------------------------
+1/12 Testing: build_dependency_contract
+1/12 Test: build_dependency_contract
+Command: "/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/cmake" "-Dsource=/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-clean-checkout" "-Dwork=/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/build-contract" "-P" "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-clean-checkout/tests/build_contract.cmake"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"build_dependency_contract" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+-- PASS: manifest pin, source hash and immutable DLL import header
+-- PASS: pre-project Windows target selection, discovery and manifest cache repair
+-- PASS: installed SDK consumer import header, without changing SDK or target
+<end of output>
+Test time =   0.48 sec
+----------------------------------------------------------
+Test Passed.
+"build_dependency_contract" end time: Oct 09 20:25 BST
+"build_dependency_contract" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/12 Testing: runtime_staging_mock_contract
+2/12 Test: runtime_staging_mock_contract
+Command: "/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/cmake" "-Dsource=/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-clean-checkout" "-Dwork=/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/build-contract" "-P" "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-clean-checkout/tests/runtime_staging.cmake"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"runtime_staging_mock_contract" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+-- PASS: standalone runtime policy, spaces, transitive DLL closure, CRT staging, OS exclusions and unresolved-DLL failure (mock dumpbin)
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"runtime_staging_mock_contract" end time: Oct 09 20:25 BST
+"runtime_staging_mock_contract" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/12 Testing: windows_verifier_helper_contract
+3/12 Test: windows_verifier_helper_contract
+Command: "/workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh" "-NoLogo" "-NoProfile" "-File" "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-clean-checkout/tests/windows_verifier.ps1" "-Source" "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-clean-checkout" "-Work" "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/build-contract"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"windows_verifier_helper_contract" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+[success] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('OK')
+OK
+[warning] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('source.c: warning C4701: test warning')
+source.c: warning C4701: test warning
+[localized] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('source.c: avviso C4244: test warning')
+source.c: avviso C4244: test warning
+[failure] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::Error.WriteLine('failure'); exit 9
+failure
+[policy] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::Error.WriteLine('CMake Warning (dev): test policy')
+CMake Warning (dev): test policy
+PASS: verifier syntax, nonzero exits, compiler diagnostics/localization and policy warnings (helper contract only)
+<end of output>
+Test time =   4.78 sec
+----------------------------------------------------------
+Test Passed.
+"windows_verifier_helper_contract" end time: Oct 09 20:25 BST
+"windows_verifier_helper_contract" time elapsed: 00:00:04
+----------------------------------------------------------
+
+4/12 Testing: file_replay_contract
+4/12 Test: file_replay_contract
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene_replay_tests"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"file_replay_contract" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+PASS: independent replay buffers/ranges, leases, EOF, loop gaps and signed CI8
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"file_replay_contract" end time: Oct 09 20:25 BST
+"file_replay_contract" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/12 Testing: sample_math_and_dc
+5/12 Test: sample_math_and_dc
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene_sample_tests"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"sample_math_and_dc" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+PASS: signed CI8 moments, full-range CI16 power, DC chunk invariance/gap, tuning metadata
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"sample_math_and_dc" end time: Oct 09 20:25 BST
+"sample_math_and_dc" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/12 Testing: analysis_worker_contract
+6/12 Test: analysis_worker_contract
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene_analysis_tests"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"analysis_worker_contract" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+PASS: tone frequency/level, histogram totals/rails, gap reset and runtime reconfiguration
+<end of output>
+Test time =   0.18 sec
+----------------------------------------------------------
+Test Passed.
+"analysis_worker_contract" end time: Oct 09 20:25 BST
+"analysis_worker_contract" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/12 Testing: fft_integer_contract
+7/12 Test: fft_integer_contract
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene_fft_tests"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"fft_integer_contract" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+PASS: SSE2-assembly, every size 8..16384, bit-exact scalar and DFT checks
+<end of output>
+Test time =   0.09 sec
+----------------------------------------------------------
+Test Passed.
+"fft_integer_contract" end time: Oct 09 20:25 BST
+"fft_integer_contract" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/12 Testing: core_contracts
+8/12 Test: core_contracts
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene_tests"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"core_contracts" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+PASS: config, ring lease/wrap/full/EOF, 5000 concurrent blocks, synchronized channels/gap, segmented byte-exact recording/no-overwrite
+<end of output>
+Test time =   1.81 sec
+----------------------------------------------------------
+Test Passed.
+"core_contracts" end time: Oct 09 20:25 BST
+"core_contracts" time elapsed: 00:00:01
+----------------------------------------------------------
+
+9/12 Testing: cli_help
+9/12 Test: cli_help
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene" "--help"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"cli_help" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]
+       --list-devices | --version
+C receiver and local web console; no acquisition, tracking or PVT yet.
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cli_help" end time: Oct 09 20:25 BST
+"cli_help" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/12 Testing: cli_version
+10/12 Test: cli_version
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene" "--version"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"cli_version" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+NGene 0.6.2 Linux/x86_64 native-HackRF=yes; FFT=SSE2-assembly
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cli_version" end time: Oct 09 20:25 BST
+"cli_version" time elapsed: 00:00:00
+----------------------------------------------------------
+
+11/12 Testing: controller_lifecycle
+11/12 Test: controller_lifecycle
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene_control_tests"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"controller_lifecycle" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+Controller lifecycle, revision guard, recording and EOF: PASS
+<end of output>
+Test time =   0.33 sec
+----------------------------------------------------------
+Test Passed.
+"controller_lifecycle" end time: Oct 09 20:25 BST
+"controller_lifecycle" time elapsed: 00:00:00
+----------------------------------------------------------
+
+12/12 Testing: native_hackrf_contract
+12/12 Test: native_hackrf_contract
+Command: "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug/ngene_hackrf_tests"
+Directory: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Debug
+"native_hackrf_contract" start time: Oct 09 20:25 BST
+Output:
+----------------------------------------------------------
+PASS: native HackRF API config, callback lifetime, overflow/drop indices, malformed transfer and cleanup (simulated driver)
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"native_hackrf_contract" end time: Oct 09 20:25 BST
+"native_hackrf_contract" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Oct 09 20:25 BST
