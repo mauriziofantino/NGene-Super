@@ -1,0 +1,6 @@
+['/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/cmake', '-Dsource=/workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/clean-checkout', '-Dwork=/workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/deep test work deep test work deep test work deep test work deep test work deep test work deep test work deep test work deep test work deep test work /nested folder nested folder nested folder nested folder nested folder nested folder nested folder nested folder ', '-P', '/workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/clean-checkout/tests/build_contract.cmake']
+-- PASS: manifest pin, source hash and immutable DLL import header
+-- PASS: pre-project Windows target selection, discovery and manifest cache repair
+-- Compiler fixtures: /tmp/ngt-cf55473fa359 (retained on failure)
+-- PASS: installed SDK consumer import header, without changing SDK or target
+-- PASS: PRIVATE MSVC /W0 for vendors; receiver /W4 /WX preserved (configure only)

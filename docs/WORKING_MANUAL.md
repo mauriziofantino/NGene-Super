@@ -825,3 +825,24 @@ Test di configurazione aggiuntivi coprono i casi precedentemente errati e un SDK
 ## Ripresa Windows 0.6.2
 
 Il log MSVC della 0.6.1 segnala C4701 sul draft della configurazione HTTP e CMP0207 nel processo separato di staging. La revisione 0.6.2 corregge il flusso, imposta la policy nello script, automatizza anche il CRT Debug/Release con HackRF OFF, e conserva `/W4 /WX`. `scripts/verify-windows.ps1` clona la revisione committata e prova OFF/ON × Debug/Release, install, ZIP rilocato e device enumeration. Non certificare Windows usando Linux, fixture, parsing PowerShell o una CI soltanto definita. L'acceptance rimane aperta fino ai risultati nativi; consultare `WINDOWS_BUILD_062.md`.
+
+
+## Windows developer entry and path-length regression
+
+- PowerShell/VS Code development entry: scripts/build-windows.ps1; defaults x64,
+  HackRF ON, Release. Build and Test always configure first, use the committed
+  presets and retain logs. scripts/windows-tools.ps1 owns common tool discovery
+  and generated-project warning checks. No persistent PATH change or personal
+  CMake/SDK path is required. VS Code tasks work without CMake Tools installed.
+- Ctrl+Shift+B invokes the default MSVC build task; Test and Package are in Run Task.
+  Normal development builds accept uncommitted work. scripts/verify-windows.ps1
+  still requires a clean committed source and performs a separate fresh clone.
+- Keep vendor MSVC /W0 PRIVATE and receiver /W4 /WX; do not reintroduce /w.
+- Compiler-probe fixtures belong under a short unique temporary root created by
+  cmake/TestScratch.cmake, not under a nested checkout/build-contract folder.
+  The supplied native log showed FTK1011 at 261–269-character .tlog paths.
+  Do not force compiler success, skip these tests or disable FileTracker.
+- Current native acceptance is OPEN. The latest supplied Windows excerpt has
+  three successful builds with 0 warnings/errors and functional tests passing,
+  but build_dependency_contract failed before install/package verification.
+  Linux host/fixture tests do not certify native MSVC or the VS Code UI.

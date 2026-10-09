@@ -1,0 +1,60 @@
+['/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/cmake', '--build', '/workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/build-ON-Release', '--parallel', '4']
+[  2%] Building C object CMakeFiles/ngene_hackrf_native.dir/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/final-ON-Release/_deps/ngene_hackrf_source-src/host/libhackrf/src/hackrf.c.o
+[  6%] Building C object CMakeFiles/ngene_http.dir/third_party/cjson/cJSON.c.o
+[  6%] Building C object CMakeFiles/ngene_http.dir/third_party/civetweb/src/civetweb.c.o
+[  8%] Linking C shared library libhackrf.so
+[  8%] Built target ngene_hackrf_native
+[ 10%] Building C object CMakeFiles/ngene_core.dir/src/core/receiver.c.o
+[ 12%] Building C object CMakeFiles/ngene_core.dir/src/core/error.c.o
+[ 14%] Building C object CMakeFiles/ngene_core.dir/src/core/stream_info.c.o
+[ 17%] Building C object CMakeFiles/ngene_core.dir/src/config/config.c.o
+[ 19%] Building C object CMakeFiles/ngene_core.dir/src/platform/platform.c.o
+[ 21%] Building C object CMakeFiles/ngene_core.dir/src/stream/ring.c.o
+[ 23%] Building C object CMakeFiles/ngene_core.dir/src/frontend/file.c.o
+[ 25%] Building C object CMakeFiles/ngene_core.dir/src/frontend/frontend.c.o
+[ 27%] Building C object CMakeFiles/ngene_core.dir/src/conditioning/bypass.c.o
+[ 29%] Building C object CMakeFiles/ngene_core.dir/src/conditioning/dc.c.o
+[ 31%] Building C object CMakeFiles/ngene_core.dir/src/dsp/sample_ops.c.o
+[ 34%] Building C object CMakeFiles/ngene_core.dir/src/recording/recording.c.o
+[ 36%] Building C object CMakeFiles/ngene_core.dir/src/frontend/hackrf.c.o
+[ 38%] Building C object CMakeFiles/ngene_core.dir/src/dsp/fft/fft.c.o
+[ 40%] Building C object CMakeFiles/ngene_core.dir/src/analysis/analysis.c.o
+[ 42%] Building ASM object CMakeFiles/ngene_core.dir/src/dsp/x86/fft_sse2.S.o
+[ 44%] Linking C static library libngene_core.a
+[ 44%] Built target ngene_core
+[ 46%] Building C object CMakeFiles/ngene_replay_tests.dir/tests/test_replay.c.o
+[ 48%] Building C object CMakeFiles/ngene_sample_tests.dir/tests/test_samples.c.o
+[ 51%] Building C object CMakeFiles/ngene_control.dir/src/control/control.c.o
+[ 53%] Linking C executable ngene_replay_tests
+[ 55%] Building C object CMakeFiles/ngene_sample_tests.dir/tests/fixtures.c.o
+[ 55%] Built target ngene_replay_tests
+[ 57%] Building C object CMakeFiles/ngene_analysis_tests.dir/tests/test_analysis.c.o
+[ 59%] Linking C executable ngene_sample_tests
+[ 59%] Built target ngene_sample_tests
+[ 61%] Building C object CMakeFiles/ngene_fft_tests.dir/tests/test_fft.c.o
+[ 63%] Building C object CMakeFiles/ngene_control.dir/src/platform/files.c.o
+[ 65%] Linking C executable ngene_analysis_tests
+[ 65%] Built target ngene_analysis_tests
+[ 68%] Linking C static library libngene_control.a
+[ 70%] Building C object CMakeFiles/ngene_tests.dir/tests/test_core.c.o
+[ 70%] Built target ngene_control
+[ 72%] Building C object CMakeFiles/ngene_hackrf_tests.dir/tests/test_hackrf.c.o
+[ 74%] Building C object CMakeFiles/ngene_hackrf_tests.dir/tests/fixtures.c.o
+[ 76%] Building C object CMakeFiles/ngene_hackrf_tests.dir/src/frontend/hackrf.c.o
+[ 78%] Linking C executable ngene_tests
+[ 78%] Built target ngene_tests
+[ 80%] Linking C executable ngene_fft_tests
+[ 82%] Building C object CMakeFiles/ngene_control_tests.dir/tests/test_control.c.o
+[ 85%] Linking C executable ngene_hackrf_tests
+[ 85%] Built target ngene_fft_tests
+[ 85%] Built target ngene_hackrf_tests
+[ 87%] Building C object CMakeFiles/ngene_control_tests.dir/tests/fixtures.c.o
+[ 89%] Linking C executable ngene_control_tests
+[ 89%] Built target ngene_control_tests
+[ 91%] Linking C static library libngene_http.a
+[ 91%] Built target ngene_http
+[ 93%] Building C object CMakeFiles/ngene.dir/src/web/server.c.o
+[ 95%] Building C object CMakeFiles/ngene.dir/generated/web_assets.c.o
+[ 97%] Building C object CMakeFiles/ngene.dir/apps/main.c.o
+[100%] Linking C executable ngene
+[100%] Built target ngene

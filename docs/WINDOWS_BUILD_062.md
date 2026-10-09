@@ -115,3 +115,14 @@ that entry point with the same MSVC presets and inputs, retain logs and propagat
 compiler/test failures. CMake Tools is optional for running the NGene tasks.
 Interactive VS Code/native Windows execution of the update still requires the
 user's host; Linux host contracts are not reported as native proof.
+
+The update at commit `69a9e04` was tested from a clean Git clone on Linux:
+OFF Debug/Release **12/12** CTest each, ON Debug/Release **13/13** each.
+Configure and build also passed in all four fresh directories. A separate
+regression used a work root of **318 characters** containing spaces; the compiler
+fixtures still configured successfully in their independent short temp root.
+The PowerShell contracts verify eight preset plans, VS Code task wiring,
+configure/build/test orchestration and nonzero CTest propagation with fixture tools.
+These are Linux/PowerShell 7 results, not interactive VS Code or native MSVC proof.
+Complete logs, JUnit and the sanitized native-log summary are retained under
+`docs/validation/msvc-062/vscode-ftk/`.

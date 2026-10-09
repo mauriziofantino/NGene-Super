@@ -1,0 +1,80 @@
+[
+  {
+    "case": "OFF-Debug",
+    "phase": "configure",
+    "exit": 0,
+    "seconds": 1.225
+  },
+  {
+    "case": "OFF-Debug",
+    "phase": "build",
+    "exit": 0,
+    "seconds": 1.415
+  },
+  {
+    "case": "OFF-Debug",
+    "phase": "tests",
+    "exit": 0,
+    "seconds": 12.236
+  },
+  {
+    "case": "OFF-Release",
+    "phase": "configure",
+    "exit": 0,
+    "seconds": 0.618
+  },
+  {
+    "case": "OFF-Release",
+    "phase": "build",
+    "exit": 0,
+    "seconds": 4.665
+  },
+  {
+    "case": "OFF-Release",
+    "phase": "tests",
+    "exit": 0,
+    "seconds": 13.138
+  },
+  {
+    "case": "ON-Debug",
+    "phase": "configure",
+    "exit": 0,
+    "seconds": 0.844
+  },
+  {
+    "case": "ON-Debug",
+    "phase": "build",
+    "exit": 0,
+    "seconds": 1.955
+  },
+  {
+    "case": "ON-Debug",
+    "phase": "tests",
+    "exit": 0,
+    "seconds": 13.648
+  },
+  {
+    "case": "ON-Release",
+    "phase": "configure",
+    "exit": 0,
+    "seconds": 0.806
+  },
+  {
+    "case": "ON-Release",
+    "phase": "build",
+    "exit": 0,
+    "seconds": 4.81
+  },
+  {
+    "case": "ON-Release",
+    "phase": "tests",
+    "exit": 0,
+    "seconds": 17.004
+  },
+  {
+    "case": "long-work-fixture",
+    "phase": "configure",
+    "exit": 0,
+    "work_path_length": 318
+  }
+]

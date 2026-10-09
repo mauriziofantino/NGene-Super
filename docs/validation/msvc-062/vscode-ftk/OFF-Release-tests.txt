@@ -1,0 +1,30 @@
+['/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/ctest', '--test-dir', '/workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/build-OFF-Release', '--output-on-failure', '--output-junit', '/workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/matrix-logs/OFF-Release-junit.xml']
+Test project /workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/build-OFF-Release
+      Start  1: build_dependency_contract
+ 1/12 Test  #1: build_dependency_contract ..........   Passed    0.45 sec
+      Start  2: runtime_staging_mock_contract
+ 2/12 Test  #2: runtime_staging_mock_contract ......   Passed    0.04 sec
+      Start  3: windows_verifier_helper_contract
+ 3/12 Test  #3: windows_verifier_helper_contract ...   Passed    2.66 sec
+      Start  4: windows_developer_entry_contract
+ 4/12 Test  #4: windows_developer_entry_contract ...   Passed    7.46 sec
+      Start  5: file_replay_contract
+ 5/12 Test  #5: file_replay_contract ...............   Passed    0.00 sec
+      Start  6: sample_math_and_dc
+ 6/12 Test  #6: sample_math_and_dc .................   Passed    0.09 sec
+      Start  7: analysis_worker_contract
+ 7/12 Test  #7: analysis_worker_contract ...........   Passed    0.16 sec
+      Start  8: fft_integer_contract
+ 8/12 Test  #8: fft_integer_contract ...............   Passed    0.03 sec
+      Start  9: core_contracts
+ 9/12 Test  #9: core_contracts .....................   Passed    1.92 sec
+      Start 10: cli_help
+10/12 Test #10: cli_help ...........................   Passed    0.00 sec
+      Start 11: cli_version
+11/12 Test #11: cli_version ........................   Passed    0.00 sec
+      Start 12: controller_lifecycle
+12/12 Test #12: controller_lifecycle ...............   Passed    0.31 sec
+
+100% tests passed out of 12
+
+Total Test time (real) =  13.13 sec

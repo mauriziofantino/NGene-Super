@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="13"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="16"
+	timestamp="2026-10-09T21:34:06"
+	>
+	<testcase name="build_dependency_contract" classname="build_dependency_contract" time="0.842055" status="run">
+		<properties/>
+		<system-out>-- PASS: manifest pin, source hash and immutable DLL import header
+-- PASS: pre-project Windows target selection, discovery and manifest cache repair
+-- Compiler fixtures: /tmp/ngt-2e4a10d5b673 (retained on failure)
+-- PASS: installed SDK consumer import header, without changing SDK or target
+-- PASS: PRIVATE MSVC /W0 for vendors; receiver /W4 /WX preserved (configure only)
+</system-out>
+	</testcase>
+	<testcase name="runtime_staging_mock_contract" classname="runtime_staging_mock_contract" time="0.0562239" status="run">
+		<properties/>
+		<system-out>-- PASS: standalone runtime policy, spaces, transitive DLL closure, CRT staging, OS exclusions and unresolved-DLL failure (mock dumpbin)
+</system-out>
+	</testcase>
+	<testcase name="windows_verifier_helper_contract" classname="windows_verifier_helper_contract" time="3.69686" status="run">
+		<properties/>
+		<system-out>[success] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('OK')
+OK
+[warning] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('source.c: warning C4701: test warning')
+source.c: warning C4701: test warning
+[localized] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('source.c: avviso C4244: test warning')
+source.c: avviso C4244: test warning
+[failure] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::Error.WriteLine('failure'); exit 9
+failure
+[policy] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::Error.WriteLine('CMake Warning (dev): test policy')
+CMake Warning (dev): test policy
+PASS: verifier entry point, CMake discovery/selection, MSBuild warning policy, syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper ...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="windows_developer_entry_contract" classname="windows_developer_entry_contract" time="9.97321" status="run">
+		<properties/>
+		<system-out>Using CMake 4.3.0: /workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/build-ON-Release/build-contract/developer entry with spaces/scripts/cmake.ps1
+[configure] /workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/build-ON-Release/build-contract/developer entry with spaces/scripts/cmake.ps1 --preset windows-msvc-x64-hackrf
+Fixture configure/build completed
+[build] /workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/build-ON-Release/build-contract/developer entry with spaces/scripts/cmake.ps1 --build --preset windows-msvc-x64-hackrf --parallel 2
+Fixture configure/build completed
+[test] /workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/build-ON-Release/build-contract/developer entry with spaces/scripts/ctest.ps1 --preset windows-msvc-x64-hackrf --no-tests=error --output-on-failure --output-junit /workspace/scratch/4b1b6222cc2b/maintenance/vscode-ftk/build-ON-Release/build-contract/developer entry with spaces/build/msvc-x64-hackrf/Release-junit.xml
+Fixture tests completed
+Completed Test (x64, HackRF...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="file_replay_contract" classname="file_replay_contract" time="0.00488228" status="run">
+		<properties/>
+		<system-out>PASS: independent replay buffers/ranges, leases, EOF, loop gaps and signed CI8
+</system-out>
+	</testcase>
+	<testcase name="sample_math_and_dc" classname="sample_math_and_dc" time="0.035745" status="run">
+		<properties/>
+		<system-out>PASS: signed CI8 moments, full-range CI16 power, DC chunk invariance/gap, tuning metadata
+</system-out>
+	</testcase>
+	<testcase name="analysis_worker_contract" classname="analysis_worker_contract" time="0.162782" status="run">
+		<properties/>
+		<system-out>PASS: tone frequency/level, histogram totals/rails, gap reset and runtime reconfiguration
+</system-out>
+	</testcase>
+	<testcase name="fft_integer_contract" classname="fft_integer_contract" time="0.015771" status="run">
+		<properties/>
+		<system-out>PASS: SSE2-assembly, every size 8..16384, bit-exact scalar and DFT checks
+</system-out>
+	</testcase>
+	<testcase name="core_contracts" classname="core_contracts" time="1.88019" status="run">
+		<properties/>
+		<system-out>PASS: config, ring lease/wrap/full/EOF, 5000 concurrent blocks, synchronized channels/gap, segmented byte-exact recording/no-overwrite
+</system-out>
+	</testcase>
+	<testcase name="cli_help" classname="cli_help" time="0.00244593" status="run">
+		<properties/>
+		<system-out>NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]
+       --list-devices | --version
+C receiver and local web console; no acquisition, tracking or PVT yet.
+</system-out>
+	</testcase>
+	<testcase name="cli_version" classname="cli_version" time="0.00186317" status="run">
+		<properties/>
+		<system-out>NGene 0.6.2 Linux/x86_64 native-HackRF=yes; FFT=SSE2-assembly
+</system-out>
+	</testcase>
+	<testcase name="controller_lifecycle" classname="controller_lifecycle" time="0.301305" status="run">
+		<properties/>
+		<system-out>Controller lifecycle, revision guard, recording and EOF: PASS
+</system-out>
+	</testcase>
+	<testcase name="native_hackrf_contract" classname="native_hackrf_contract" time="0.00221378" status="run">
+		<properties/>
+		<system-out>PASS: native HackRF API config, callback lifetime, overflow/drop indices, malformed transfer and cleanup (simulated driver)
+</system-out>
+	</testcase>
+</testsuite>

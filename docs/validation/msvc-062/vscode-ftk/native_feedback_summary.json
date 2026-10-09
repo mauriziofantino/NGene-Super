@@ -1,0 +1,39 @@
+{
+  "source_filename": "Pasted text(20261009-202108).txt",
+  "source_sha256": "6da961981c6ecdb8d607312f6cdddd39e3c73fc85fbac189b2d61789f9a69870",
+  "acceptance": "open",
+  "native_builds_visible": [
+    {
+      "hackrf": "OFF",
+      "configuration": "Release",
+      "warnings": 0,
+      "errors": 0
+    },
+    {
+      "hackrf": "ON",
+      "configuration": "Debug",
+      "warnings": 0,
+      "errors": 0
+    },
+    {
+      "hackrf": "ON",
+      "configuration": "Release",
+      "warnings": 0,
+      "errors": 0
+    }
+  ],
+  "native_builds_not_visible": [
+    "OFF Debug"
+  ],
+  "failed_test": "build_dependency_contract",
+  "only_diagnostic_code": "FTK1011",
+  "failed_tlog_lengths": [
+    261,
+    262,
+    264,
+    265,
+    268,
+    269
+  ],
+  "native_install_and_package": "not verified"
+}
