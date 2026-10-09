@@ -1,0 +1,48 @@
+{
+  "v143_CL.json": [
+    {
+      "name": "WarningLevel",
+      "switch": "W0",
+      "comment": "Turn Off All Warnings",
+      "value": "TurnOffAllWarnings",
+      "flags": []
+    },
+    {
+      "name": "WarningLevel",
+      "switch": "W4",
+      "comment": "Level4",
+      "value": "Level4",
+      "flags": []
+    },
+    {
+      "name": "TreatWarningAsError",
+      "switch": "WX",
+      "comment": "Treat Warnings As Errors",
+      "value": "true",
+      "flags": []
+    }
+  ],
+  "v145_CL.json": [
+    {
+      "name": "WarningLevel",
+      "switch": "W0",
+      "comment": "Turn Off All Warnings",
+      "value": "TurnOffAllWarnings",
+      "flags": []
+    },
+    {
+      "name": "WarningLevel",
+      "switch": "W4",
+      "comment": "Level4",
+      "value": "Level4",
+      "flags": []
+    },
+    {
+      "name": "TreatWarningAsError",
+      "switch": "WX",
+      "comment": "Treat Warnings As Errors",
+      "value": "true",
+      "flags": []
+    }
+  ]
+}

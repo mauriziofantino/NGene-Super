@@ -1,6 +1,6 @@
 # NGene 0.6.2 — Windows/MSVC build candidate
 
-**Acceptance status: OPEN.** This revision has not been built or executed on native Windows in this environment. No successful Linux test, simulated dependency resolver, PowerShell parser or unexecuted CI definition is counted as a Windows result.
+**Acceptance status: OPEN.** A complete native Windows acceptance run has not been verified. Partial user-supplied native feedback is recorded below; this environment cannot execute MSVC. No successful Linux test, simulated dependency resolver, PowerShell parser or unexecuted CI definition is counted as a Windows result.
 
 ## Actual failure and correction
 
@@ -82,3 +82,12 @@ Configure-only target isolation and XML helper fixtures are explicitly host
 contracts; the replacement still needs a native Windows run.
 
 Reference: https://learn.microsoft.com/en-us/cpp/error-messages/tool-errors/command-line-warning-d9025
+
+The updated Linux source at commit `3353e53367c4c8ff631f2ec50b13e878ad4a6df6`
+was configured/built/tested in four new build directories from a fresh Git
+checkout. OFF Debug/Release passed 11/11 tests each; ON Debug/Release passed
+12/12 each. ON Debug initially failed to launch the FFT test because its ELF
+file had mode 0644 after a successful build. Only the generated executable was
+removed and relinked, without changing source or build rules; the complete
+CTest retry passed. Initial and retry logs are retained under
+`docs/validation/msvc-062/d9025/`. No Windows claim is inferred from these runs.

@@ -1,0 +1,86 @@
+[
+  {
+    "case": "OFF-Debug",
+    "phase": "configure",
+    "exit": 0,
+    "seconds": 0.912
+  },
+  {
+    "case": "OFF-Debug",
+    "phase": "build",
+    "exit": 0,
+    "seconds": 2.511
+  },
+  {
+    "case": "OFF-Debug",
+    "phase": "tests",
+    "exit": 0,
+    "seconds": 5.391
+  },
+  {
+    "case": "OFF-Release",
+    "phase": "configure",
+    "exit": 0,
+    "seconds": 0.731
+  },
+  {
+    "case": "OFF-Release",
+    "phase": "build",
+    "exit": 0,
+    "seconds": 4.435
+  },
+  {
+    "case": "OFF-Release",
+    "phase": "tests",
+    "exit": 0,
+    "seconds": 5.302
+  },
+  {
+    "case": "ON-Debug",
+    "phase": "configure",
+    "exit": 0,
+    "seconds": 0.844
+  },
+  {
+    "case": "ON-Debug",
+    "phase": "build",
+    "exit": 0,
+    "seconds": 1.335
+  },
+  {
+    "case": "ON-Debug",
+    "phase": "tests",
+    "exit": 8,
+    "seconds": 7.674
+  },
+  {
+    "case": "ON-Debug",
+    "phase": "relink",
+    "exit": 0,
+    "seconds": 0.154
+  },
+  {
+    "case": "ON-Debug",
+    "phase": "tests-retry",
+    "exit": 0,
+    "seconds": 4.99
+  },
+  {
+    "case": "ON-Release",
+    "phase": "configure",
+    "exit": 0,
+    "seconds": 0.568
+  },
+  {
+    "case": "ON-Release",
+    "phase": "build",
+    "exit": 0,
+    "seconds": 4.175
+  },
+  {
+    "case": "ON-Release",
+    "phase": "tests",
+    "exit": 0,
+    "seconds": 5.691
+  }
+]

@@ -1,0 +1,28 @@
+['/workspace/scratch/4b1b6222cc2b/tooling/cmake/data/bin/ctest', '--test-dir', '/workspace/scratch/4b1b6222cc2b/maintenance/d9025/build-OFF-Release', '--output-on-failure', '--output-junit', '/workspace/scratch/4b1b6222cc2b/maintenance/d9025/matrix-logs/OFF-Release-junit.xml']
+Test project /workspace/scratch/4b1b6222cc2b/maintenance/d9025/build-OFF-Release
+      Start  1: build_dependency_contract
+ 1/11 Test  #1: build_dependency_contract ..........   Passed    0.46 sec
+      Start  2: runtime_staging_mock_contract
+ 2/11 Test  #2: runtime_staging_mock_contract ......   Passed    0.03 sec
+      Start  3: windows_verifier_helper_contract
+ 3/11 Test  #3: windows_verifier_helper_contract ...   Passed    2.32 sec
+      Start  4: file_replay_contract
+ 4/11 Test  #4: file_replay_contract ...............   Passed    0.00 sec
+      Start  5: sample_math_and_dc
+ 5/11 Test  #5: sample_math_and_dc .................   Passed    0.03 sec
+      Start  6: analysis_worker_contract
+ 6/11 Test  #6: analysis_worker_contract ...........   Passed    0.15 sec
+      Start  7: fft_integer_contract
+ 7/11 Test  #7: fft_integer_contract ...............   Passed    0.01 sec
+      Start  8: core_contracts
+ 8/11 Test  #8: core_contracts .....................   Passed    1.93 sec
+      Start  9: cli_help
+ 9/11 Test  #9: cli_help ...........................   Passed    0.00 sec
+      Start 10: cli_version
+10/11 Test #10: cli_version ........................   Passed    0.00 sec
+      Start 11: controller_lifecycle
+11/11 Test #11: controller_lifecycle ...............   Passed    0.34 sec
+
+100% tests passed out of 11
+
+Total Test time (real) =   5.29 sec

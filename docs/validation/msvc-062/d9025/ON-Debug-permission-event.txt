@@ -1,0 +1,1 @@
+Initial ON-Debug CTest could not launch ngene_fft_tests: permission denied. The ELF file was present with mode 0644 after successful linking. No source code or CMake rule has been changed to mask this event. Removed only this generated executable and relinked its target, then reran CTest.
