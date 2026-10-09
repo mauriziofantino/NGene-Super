@@ -1,0 +1,21 @@
+Platform: Linux; PowerShell 7.5.3. Not native Windows PowerShell 5.1/MSVC acceptance.
+[success] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('OK')
+OK
+[warning] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('source.c: warning C4701: test warning')
+source.c: warning C4701: test warning
+[localized] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::WriteLine('source.c: avviso C4244: test warning')
+source.c: avviso C4244: test warning
+[failure] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::Error.WriteLine('failure'); exit 9
+failure
+[policy] /workspace/scratch/4b1b6222cc2b/tooling/powershell/pwsh -NoLogo -NoProfile -Command [Console]::Error.WriteLine('CMake Warning (dev): test policy')
+CMake Warning (dev): test policy
+PASS: verifier entry point, syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)
+
+Exit code: 0
+
+Negative check: the previous delivered verifier is rejected by the new entry-point contract as expected.
+Exception: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/candidate-repo/tests/windows_verifier.ps1:20
+Line |
+  20 |  … arlyPath) { throw 'Script-path resolution occurs before parameter bin …
+     |                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Script-path resolution occurs before parameter binding.

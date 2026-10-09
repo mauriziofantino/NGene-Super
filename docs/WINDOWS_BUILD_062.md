@@ -16,7 +16,7 @@ The supplied Windows 0.6.1 log was read in full. It shows MSBuild 18, Release, H
 
 ## Available evidence
 
-The tested build source is commit `0ec3155a06a85e52773a33e85bf8b8bbfc3ab68d`. The delivery also contains a further verifier-only correction to XML element handling, checked against all four actual JUnit reports and targeted helper fixtures; it changes no receiver C/assembly.
+The tested build source is commit `0ec3155a06a85e52773a33e85bf8b8bbfc3ab68d`. The delivery also contains verifier-only corrections to XML element handling and parameter initialization. XML handling was checked against all four actual JUnit reports and targeted helper fixtures. The reported Windows PowerShell 5.1 entry-point failure is corrected by resolving the default source repository after parameter binding. A PowerShell 7/Linux contract test covers default resolution from an unrelated current directory, paths containing spaces, explicit paths and URLs, and rejects script-path variables in parameter defaults. Windows PowerShell 5.1 and the native MSVC matrix still require execution on Windows. These changes modify no receiver C/assembly.
 
 Fresh-clone Linux build evidence is stored in `validation/msvc-062/`. These builds use GCC, the unchanged GNU SSE2 assembly, native upstream libhackrf and local libusb development headers. They are **not** native MSVC tests or a Windows DLL-loading test.
 
@@ -28,7 +28,7 @@ Fresh-clone Linux build evidence is stored in `validation/msvc-062/`. These buil
 | Linux HackRF ON Debug | 12/12 CTest | Fresh clone, pinned source downloaded/verified |
 | Browser end-to-end | Passed | Rejected INI cannot change saved profile/revision; existing receiver/GUI/replay/recording behavior |
 | Runtime staging contract | Passed | Mock dumpbin: transitive DLLs, CRT, OS exclusions, spaces, missing-DLL failure, standalone policy |
-| PowerShell verifier contract | Passed | Parser and helper: nonzero native exits, compiler diagnostics including localized messages, CMake policy warnings, incomplete/failed/skipped JUnit report rejection |
+| PowerShell verifier contract | Passed | Entry-point default/explicit path tests, parser and helper: nonzero native exits, compiler diagnostics including localized messages, CMake policy warnings, incomplete/failed/skipped JUnit report rejection |
 | `--help` / `--version` | Passed on Linux | Both frontends and configurations |
 | Real `--list-devices` on Linux | Failed: `hackrf_init: Other error` | USB initialization unavailable here; no device/RF proof claimed |
 | Native Windows x64 OFF/ON Debug/Release | **Not executed** | Windows host is not accessible from this session |
@@ -44,8 +44,8 @@ Prerequisites remain Visual Studio 2026 with C/C++ tools and Windows SDK, CMake 
 From the source ZIP's parent directory:
 
 ```powershell
-git clone ngene-0.6.2.bundle NGene
-cd NGene
+git clone ngene-0.6.2.bundle NGene-git
+cd NGene-git
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1
 ```
 

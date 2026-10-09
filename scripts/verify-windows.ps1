@@ -3,12 +3,17 @@
 [CmdletBinding()]
 param(
     [ValidateSet('x64', 'ARM64')][string]$Architecture = 'x64',
-    [string]$SourceRepository = (Split-Path $PSScriptRoot -Parent),
+    [string]$SourceRepository = '',
     [string]$Revision = '',
     [string]$WorkRoot = (Join-Path ([IO.Path]::GetTempPath()) "ngene-msvc-$([guid]::NewGuid())")
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Windows PowerShell 5.1 may evaluate parameter defaults before $PSScriptRoot is set.
+# Resolve the checkout only after parameter binding; explicit paths/URLs stay intact.
+if ([string]::IsNullOrWhiteSpace($SourceRepository)) {
+    $SourceRepository = Split-Path -Path $PSScriptRoot -Parent
+}
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows/MSVC is required. Linux, WSL and Wine do not qualify.' }
 $hostArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $expectedHost = if ($Architecture -eq 'x64') { 'AMD64' } else { 'ARM64' }

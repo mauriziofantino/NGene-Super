@@ -8,6 +8,39 @@ $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(
     (Join-Path $Source 'scripts/verify-windows.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count -ne 0) { throw ($errors | Out-String) }
+# Do not regress the WinPS 5.1 entry-point failure: automatic script-path variables
+# must be used in the script body, never in a parameter's default expression.
+foreach ($parameter in $ast.ParamBlock.Parameters) {
+    if ($null -ne $parameter.DefaultValue) {
+        $earlyPath = $parameter.DefaultValue.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                $node.VariablePath.UserPath -in @('PSScriptRoot', 'PSCommandPath', 'MyInvocation')
+        }, $true)
+        if ($null -ne $earlyPath) { throw 'Script-path resolution occurs before parameter binding.' }
+    }
+}
+$entryDirectory = Join-Path $Work 'entry point with spaces/scripts'
+$null = New-Item -Path $entryDirectory -ItemType Directory -Force
+$entryFixture = Join-Path $entryDirectory 'verify entry.ps1'
+$platformGuard = @($ast.EndBlock.Statements | Where-Object {
+    $_.Extent.Text.StartsWith('if ($env:OS')
+})
+if ($platformGuard.Count -ne 1) { throw 'Cannot isolate the verifier entry point.' }
+$sourceText = Get-Content -LiteralPath (Join-Path $Source 'scripts/verify-windows.ps1') -Raw
+$entryText = $sourceText.Substring(0, $platformGuard[0].Extent.StartOffset) +
+    [Environment]::NewLine + 'Write-Output $SourceRepository'
+Set-Content -LiteralPath $entryFixture -Value $entryText -Encoding UTF8
+$expectedSource = Split-Path -Path $entryDirectory -Parent
+Push-Location $Source
+try {
+    $resolvedSource = & $entryFixture
+    if ($resolvedSource -ne $expectedSource) { throw 'Default checkout depends on the current directory.' }
+    foreach ($explicitSource in @($Source, 'https://example.invalid/ngene.git')) {
+        $resolvedSource = & $entryFixture -SourceRepository $explicitSource
+        if ($resolvedSource -ne $explicitSource) { throw 'Explicit repository path or URL was changed.' }
+    }
+} finally { Pop-Location }
 $helper = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-Checked'
@@ -59,4 +92,4 @@ foreach ($invalid in @(
     try { Assert-TestReport $report } catch { $caught = $true }
     if (-not $caught) { throw 'Incomplete, failed or skipped CTest report was accepted.' }
 }
-Write-Host 'PASS: verifier syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)'
+Write-Host 'PASS: verifier entry point, syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)'

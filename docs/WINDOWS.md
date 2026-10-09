@@ -79,7 +79,7 @@ Per la verifica completa su Windows nativo, dal checkout Git **con le correzioni
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1
 ```
 
-Lo script rifiuta una working tree sporca per non certificare per errore una revisione precedente. Chi usa l'archivio consegnato può ottenere il checkout con `git clone ngene-0.6.2.bundle NGene`, poi eseguire lo script dentro `NGene`. Non occorre inizializzare o aggiornare il baseline.
+Lo script rifiuta una working tree sporca per non certificare per errore una revisione precedente. Chi usa l'archivio consegnato può ottenere il checkout con `git clone ngene-0.6.2.bundle NGene-git`, poi eseguire lo script dentro `NGene-git`. Non occorre inizializzare o aggiornare il baseline.
 
 Lo script:
 
@@ -102,3 +102,18 @@ Sono disponibili build/test reali Linux della 0.6.2 nelle quattro combinazioni e
 Mancano un host/runner Windows accessibile e i quattro risultati MSVC con smoke test e clone pulito. L'acceptance resta aperta; il report [WINDOWS_BUILD_062.md](WINDOWS_BUILD_062.md) distingue implementazione, prove eseguite e prove mancanti. La nuova CI è configurata, non dichiarata eseguita.
 
 Driver USB, dispositivo collegato e validazione RF restano prove sul computer ricevitore: `ngene --list-devices`. Il build non installa driver o firmware. Il supporto Unicode dei percorsi Windows rimane quello precedente, basato sulle API narrow: usare percorsi ASCII in questa revisione.
+
+### Verificatore: Windows PowerShell 5.1
+
+Il percorso predefinito del checkout viene risolto dopo il binding dei parametri,
+per evitare il valore vuoto di `$PSScriptRoot` osservato nel parametro della prima
+consegna 0.6.2. Per continuare da quel bundle senza modificare file:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1 -SourceRepository "$PWD"
+```
+
+Il pacchetto aggiornato include la correzione e non richiede questo argomento.
+Il test del punto di ingresso copre cartelle con spazi, directory corrente diversa
+e repository espliciti; la sua esecuzione su PowerShell 7/Linux non certifica
+Windows PowerShell 5.1 o una build MSVC.
