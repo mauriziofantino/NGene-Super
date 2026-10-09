@@ -1,0 +1,191 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "NGene: Build (Windows MSVC)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/build-windows.ps1",
+        "-Action",
+        "Build",
+        "-Configuration",
+        "${input:ngeneConfiguration}",
+        "-Hackrf",
+        "${input:ngeneHackrf}",
+        "-Architecture",
+        "${input:ngeneArchitecture}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "NGene: Test (Windows MSVC)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/build-windows.ps1",
+        "-Action",
+        "Test",
+        "-Configuration",
+        "${input:ngeneConfiguration}",
+        "-Hackrf",
+        "${input:ngeneHackrf}",
+        "-Architecture",
+        "${input:ngeneArchitecture}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "group": "test"
+    },
+    {
+      "label": "NGene: Configure (Windows MSVC)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/build-windows.ps1",
+        "-Action",
+        "Configure",
+        "-Configuration",
+        "${input:ngeneConfiguration}",
+        "-Hackrf",
+        "${input:ngeneHackrf}",
+        "-Architecture",
+        "${input:ngeneArchitecture}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "NGene: Package (Windows MSVC)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/build-windows.ps1",
+        "-Action",
+        "Package",
+        "-Configuration",
+        "${input:ngeneConfiguration}",
+        "-Hackrf",
+        "${input:ngeneHackrf}",
+        "-Architecture",
+        "${input:ngeneArchitecture}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "NGene: Verify clean Windows checkout",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/verify-windows.ps1",
+        "-Architecture",
+        "${input:ngeneArchitecture}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "ngeneConfiguration",
+      "type": "pickString",
+      "description": "NGene configuration",
+      "options": [
+        "Release",
+        "Debug"
+      ],
+      "default": "Release"
+    },
+    {
+      "id": "ngeneHackrf",
+      "type": "pickString",
+      "description": "Native HackRF adapter",
+      "options": [
+        "ON",
+        "OFF"
+      ],
+      "default": "ON"
+    },
+    {
+      "id": "ngeneArchitecture",
+      "type": "pickString",
+      "description": "MSVC target architecture (ARM64 builds also work on x64)",
+      "options": [
+        "x64",
+        "ARM64"
+      ],
+      "default": "x64"
+    }
+  ]
+}

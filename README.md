@@ -10,7 +10,7 @@ Questa versione riceve e registra I/Q e produce diagnostica. Acquisizione satell
 
 - Manifest **vcpkg con baseline e versioni fissate**, bootstrap automatico se vcpkg non è installato; HackRF `v2026.01.3` scaricata con controllo SHA-256.
 - Windows **MSVC nativo**, x64 e ARM64: nessuna modifica ai file CMake, aggiornamento manuale del baseline o copia manuale delle DLL. [Procedura e validazione Windows](docs/WINDOWS.md).
-- Warning severi esclusivi dei target NGene; dipendenze `SYSTEM`, `/w` solo sui target esterni. Header HackRF di import generato senza alterare upstream o duplicare `ADD_EXPORTS`.
+- Warning severi esclusivi dei target NGene; dipendenze `SYSTEM`, `/W0` solo sui target esterni. Header HackRF di import generato senza alterare upstream o duplicare `ADD_EXPORTS`.
 - Naming ESA per **funzioni, tipi, tag delle struct, membri e variabili**: `NgRingDestroy`, `TNgRing`, `TNgRecorder`, `statsMutex`, `segmentOffset`. [Convenzioni e verifiche](docs/CODING_STANDARD.md), [migrazione degli identificatori](docs/IDENTIFIER_RENAMES.csv).
 - **Replay di file CI8**, con range, pacing e loop; nessun frontend sintetico. Una sessione replay indipendente può funzionare insieme alla sessione live, senza mescolare campioni, ring o clock.
 - Doxygen verificato con warning trattati come errori; documentati anche ownership, lifetime e membri delle strutture. [Report dell'incremento](docs/ITERATION_06.md).
@@ -24,13 +24,12 @@ Consolidamento 0.6.2: correzione del percorso HTTP C4701 e della policy CMP0207 
 Prerequisiti di sviluppo: Visual Studio 18/2026 con workload C/C++, Windows SDK, CMake che riconosca VS 2026 (4.2 o successivo) e Git. La prima configurazione scarica le dipendenze mancanti.
 
 ```powershell
-cmake --preset windows-msvc-x64-hackrf
-cmake --build --preset windows-msvc-x64-hackrf --parallel
-ctest --preset windows-msvc-x64-hackrf
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Action Test
 .\build\msvc-x64-hackrf\Release\ngene.exe --web
 ```
 
-CMake seleziona il generatore Visual Studio installato. Per un cross-build MSVC da x64 ad ARM64 usare il preset `windows-msvc-arm64-hackrf` e il relativo toolset ARM64. Il build senza hardware è `windows-msvc-x64`; i test usano file registrati e fixture, senza un generatore nel ricevitore.
+Lo script rileva anche CMake incluso in Visual Studio fuori dal PATH e seleziona il generatore Visual Studio installato. `-Configuration Debug`, `-Hackrf OFF` e `-Architecture ARM64` selezionano gli altri preset senza modificarli. Da **VS Code**, aprire questa cartella e usare **Ctrl+Shift+B**, oppure **Terminal → Run Task → NGene: Test (Windows MSVC)**. [Istruzioni VS Code](docs/VSCODE.md). Per un cross-build MSVC da x64 ad ARM64 usare il preset `windows-msvc-arm64-hackrf` e il relativo toolset ARM64. Il build senza hardware è `windows-msvc-x64`; i test usano file registrati e fixture, senza un generatore nel ricevitore.
 
 Le correzioni sono verificate qui su Linux, inclusi build Debug/Release OFF/ON e regressioni GUI/staging. **La sua esecuzione nativa MSVC deve ancora essere verificata**: la CI comprende runner VS 2026 x64/ARM64 e uno script da checkout pulito, con Debug, Release e pacchetto rilocato.
 

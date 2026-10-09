@@ -41,14 +41,7 @@ try {
         if ($resolvedSource -ne $explicitSource) { throw 'Explicit repository path or URL was changed.' }
     }
 } finally { Pop-Location }
-foreach ($name in @('Get-CMakeCandidates', 'Get-CMakeToolVersion', 'Resolve-CMakeTools')) {
-    $definition = $ast.Find({
-        param($node)
-        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
-    }, $true)
-    if ($null -eq $definition) { throw "Missing tool discovery helper: $name" }
-    Invoke-Expression $definition.Extent.Text
-}
+. (Join-Path $Source 'scripts/windows-tools.ps1')
 $toolRoot = Join-Path $Work 'tool discovery with spaces'
 function New-ToolFixture {
     param([string]$Directory, [string]$Version, [string]$PackVersion = $Version)
@@ -93,12 +86,9 @@ try {
     $expectedTool = Join-Path $installationFixture 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     if ($candidates -notcontains $expectedTool) { throw 'Visual Studio CMake was not found when absent from PATH.' }
 } finally { Remove-Item Function:Get-Command }
-$policyHelper = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-VsWarningPolicy'
-}, $true)
-if ($null -eq $policyHelper) { throw 'Missing generated MSBuild warning policy guard.' }
-Invoke-Expression $policyHelper.Extent.Text
+if ($null -eq (Get-Command Assert-VsWarningPolicy -CommandType Function)) {
+    throw 'Missing generated MSBuild warning policy guard.'
+}
 $projectFixture = Join-Path $toolRoot 'warnings.vcxproj'
 $vendorProject = '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' +
     '<ItemDefinitionGroup><ClCompile><WarningLevel>TurnOffAllWarnings</WarningLevel>' +

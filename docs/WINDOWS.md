@@ -6,6 +6,19 @@ Il percorso standard parte da un checkout pulito: Visual Studio 18/2026 con work
 
 ## Procedura standard
 
+Per la build quotidiana da PowerShell o VS Code usare il punto di ingresso
+condiviso, che rileva gli strumenti anche fuori dal PATH:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Action Test
+```
+
+Da VS Code aprire il repository e usare **Ctrl+Shift+B**; per i test scegliere
+**Terminal → Run Task → NGene: Test (Windows MSVC)**. [Dettagli](VSCODE.md).
+`-Configuration Debug`, `-Hackrf OFF`, `-Architecture ARM64` selezionano i preset.
+Questa modalità accetta la working tree in sviluppo e non richiede un nuovo clone.
+
 Da un normale PowerShell, il verificatore scopre automaticamente anche CMake
 incluso in Visual Studio, senza modificare il PATH o aprire una Developer Prompt:
 
@@ -172,3 +185,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1
 
 La nuova verifica esegue un clone pulito del commit aggiornato; non riutilizza
 la build precedente. Non occorre modificare file CMake, warning level o DLL a mano.
+
+### FTK1011 nei test CMake
+
+Il nuovo log Windows mostra tre build visibili con 0 warning/0 errori, i test
+funzionali (inclusa FFT e --list-devices) superati e il solo
+build_dependency_contract fallito. I percorsi .tlog del probe del compilatore
+nella fixture SDK erano lunghi 261–269 caratteri. Ora i progetti di prova SDK e
+warning vengono creati in una radice temporanea breve e unica (`ngt-*`), fuori
+dalla build del ricevitore. I test di compilazione/link di CMake restano attivi;
+non si forza CMAKE_C_COMPILER_WORKS e non si disabilita FileTracker. In caso di
+fallimento la directory resta disponibile; dopo un successo viene rimossa.
+Il verificatore usa anche un nome temporaneo più breve (`ngm-*`). Nessuna
+modifica a registro, LongPathsEnabled o file CMake del PC è richiesta.
+La correzione mantiene aperta l'accettazione fino al nuovo test nativo completo.

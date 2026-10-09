@@ -134,6 +134,9 @@ if(NGENE_BUILD_TESTS)
         add_test(NAME windows_verifier_helper_contract
             COMMAND "${NGENE_POWERSHELL}" -NoLogo -NoProfile -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/windows_verifier.ps1"
                 -Source "${CMAKE_CURRENT_SOURCE_DIR}" -Work "${CMAKE_CURRENT_BINARY_DIR}/build-contract")
+        add_test(NAME windows_developer_entry_contract
+            COMMAND "${NGENE_POWERSHELL}" -NoLogo -NoProfile -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/windows_build.ps1"
+                -Source "${CMAKE_CURRENT_SOURCE_DIR}" -Work "${CMAKE_CURRENT_BINARY_DIR}/build-contract")
     endif()
     add_executable(ngene_replay_tests tests/test_replay.c)
     target_include_directories(ngene_replay_tests PRIVATE src)

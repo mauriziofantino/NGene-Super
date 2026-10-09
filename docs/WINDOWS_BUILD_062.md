@@ -91,3 +91,27 @@ file had mode 0644 after a successful build. Only the generated executable was
 removed and relinked, without changing source or build rules; the complete
 CTest retry passed. Initial and retry logs are retained under
 `docs/validation/msvc-062/d9025/`. No Windows claim is inferred from these runs.
+
+## Native feedback: compiler-fixture FTK1011 and VS Code
+
+The latest supplied log contains successful native builds for OFF Release,
+ON Debug and ON Release, each with **0 warnings and 0 errors**. OFF Debug is not
+visible in the excerpt. All visible functional tests pass, including integer FFT,
+CLI help/version, HackRF device enumeration and the controller. Only
+build_dependency_contract fails while configuring its nested SDK fixture.
+The FileTracker .tlog paths are 261–269 characters; the only diagnostic code in
+the supplied text is FTK1011. Runtime install/package acceptance remains unverified
+because the verifier stops those paths after the failed CTest.
+
+Compiler fixtures now use a short unique TEMP root instead of a nested checkout
+build root, with source/build subdirectories `s/b` and `w/b`. Compiler detection,
+ABI and working-compiler probes remain enabled. The acceptance root name is
+shorter. No compiler success flag, FileTracker suppression, test skip or OS/registry
+change is used to mask the failure.
+
+The shared scripts/windows-tools.ps1 serves both the acceptance verifier and the
+new developer entry point scripts/build-windows.ps1. Versioned VS Code tasks invoke
+that entry point with the same MSVC presets and inputs, retain logs and propagate
+compiler/test failures. CMake Tools is optional for running the NGene tasks.
+Interactive VS Code/native Windows execution of the update still requires the
+user's host; Linux host contracts are not reported as native proof.

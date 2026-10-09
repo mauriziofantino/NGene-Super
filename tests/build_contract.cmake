@@ -1,4 +1,5 @@
 # Guard reproducibility and DLL import/export contracts without a Windows SDK or a device.
+set(native_host_win32 "${CMAKE_HOST_WIN32}")
 include("${source}/cmake/DependencyLock.cmake")
 file(READ "${source}/vcpkg.json" manifest)
 string(JSON baseline GET "${manifest}" builtin-baseline)
@@ -95,10 +96,16 @@ if(NOT VCPKG_TARGET_TRIPLET STREQUAL "x64-windows-static")
     message(FATAL_ERROR "Bootstrap changed an explicitly selected triplet")
 endif()
 message(STATUS "PASS: pre-project Windows target selection, discovery and manifest cache repair")
+set(CMAKE_HOST_WIN32 "${native_host_win32}")
 
 # Configure the SYSTEM provider against a fixture SDK with the upstream export bug.
 # Only CMake's Windows provider branch is exercised; no Windows binary is built.
-set(sdk_fixture "${work}/installed-sdk-fixture")
+# Keep the compiler probes outside the build tree: user and CI checkout roots can
+# already be long, and MSBuild's tracking log suffix adds roughly 100 characters.
+include("${source}/cmake/TestScratch.cmake")
+ngene_test_scratch(fixture_root)
+message(STATUS "Compiler fixtures: ${fixture_root} (retained on failure)")
+set(sdk_fixture "${fixture_root}/s")
 file(MAKE_DIRECTORY "${sdk_fixture}/sdk/include/libhackrf" "${sdk_fixture}/sdk/lib"
     "${sdk_fixture}/sdk/bin")
 file(WRITE "${sdk_fixture}/sdk/include/libhackrf/hackrf.h" "${header}")
@@ -109,7 +116,7 @@ file(WRITE "${sdk_fixture}/dummy.c" "int Fixture(void) { return 0; }\n")
 file(WRITE "${sdk_fixture}/CMakeLists.txt" "cmake_minimum_required(VERSION 3.26)\nproject(ImportHeaderFixture LANGUAGES C)\nif(POLICY CMP0144)\ncmake_policy(SET CMP0144 NEW)\nendif()\nset(WIN32 TRUE)\nset(CMAKE_FIND_LIBRARY_PREFIXES lib \"\")\nset(CMAKE_FIND_LIBRARY_SUFFIXES .a .lib)\nlist(APPEND CMAKE_MODULE_PATH \"${source}/cmake\")\nadd_library(ngene_core STATIC dummy.c)\nset(HACKRF_ROOT \"${sdk_fixture}/sdk\")\nset(NGENE_HACKRF_PROVIDER SYSTEM CACHE STRING \"Fixture provider\")\ninclude(HackRFProvider)\nngene_resolve_hackrf()\nget_target_property(includes ngene_core INCLUDE_DIRECTORIES)\nif(NOT includes MATCHES \"generated/hackrf-import\")\nmessage(FATAL_ERROR \"Installed SDK consumer header was not selected\")\nendif()\n")
 # This fixture configures with the host compiler but never compiles a vendor binary.
 file(APPEND "${sdk_fixture}/CMakeLists.txt" "file(READ \"${sdk_fixture}/sdk/include/libhackrf/hackrf.h\" original)\nfile(READ \"\${CMAKE_CURRENT_BINARY_DIR}/generated/hackrf-import/hackrf.h\" consumer)\nif(NOT original MATCHES \"#define ADD_EXPORTS\" OR consumer MATCHES \"#define ADD_EXPORTS\")\nmessage(FATAL_ERROR \"Installed SDK export header was mutated or not normalized\")\nendif()\nset_target_properties(ngene_core PROPERTIES LINKER_LANGUAGE C)\n")
-execute_process(COMMAND "${CMAKE_COMMAND}" -S "${sdk_fixture}" -B "${sdk_fixture}/build"
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${sdk_fixture}" -B "${sdk_fixture}/b"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Installed SDK import-header fixture failed: ${output}\n${errors}")
@@ -118,7 +125,7 @@ message(STATUS "PASS: installed SDK consumer import header, without changing SDK
 
 # Configure-only MSVC policy fixture: external warning settings must not leak to
 # consumers. Native .vcxproj generation is checked by verify-windows.ps1 on Windows.
-set(warning_fixture "${work}/warning-policy-fixture")
+set(warning_fixture "${fixture_root}/w")
 file(MAKE_DIRECTORY "${warning_fixture}")
 file(WRITE "${warning_fixture}/dummy.c" "int Fixture(void) { return 0; }\n")
 set(warning_project [=[
@@ -143,9 +150,11 @@ endif()
 ]=])
 string(CONFIGURE "${warning_project}" warning_project @ONLY)
 file(WRITE "${warning_fixture}/CMakeLists.txt" "${warning_project}")
-execute_process(COMMAND "${CMAKE_COMMAND}" -S "${warning_fixture}" -B "${warning_fixture}/build"
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${warning_fixture}" -B "${warning_fixture}/b"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Warning policy fixture failed: ${output}\n${errors}")
 endif()
 message(STATUS "PASS: PRIVATE MSVC /W0 for vendors; receiver /W4 /WX preserved (configure only)")
+# Only the uniquely allocated test directory is removed; failures retain it.
+file(REMOVE_RECURSE "${fixture_root}")
