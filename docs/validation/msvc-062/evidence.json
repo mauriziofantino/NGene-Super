@@ -1,0 +1,45 @@
+{
+  "acceptance": "pending-native-Windows",
+  "testedCommit": "0ec3155a06a85e52773a33e85bf8b8bbfc3ab68d",
+  "host": "Linux/x86_64",
+  "cmake": "4.4.3",
+  "compiler": "GCC 13.3.0",
+  "matrix": [
+    {
+      "hackrf": "OFF",
+      "configuration": "Release",
+      "tests": 11,
+      "failures": 0,
+      "buildWarnings": 0,
+      "help": "NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]\n       --list-devices | --version\nC receiver and local web console; no acquisition, tracking or PVT yet.\n",
+      "version": "NGene 0.6.2 Linux/x86_64 native-HackRF=no; FFT=SSE2-assembly\n"
+    },
+    {
+      "hackrf": "OFF",
+      "configuration": "Debug",
+      "tests": 11,
+      "failures": 0,
+      "buildWarnings": 0,
+      "help": "NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]\n       --list-devices | --version\nC receiver and local web console; no acquisition, tracking or PVT yet.\n",
+      "version": "NGene 0.6.2 Linux/x86_64 native-HackRF=no; FFT=SSE2-assembly\n"
+    },
+    {
+      "hackrf": "ON",
+      "configuration": "Release",
+      "tests": 12,
+      "failures": 0,
+      "buildWarnings": 0,
+      "help": "NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]\n       --list-devices | --version\nC receiver and local web console; no acquisition, tracking or PVT yet.\n",
+      "version": "NGene 0.6.2 Linux/x86_64 native-HackRF=yes; FFT=SSE2-assembly\n"
+    },
+    {
+      "hackrf": "ON",
+      "configuration": "Debug",
+      "tests": 12,
+      "failures": 0,
+      "buildWarnings": 0,
+      "help": "NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]\n       --list-devices | --version\nC receiver and local web console; no acquisition, tracking or PVT yet.\n",
+      "version": "NGene 0.6.2 Linux/x86_64 native-HackRF=yes; FFT=SSE2-assembly\n"
+    }
+  ]
+}

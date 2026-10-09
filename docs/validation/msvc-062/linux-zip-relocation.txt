@@ -1,0 +1,8 @@
+NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]
+       --list-devices | --version
+C receiver and local web console; no acquisition, tracking or PVT yet.
+NGene 0.6.2 Linux/x86_64 native-HackRF=no; FFT=SSE2-assembly
+NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]
+       --list-devices | --version
+C receiver and local web console; no acquisition, tracking or PVT yet.
+NGene 0.6.2 Linux/x86_64 native-HackRF=yes; FFT=SSE2-assembly

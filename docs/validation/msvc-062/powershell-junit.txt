@@ -1,0 +1,4 @@
+PASS: linux-OFF-Debug-junit.xml
+PASS: linux-OFF-Release-junit.xml
+PASS: linux-ON-Debug-junit.xml
+PASS: linux-ON-Release-junit.xml

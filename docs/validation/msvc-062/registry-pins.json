@@ -1,0 +1,14 @@
+{
+  "registryCommit": "0699a19d0c6386247ce50d4dedbb8217d484d536",
+  "ports": {
+    "libusb": {
+      "baseline": "1.0.30",
+      "port-version": 0
+    },
+    "pthreads": {
+      "baseline": "3.0.0",
+      "port-version": 14
+    }
+  },
+  "scope": "official registry content verified; not integrated Visual Studio execution"
+}

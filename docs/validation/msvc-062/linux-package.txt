@@ -1,0 +1,44 @@
+-- Install configuration: "Release"
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/bin/ngene
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/share/ngene/licenses/CivetWeb-LICENSE.md
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/share/ngene/licenses/cJSON-LICENSE
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/share/ngene/docs/README.md
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/share/ngene/docs/WINDOWS.md
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/share/ngene/docs/PROVENANCE.md
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/share/ngene/config
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/share/ngene/config/replay.ini
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/share/ngene/config/hackrf.ini
+CPack: Create package using ZIP
+CPack: Install projects
+CPack: - Run preinstall target for: NGene
+CPack: - Install project: NGene [Release]
+CPack: Create package
+CPack: - package: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-OFF/NGene-0.6.2-Linux.zip generated.
+NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]
+       --list-devices | --version
+C receiver and local web console; no acquisition, tracking or PVT yet.
+NGene 0.6.2 Linux/x86_64 native-HackRF=no; FFT=SSE2-assembly
+-- Install configuration: "Release"
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/include/libhackrf/hackrf.h
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/licenses/libhackrf-COPYING
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/lib/libhackrf.so
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/bin/ngene
+-- Set non-toolchain portion of runtime path of "/workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/bin/ngene" to "$ORIGIN/../lib"
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/licenses/CivetWeb-LICENSE.md
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/licenses/cJSON-LICENSE
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/docs/README.md
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/docs/WINDOWS.md
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/docs/PROVENANCE.md
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/config
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/config/replay.ini
+-- Installing: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/share/ngene/config/hackrf.ini
+CPack: Create package using ZIP
+CPack: Install projects
+CPack: - Run preinstall target for: NGene
+CPack: - Install project: NGene [Release]
+CPack: Create package
+CPack: - package: /workspace/scratch/4b1b6222cc2b/maintenance/msvc-current/package-ON/NGene-0.6.2-Linux.zip generated.
+NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]
+       --list-devices | --version
+C receiver and local web console; no acquisition, tracking or PVT yet.
+NGene 0.6.2 Linux/x86_64 native-HackRF=yes; FFT=SSE2-assembly

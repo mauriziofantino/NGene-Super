@@ -14,6 +14,12 @@ $helper = $ast.Find({
 }, $true)
 if ($null -eq $helper) { throw 'Missing native command verification helper.' }
 Invoke-Expression $helper.Extent.Text
+$reportHelper = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-TestReport'
+}, $true)
+if ($null -eq $reportHelper) { throw 'Missing CTest completion verification helper.' }
+Invoke-Expression $reportHelper.Extent.Text
 $logs = Join-Path $Work 'verifier-helper'
 $null = New-Item -Path $logs -ItemType Directory -Force
 $script:commandNumber = 0
@@ -36,4 +42,21 @@ if ($script:evidence.commands.Count -ne 5 -or
     $script:evidence.commands[1].warnings -ne 1 -or
     $script:evidence.commands[2].warnings -ne 1 -or
     $script:evidence.commands[3].exitCode -ne 9) { throw 'Lost or incorrect command evidence.' }
-Write-Host 'PASS: verifier syntax, nonzero exits, compiler diagnostics/localization and policy warnings (helper contract only)'
+$report = Join-Path $logs 'junit.xml'
+$casesXml = '<testcase name="fixture"/>' * 9
+$valid = '<testsuite name="(empty)" tests="9" failures="0">' + $casesXml + '</testsuite>'
+Set-Content -LiteralPath $report -Value $valid -Encoding UTF8
+Assert-TestReport $report
+foreach ($invalid in @(
+    $valid.Replace('failures="0"', 'failures="1"'),
+    $valid.Replace('tests="9"', 'tests="10"'),
+    $valid.Replace('<testcase name="fixture"/>', '<testcase><skipped/></testcase>'),
+    '<testsuite name="(empty)" tests="0" failures="0"/>',
+    '<testsuites/>'
+)) {
+    Set-Content -LiteralPath $report -Value $invalid -Encoding UTF8
+    $caught = $false
+    try { Assert-TestReport $report } catch { $caught = $true }
+    if (-not $caught) { throw 'Incomplete, failed or skipped CTest report was accepted.' }
+}
+Write-Host 'PASS: verifier syntax, exits, compiler/localization/policy diagnostics and complete JUnit report guard (helper contract only)'

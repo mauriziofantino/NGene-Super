@@ -58,6 +58,19 @@ function Invoke-Smoke {
         if ($Hackrf) { Invoke-Checked "$Label-devices" $Executable @('--list-devices') }
     } finally { $env:PATH = $savedPath }
 }
+function Assert-TestReport {
+    param([string]$Report)
+    if (-not (Test-Path -LiteralPath $Report)) { throw 'CTest did not produce its completion report.' }
+    [xml]$testXml = Get-Content -LiteralPath $Report -Raw
+    $suite = $testXml.DocumentElement
+    # XML's "name" attribute shadows .Name in PowerShell's XML adapter; use LocalName.
+    if ($suite.LocalName -ne 'testsuite' -or [int]$suite.GetAttribute('tests') -lt 9 -or
+        [int]$suite.GetAttribute('failures') -ne 0 -or
+        $suite.GetElementsByTagName('skipped').Count -ne 0 -or
+        $suite.GetElementsByTagName('testcase').Count -ne [int]$suite.GetAttribute('tests')) {
+        throw 'CTest report is incomplete, failed or skipped tests. Acceptance requires the whole suite.'
+    }
+}
 $overrides = @('HACKRF_ROOT', 'HACKRF_SOURCE_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLATION_ROOT',
               'VCPKG_OVERLAY_PORTS', 'VCPKG_OVERLAY_TRIPLETS',
               'CMAKE_PREFIX_PATH', 'CMAKE_TOOLCHAIN_FILE', 'CMAKE_GENERATOR', 'CMAKE_GENERATOR_PLATFORM',
@@ -119,15 +132,7 @@ try {
                     Invoke-Checked "$label-build" cmake @('--build', '--preset', $buildPreset, '--parallel', '2', '--verbose')
                     $testReport = Join-Path $build "$configuration-junit.xml"
                     Invoke-Checked "$label-tests" ctest @('--preset', $buildPreset, '--no-tests=error', '--output-junit', $testReport)
-                    if (-not (Test-Path -LiteralPath $testReport)) { throw 'CTest did not produce its completion report.' }
-                    [xml]$testXml = Get-Content -LiteralPath $testReport -Raw
-                    $suite = $testXml.DocumentElement
-                    if ($suite.Name -ne 'testsuite' -or [int]$suite.GetAttribute('tests') -lt 9 -or
-                        [int]$suite.GetAttribute('failures') -ne 0 -or
-                        $suite.GetElementsByTagName('skipped').Count -ne 0 -or
-                        $suite.GetElementsByTagName('testcase').Count -ne [int]$suite.GetAttribute('tests')) {
-                        throw 'CTest report is incomplete, failed or skipped tests. Acceptance requires the whole suite.'
-                    }
+                    Assert-TestReport $testReport
                     $executable = Join-Path $build "$configuration/ngene.exe"
                     Invoke-Smoke "$label-build-runtime" $executable $hackrf
                     $result.dlls = @(Get-ChildItem (Split-Path $executable -Parent) -Filter '*.dll' -File | Select-Object -ExpandProperty Name)

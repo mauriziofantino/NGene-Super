@@ -12,9 +12,11 @@ The supplied Windows 0.6.1 log was read in full. It shows MSBuild 18, Release, H
 - vcpkg bootstrap is checked again on configure retries with a cached toolchain. `cmd /c call` invokes its batch file with quoted path arguments, including paths with spaces.
 - The existing baseline, dependency overrides, source hash, SYSTEM includes and private third-party warning policy are preserved. No new FFTW/pkgconf dependency, SDK preparation, hand-copied DLL or compiler-warning suppression was added.
 - OFF is explicit in the base Windows preset. Both OFF/ON configurations have Release and Debug build/test presets; configure never pins VS 2022, v143 or a user-specific path.
-- The native verifier creates a fresh Git clone of the committed candidate, runs the four combinations, CTest, build/install/ZIP smoke tests and HackRF enumeration, captures full logs, and records the exact commit in `acceptance.json`. It rejects an older dirty working tree, compiler diagnostics, policy warnings, failed commands, missing DLLs, and an unverified integrated-vcpkg criterion. CI retains the evidence on failure as well as success.
+- The native verifier creates a fresh Git clone of the committed candidate, runs the four combinations, CTest, build/install/ZIP smoke tests and HackRF enumeration, captures full logs, and requires a complete, nonempty, unskipped JUnit report and records the exact commit in `acceptance.json`. It rejects an older dirty working tree, compiler diagnostics, policy warnings, failed commands, missing DLLs, and an unverified integrated-vcpkg criterion. CI retains the evidence on failure as well as success.
 
 ## Available evidence
+
+The tested build source is commit `0ec3155a06a85e52773a33e85bf8b8bbfc3ab68d`. The delivery also contains a further verifier-only correction to XML element handling, checked against all four actual JUnit reports and targeted helper fixtures; it changes no receiver C/assembly.
 
 Fresh-clone Linux build evidence is stored in `validation/msvc-062/`. These builds use GCC, the unchanged GNU SSE2 assembly, native upstream libhackrf and local libusb development headers. They are **not** native MSVC tests or a Windows DLL-loading test.
 
@@ -26,7 +28,7 @@ Fresh-clone Linux build evidence is stored in `validation/msvc-062/`. These buil
 | Linux HackRF ON Debug | 12/12 CTest | Fresh clone, pinned source downloaded/verified |
 | Browser end-to-end | Passed | Rejected INI cannot change saved profile/revision; existing receiver/GUI/replay/recording behavior |
 | Runtime staging contract | Passed | Mock dumpbin: transitive DLLs, CRT, OS exclusions, spaces, missing-DLL failure, standalone policy |
-| PowerShell verifier contract | Passed | Parser and helper: nonzero native exits, compiler diagnostics including localized messages, CMake policy warnings |
+| PowerShell verifier contract | Passed | Parser and helper: nonzero native exits, compiler diagnostics including localized messages, CMake policy warnings, incomplete/failed/skipped JUnit report rejection |
 | `--help` / `--version` | Passed on Linux | Both frontends and configurations |
 | Real `--list-devices` on Linux | Failed: `hackrf_init: Other error` | USB initialization unavailable here; no device/RF proof claimed |
 | Native Windows x64 OFF/ON Debug/Release | **Not executed** | Windows host is not accessible from this session |
