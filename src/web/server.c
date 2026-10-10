@@ -1,5 +1,6 @@
 /** @file server.c @brief Local HTTP control and bounded WebSocket telemetry. */
 #include "ngene/web.h"
+#include "ngene/capture.h"
 #include "ngene/control.h"
 #include "ngene/build.h"
 #include "ngene/dsp/fft.h"
@@ -58,6 +59,8 @@ typedef struct {
     struct mg_context *http;
     /** Serializes creation/copy of request-local large status JSON snapshots. */
     TNgMutex jsonMutex;
+    /** Serializes start/stop requests with cross-session file deletion checks. */
+    TNgMutex commandMutex;
     /** Atomic shutdown request polled by the service owner. */
     TNgAtomicInt quit;
     /** Number of open bounded telemetry connections. */
@@ -696,6 +699,275 @@ static void AddFile(void *context, const char *name, uint64_t bytes)
     cJSON_AddItemToArray(list->files, entry);
 }
 
+/** @brief Check an absolute file against both active capture/replay sessions.
+ * @details Uses copied status/profile snapshots; no sample-thread work is introduced.
+ * @param server Live server containing both independent controllers.
+ * @param full Resolved absolute candidate path.
+ * @param includeReaders Nonzero also protects inputs of running replay sessions.
+ * @return Nonzero if a receiver currently owns the file for writing or selected reading.
+ */
+static int FileInUse(TNgWebServer *server, const char *full, int includeReaders)
+{
+    TNgControl *controllers[2] = {server->control, server->replayControl};
+    size_t index;
+    for (index = 0; index < 2; ++index) {
+        TNgControlStatus status;
+        TNgConfig config = {0};
+        uint64_t revision;
+        char directory[512];
+        char candidate[512];
+        const char *name = full, *cursor;
+        NgControlSnapshot(controllers[index], &status);
+        for (cursor = full; *cursor != '\0'; ++cursor) {
+            if (*cursor == '/' || *cursor == '\\') {
+                name = cursor + 1;
+            }
+        }
+        if (name != full && (size_t)(name - full) < sizeof(directory)) {
+            size_t length = (size_t)(name - full - 1);
+            if (length == 0 || (length == 2 && full[1] == ':')) {
+                ++length;
+            }
+            (void)snprintf(directory, sizeof(directory), "%.*s", (int)length, full);
+            if (NgPathEqual(directory, status.outputDirectory) != 0 &&
+                FileActive(&status, name) != 0) {
+                return 1;
+            }
+        }
+        if (includeReaders != 0 && status.state != NG_STOPPED && status.state != NG_FAILED) {
+            NgControlConfig(controllers[index], &config, &revision);
+            if (config.frontend == NG_FRONTEND_FILE &&
+                NgFileAbsolute(config.replayPath, candidate, sizeof(candidate)) == 0 &&
+                NgPathEqual(full, candidate) != 0) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/** @brief Serialize lifecycle requests with the cross-session deletion guard.
+ * @details Only HTTP request threads acquire this mutex; sample producers never wait on it.
+ * @param server Live server owning the guard.
+ * @param control Selected receiver controller.
+ * @param command Requested lifecycle action.
+ * @param revision Expected profile revision.
+ * @param id Receives accepted command identifier.
+ * @param error Optional command diagnostic.
+ * @return NG_OK if accepted; controller error otherwise.
+ */
+static int GuardedCommand(TNgWebServer *server, TNgControl *control, TNgCommand command,
+                          uint64_t revision, uint64_t *id, TNgError *error)
+{
+    int result;
+    NgMutexLock(&server->commandMutex);
+    result = NgControlRequest(control, command, revision, id, error);
+    NgMutexUnlock(&server->commandMutex);
+    return result;
+}
+
+/** @brief Bounded request-owned file-picker accumulator; no borrowed names are retained. */
+typedef struct {
+    /** Borrowed server, retained for the whole synchronous request. */
+    TNgWebServer *server;
+    /** Owned JSON array of immediate entries. */
+    cJSON *entries;
+    /** Resolved current directory; empty for the OS root list. */
+    char directory[512];
+    /** Optional filename filter applied before the response limit. */
+    char nameFilter[240];
+    /** Entries emitted into this bounded response. */
+    size_t count;
+    /** Nonzero when additional entries were omitted. */
+    int truncated;
+} TNgPickerList;
+
+/** @brief Match filename text with case-insensitive ASCII comparison.
+ * @param name Borrowed filename.
+ * @param filter Borrowed optional search text; empty matches every filename.
+ * @return Nonzero when the filter occurs in name.
+ */
+static int NameContains(const char *name, const char *filter)
+{
+    size_t length = strlen(filter);
+    for (;;) {
+        size_t index = 0;
+        while (index < length && name[index] != '\0' &&
+               tolower((unsigned char)name[index]) == tolower((unsigned char)filter[index])) {
+            ++index;
+        }
+        if (index == length) {
+            return 1;
+        }
+        if (*name == '\0') {
+            return 0;
+        }
+        ++name;
+    }
+}
+
+/** @brief Append one directory or supported CI8 file to the picker.
+ * @param context Request-owned listing.
+ * @param name Borrowed immediate entry name or absolute root.
+ * @param bytes File length in bytes.
+ * @param directory Nonzero for a directory/root.
+ */
+static void AddPickerEntry(void *context, const char *name, uint64_t bytes, int directory)
+{
+    TNgPickerList *list = context;
+    cJSON *entry;
+    char full[512];
+    char absolute[512];
+    size_t length = strlen(name);
+    int usable = 1;
+    if (directory == 0 && (length < 4 || strcmp(name + length - 4, ".cs8") != 0 ||
+                           NameContains(name, list->nameFilter) == 0)) {
+        return;
+    }
+    if (list->count == 500) {
+        list->truncated = 1;
+        return;
+    }
+    if (directory == 0) {
+        usable = bytes > 0 && bytes % sizeof(TNgIq8) == 0 &&
+                 snprintf(full, sizeof(full), "%s/%s", list->directory, name) < (int)sizeof(full) &&
+                 NgFileAbsolute(full, absolute, sizeof(absolute)) == 0 &&
+                 FileInUse(list->server, absolute, 0) == 0;
+    }
+    entry = cJSON_CreateObject();
+    String(entry, "name", name);
+    Counter(entry, "bytes", bytes);
+    cJSON_AddBoolToObject(entry, "directory", directory);
+    cJSON_AddBoolToObject(entry, "selectable", usable);
+    cJSON_AddItemToArray(list->entries, entry);
+    ++list->count;
+}
+
+/** @brief Return a read-only directory listing on the receiver computer.
+ * @param server Borrowed local server.
+ * @param connection Borrowed HTTP connection.
+ * @param body Parsed request with an optional directory path.
+ * @return HTTP response status.
+ */
+static int PickerBrowse(TNgWebServer *server, struct mg_connection *connection, cJSON *body)
+{
+    TNgPickerList list = {0};
+    TNgControlStatus status;
+    cJSON *requested = cJSON_GetObjectItemCaseSensitive(body, "path");
+    cJSON *filter = cJSON_GetObjectItemCaseSensitive(body, "filter");
+    cJSON *reply;
+    char parent[512] = "";
+    const char *path;
+    list.server = server;
+    NgControlSnapshot(server->control, &status);
+    if (requested != NULL && cJSON_IsString(requested) == 0) {
+        return Failure(connection, 400, "Expected a receiver-side directory path");
+    }
+    if (filter != NULL) {
+        if (cJSON_IsString(filter) == 0 || strlen(filter->valuestring) >= sizeof(list.nameFilter)) {
+            return Failure(connection, 400, "Invalid filename filter");
+        }
+        (void)snprintf(list.nameFilter, sizeof(list.nameFilter), "%s", filter->valuestring);
+    }
+    path = requested != NULL ? requested->valuestring : status.outputDirectory;
+    if (strlen(path) >= sizeof(list.directory) || strchr(path, '\n') != NULL ||
+        strchr(path, '\r') != NULL) {
+        return Failure(connection, 400, "Invalid or too long directory path");
+    }
+    list.entries = cJSON_CreateArray();
+    if (*path == '\0') {
+        NgDirectoryRoots(AddPickerEntry, &list);
+    } else {
+        char *separator;
+        if (NgDirectoryResolve(path, list.directory, sizeof(list.directory)) != 0 ||
+            NgDirectoryBrowse(list.directory, AddPickerEntry, &list) != 0) {
+            cJSON_Delete(list.entries);
+            return Failure(connection, 400, "Cannot browse this receiver-side directory");
+        }
+        (void)snprintf(parent, sizeof(parent), "%s", list.directory);
+        for (separator = parent; *separator != '\0'; ++separator) {
+            if (*separator == '\\') {
+                *separator = '/';
+            }
+        }
+        separator = strrchr(parent, '/');
+        if (separator == NULL) {
+            parent[0] = '\0';
+        } else if (separator == parent + 2 && parent[1] == ':') {
+            if (separator[1] == '\0') {
+                parent[0] = '\0';
+            } else {
+                separator[1] = '\0';
+            }
+        } else if (separator == parent) {
+            parent[1] = '\0';
+            if (strcmp(list.directory, "/") == 0) {
+                parent[0] = '\0';
+            }
+        } else {
+            *separator = '\0';
+        }
+    }
+    reply = cJSON_CreateObject();
+    String(reply, "directory", list.directory);
+    String(reply, "parent", parent);
+    cJSON_AddItemToObject(reply, "entries", list.entries);
+    cJSON_AddBoolToObject(reply, "truncated", list.truncated);
+    return JsonReply(connection, 200, reply);
+}
+
+/** @brief Inspect a selection and return a replay draft without modifying a controller.
+ * @param server Borrowed server containing the producer sessions.
+ * @param control Selected stopped replay/primary controller.
+ * @param connection Borrowed HTTP connection.
+ * @param body Parsed request containing a receiver-side file path.
+ * @return HTTP response status.
+ */
+static int PickerInspect(TNgWebServer *server, TNgControl *control,
+                         struct mg_connection *connection, cJSON *body)
+{
+    cJSON *selected = cJSON_GetObjectItemCaseSensitive(body, "path");
+    cJSON *reply;
+    TNgConfig config = {0};
+    TNgCaptureMetadata metadata = {0};
+    TNgControlStatus status;
+    TNgError error = {{0}};
+    uint64_t revision;
+    char full[512];
+    char ini[12000];
+    if (cJSON_IsString(selected) == 0 ||
+        NgFileAbsolute(selected->valuestring, full, sizeof(full)) != 0) {
+        return Failure(connection, 400, "Select an existing regular file on the receiver computer");
+    }
+    NgControlSnapshot(control, &status);
+    if ((status.state != NG_STOPPED && status.state != NG_FAILED) ||
+        FileInUse(server, full, 0) != 0) {
+        return Failure(connection, 409,
+                       "Stop the selected receiver or the file's writer before selection");
+    }
+    NgControlConfig(control, &config, &revision);
+    if (NgReplayConfigure(full, &config, &metadata, &error) != NG_OK) {
+        return Failure(connection, 400, error.message);
+    }
+    if (ConfigText(&config, ini, sizeof(ini)) != NG_OK) {
+        return Failure(connection, 500, "Cannot prepare replay profile");
+    }
+    reply = cJSON_CreateObject();
+    String(reply, "ini", ini);
+    String(reply, "path", full);
+    Counter(reply, "revision", revision);
+    Counter(reply, "samples", metadata.samples);
+    cJSON_AddBoolToObject(reply, "metadata_available", metadata.available);
+    String(reply, "metadata_path", metadata.metadataPath);
+    cJSON_AddBoolToObject(reply, "complete", metadata.complete);
+    cJSON_AddBoolToObject(reply, "has_gaps", metadata.hasGaps);
+    String(reply, "recording_point",
+           metadata.preConditioning != 0 ? "pre_conditioning" : "post_conditioning");
+    String(reply, "recorded_conditioning", metadata.conditioningName);
+    String(reply, "sample_rate_basis", "configured_nominal");
+    return JsonReply(connection, 200, reply);
+}
+
 /**
  * @brief Route local REST/static-file requests to the receiver controller.
  *
@@ -863,14 +1135,35 @@ static int Handle(struct mg_connection *connection, void *context)
             }
         }
     }
-    if (strcmp(path, "/api/v1/files/delete") == 0) {
+    if (strcmp(path, "/api/v1/replay-files/browse") == 0) {
+        code = PickerBrowse(server, connection, body);
+    } else if (strcmp(path, "/api/v1/replay-files/inspect") == 0) {
+        code = PickerInspect(server, control, connection, body);
+    } else if (strcmp(path, "/api/v1/files/delete") == 0) {
         cJSON *name = cJSON_GetObjectItemCaseSensitive(body, "name");
         uint64_t revision;
         TNgError error = {{0}};
         if (cJSON_IsString(name) == 0 || ParseRevision(body, &revision) == 0) {
             code = Failure(connection, 400, "Expected name and revision strings");
         } else {
-            int result = NgControlDeleteFile(control, name->valuestring, revision, &error);
+            TNgControlStatus status;
+            char candidate[1024];
+            char absolute[512];
+            int result;
+            NgMutexLock(&server->commandMutex);
+            NgControlSnapshot(control, &status);
+            (void)snprintf(candidate, sizeof(candidate), "%s/%s", status.outputDirectory,
+                           name->valuestring);
+            if (FileNameValid(name->valuestring) != 0 &&
+                NgFileAbsolute(candidate, absolute, sizeof(absolute)) == 0 &&
+                FileInUse(server, absolute, 1) != 0) {
+                NgMutexUnlock(&server->commandMutex);
+                code = Failure(connection, 409, "File is in use by a capture or replay session");
+                cJSON_Delete(body);
+                return code;
+            }
+            result = NgControlDeleteFile(control, name->valuestring, revision, &error);
+            NgMutexUnlock(&server->commandMutex);
             if (result != NG_OK) {
                 code = Failure(connection,
                                result == NG_FULL  ? 409
@@ -962,7 +1255,7 @@ static int Handle(struct mg_connection *connection, void *context)
             code = Failure(connection, 404, "Unknown command");
         } else if (ParseRevision(body, &revision) == 0) {
             code = Failure(connection, 400, "Expected revision string");
-        } else if (NgControlRequest(control, command, revision, &id, &error) != NG_OK) {
+        } else if (GuardedCommand(server, control, command, revision, &id, &error) != NG_OK) {
             code = Failure(connection, 409, error.message);
         } else {
             reply = cJSON_CreateObject();
@@ -1146,10 +1439,15 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     if (NgRandomBytes(random, sizeof(random)) != 0 || NgMutexInit(&server.jsonMutex) != 0) {
         return NgFail(error, "Cannot initialize web session");
     }
+    if (NgMutexInit(&server.commandMutex) != 0) {
+        NgMutexDestroy(&server.jsonMutex);
+        return NgFail(error, "Cannot initialize file ownership guard");
+    }
     for (k = 0; k < sizeof(random); ++k) {
         snprintf(server.token + 2 * k, 3, "%02x", random[k]);
     }
     if (NgControlCreate(config, outputDirectory, &server.control, error) != NG_OK) {
+        NgMutexDestroy(&server.commandMutex);
         NgMutexDestroy(&server.jsonMutex);
         return NG_ERROR;
     }
@@ -1168,6 +1466,7 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
             snprintf(replayProfile, sizeof(replayProfile), "%s/receiver.ini", replayDirectory) >=
                 (int)sizeof(replayProfile)) {
             NgControlDestroy(server.control);
+            NgMutexDestroy(&server.commandMutex);
             NgMutexDestroy(&server.jsonMutex);
             return NgFail(error, "Replay profile path is too long");
         }
@@ -1177,6 +1476,7 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
             if (fclose(saved) != 0 || result != NG_OK ||
                 replayConfig.frontend != NG_FRONTEND_FILE) {
                 NgControlDestroy(server.control);
+                NgMutexDestroy(&server.commandMutex);
                 NgMutexDestroy(&server.jsonMutex);
                 return NgFail(error, "Cannot load the replay profile");
             }
@@ -1184,6 +1484,7 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
         if (NgControlCreate(&replayConfig, replayDirectory, &server.replayControl, error) !=
             NG_OK) {
             NgControlDestroy(server.control);
+            NgMutexDestroy(&server.commandMutex);
             NgMutexDestroy(&server.jsonMutex);
             return NG_ERROR;
         }
@@ -1196,6 +1497,7 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     if (server.http == NULL) {
         NgControlDestroy(server.replayControl);
         NgControlDestroy(server.control);
+        NgMutexDestroy(&server.commandMutex);
         NgMutexDestroy(&server.jsonMutex);
         mg_exit_library();
         return NgFail(error, "Cannot start local HTTP listener; port may be in use");
@@ -1215,6 +1517,7 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     NgControlDestroy(server.replayControl);
     NgControlDestroy(server.control);
     mg_exit_library();
+    NgMutexDestroy(&server.commandMutex);
     NgMutexDestroy(&server.jsonMutex);
     return NG_OK;
 }

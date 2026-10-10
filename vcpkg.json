@@ -1,6 +1,6 @@
 {
   "name": "ngene",
-  "version-string": "0.6.2",
+  "version-string": "0.6.3",
   "description": "Native optional USB frontend dependencies; internal FFT has no FFTW dependency.",
   "dependencies": [],
   "features": {

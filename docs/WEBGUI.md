@@ -6,7 +6,7 @@ La GUI in inglese è inclusa nel medesimo progetto ed eseguibile C del kernel. I
 
 Configurazione di frontend, buffer, durata, nome base e directory di registrazione: modifiche ammesse solo in stato `stopped` o `error`, con revisione corrente. Import/export INI permettono profili riutilizzabili. Validate controlla sintassi e limiti; Apply & save applica la normalizzazione del percorso e scrive il profilo. I permessi reali per i file di registrazione sono verificati all’apertura del recorder; Validate non certifica spazio disco o disponibilità USB.
 
-Il campo Folder on receiver computer accetta un percorso del filesystem del processo NGene, non quello del browser. La cartella finale viene creata se il genitore esiste; non c’è ancora un navigatore remoto di directory. Percorsi relativi sono risolti rispetto alla directory di lavoro del processo. Il percorso assoluto effettivo è mostrato in Recording session.
+Il campo Folder on receiver computer accetta un percorso del filesystem del processo NGene, non quello del browser. La cartella finale viene creata se il genitore esiste; per il replay è disponibile un navigatore di cartelle del ricevitore; la destinazione di registrazione conserva il campo cartella. Percorsi relativi sono risolti rispetto alla directory di lavoro del processo. Il percorso assoluto effettivo è mostrato in Recording session.
 
 **Transfer** usa il download nativo del browser. Può copiare i dati a un computer diverso, oppure nella cartella download dello stesso PC. Gli originali restano sul ricevitore. Il tunnel SSH del README consente l’uso remoto senza cambiare binding del servizio; il codice non implementa un servizio LAN autenticato.
 
@@ -25,6 +25,8 @@ Prefisso `/api/v1`. Risposte JSON; contatori e revisioni a 64 bit sono **stringh
 | POST `/recording/start`, `/recording/stop` | `{revision:"…"}`; stesso contratto asincrono |
 | GET `/files` | Revisione/directory e fino a 200 file selezionati, dimensioni, closed e truncated |
 | POST `/files/delete` | `{name, revision}`; elimina il solo file chiuso nella directory corrente |
+| POST `/replay-files/browse` | `{path?, filter?}`; cartelle/file CI8 del ricevitore, massimo 500 elementi |
+| POST `/replay-files/inspect` | `{path}`; sidecar e INI di bozza, nessuna modifica/avvio |
 | GET `/files/<name>` | Allegato binario chiuso: raw, indice o metadati |
 | POST `/shutdown` | `{}`; chiude HTTP, arresta ricevitore, drena il recorder e termina |
 | WebSocket `/events?token=…` | Client invia il frame testo `status`; server risponde con lo snapshot JSON |
@@ -77,4 +79,4 @@ Il selettore **Receiver session** sceglie `Primary / live stream` oppure `Indepe
 
 La sessione replay usa un frontend FILE distinto, profilo `replay/receiver.ini` e API `/api/v1/replay/...`; stessa semantica delle revisioni/comandi del primario. Bootstrap e shutdown restano globali. Sul medesimo WebSocket si invia `replay:MASK` invece di `status:MASK`. Il cambio sessione svuota lo stato grafico e riconnette il socket; è disabilitato durante modifiche non salvate o operazioni pendenti per evitare risposte applicate al controller sbagliato.
 
-**Input source** offre `Recorded I/Q`: percorso sul computer NGene, prima coppia, lunghezza dell'intervallo, pacing e ripetizione. Configurare Fs e riferimenti RF coerenti con la registrazione; nessuna deduzione automatica dai metadati. Il profilo replay iniziale non ha un file e non parte automaticamente. Dettagli in [REPLAY.md](REPLAY.md).
+**Input source** offre `Recorded I/Q`: percorso sul computer NGene, prima coppia, lunghezza dell'intervallo, pacing e ripetizione. Il pulsante **Browse I/Q files…** permette la selezione da cartelle/elenco e importa Fs e riferimenti RF dal sidecar validato. Se assente, la GUI richiede di impostarli manualmente. Il profilo replay iniziale non ha un file e non parte automaticamente. Dettagli in [REPLAY.md](REPLAY.md).

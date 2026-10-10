@@ -1,4 +1,5 @@
 #include "ngene/receiver.h"
+#include "ngene/capture.h"
 #include "ngene/ring.h"
 #include "platform/platform.h"
 #include <inttypes.h>
@@ -61,6 +62,23 @@ static void TestConfig(void)
     CHECK(Parse("[recording]\nunknown=true\n", &c) == NG_ERROR);
     CHECK(Parse("[receiver]\nmode=record\n", &c) == NG_ERROR);
     CHECK(Parse("[conditioning]\nmodule=unknown\n", &c) == NG_ERROR);
+    CHECK(Parse("[frontend]\ntype=hackrf\nserial=\n[replay]\npath=\n"
+                "[recording]\ndirectory=\n",
+                &c) == NG_OK);
+    CHECK(Parse("[frontend]\nsample_rate_hz=\n", &c) == NG_ERROR);
+    CHECK(Parse("[replay]\nloop=\n", &c) == NG_ERROR);
+    {
+        FILE *profile = tmpfile();
+        TNgConfig loaded;
+        TNgError error = {{0}};
+        NgConfigDefaults(&c);
+        c.frontend = NG_FRONTEND_HACKRF;
+        CHECK(profile != NULL && NgConfigWrite(profile, &c, &error) == NG_OK);
+        rewind(profile);
+        CHECK(NgConfigRead(profile, &loaded, &error) == NG_OK);
+        CHECK(loaded.frontend == NG_FRONTEND_HACKRF && loaded.replayPath[0] == '\0');
+        CHECK(fclose(profile) == 0);
+    }
     CHECK(Parse("[buffer]\nwindow_samples=1048576\ningress_blocks=4096\n", &c) == NG_ERROR);
 }
 
@@ -474,6 +492,24 @@ static void TestRecording(void)
         done += count;
         CHECK(!ferror(f));
         fclose(f);
+        {
+            TNgCaptureMetadata found;
+            TNgConfig replay;
+            char sidecar[672];
+            NgConfigDefaults(&replay);
+            replay.dcRemoval = 1;
+            CHECK(NgReplayConfigure(path, &replay, &found, &e) == NG_OK);
+            CHECK(found.available && found.version == 2 && found.complete);
+            CHECK(found.samples == (index == 0 ? 7u : 6u));
+            CHECK(replay.frontend == NG_FRONTEND_FILE && replay.sampleRateHz == info.sampleRateHz);
+            CHECK(replay.centerFrequencyHz == info.centerFrequencyHz && replay.dcRemoval == 0);
+            CHECK(replay.windowSamples == 100 && replay.runSeconds == 0);
+            CHECK(replay.recordingEnabled == 0 && replay.replayStartSample == 0);
+            snprintf(sidecar, sizeof(sidecar), "%s.meta.ini", path);
+            CHECK(remove(sidecar) == 0);
+            /* Existing session metadata remains readable after removing the new sidecar. */
+            CHECK(NgReplayInspect(path, &found, &e) == NG_OK && found.version == 1);
+        }
         CHECK(remove(path) == 0);
     }
     CHECK(memcmp(actual, expected, sizeof(actual)) == 0);
@@ -580,6 +616,8 @@ static void TestRecordingTaps(void)
             }
             CHECK(samples[k].i == value && samples[k].q == -value);
         }
+        snprintf(path, sizeof(path), "%s_000000.cs8.meta.ini", c.recordingPrefix);
+        CHECK(remove(path) == 0);
         snprintf(path, sizeof(path), "%s.meta.ini", c.recordingPrefix);
         f = fopen(path, "rb");
         CHECK(f != NULL);

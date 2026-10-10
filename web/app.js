@@ -69,7 +69,7 @@ function parseIni(text) {
 function toIni(object) {
   const groups = new Map();
   for (const [key, value] of Object.entries(object)) {
-    if (['frontend.serial', 'recording.directory'].includes(key) && !value) continue;
+    if (['frontend.serial', 'recording.directory', 'replay.path'].includes(key) && !value) continue;
     const split = key.indexOf('.'), group = key.slice(0, split), name = key.slice(split + 1);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(`${name}=${value}`);
@@ -140,7 +140,7 @@ function controls() {
   const ready = editable(), running = connected() && status?.state === 'running';
   const commandPending = httpBusy || pendingCommand !== null;
   for (const field of $('configForm').elements) field.disabled = !ready;
-  for (const id of ['filePreset', 'hackrfPreset', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
+  for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
   if (selectedSession==='replay' || (capabilities && !capabilities.hackrf)) $('hackrfPreset').disabled = true;
   const sourceSelect=document.querySelector('[name="frontend.type"]'); if(sourceSelect){for(const option of sourceSelect.options)option.disabled=option.value==='hackrf' && (selectedSession==='replay'||!capabilities?.hackrf);}
   $('validate').disabled = !connected() || httpBusy;
@@ -218,9 +218,9 @@ function renderStatus(next) {
   controls();
 }
 async function refreshFiles() {
-  if (fileBusy || !token) return; fileBusy = true; lastFileRefresh = performance.now();
+  if (fileBusy || !token) return; const fileSession = selectedSession; fileBusy = true; lastFileRefresh = performance.now();
   try {
-    const result = await api('files'); $('files').replaceChildren();
+    const result = await api('files'); if (fileSession !== selectedSession) return; $('files').replaceChildren();
     result.files.sort((a, b) => b.name.localeCompare(a.name));
     for (const file of result.files) {
       const row = document.createElement('tr');
@@ -228,12 +228,29 @@ async function refreshFiles() {
       const cell = document.createElement('td');
       if (file.closed) { const link = document.createElement('a'); link.textContent = 'Transfer ↓'; link.title = 'Download to the computer running this browser'; link.href = `/api/v1/${sessionPrefix()}files/${encodeURIComponent(file.name)}`; link.download = file.name; cell.append(link); }
       else cell.textContent = '—'; row.append(cell);
+      const replayCell = document.createElement('td');
+      if (file.name.endsWith('.cs8')) {
+        const play = document.createElement('button'); play.textContent = 'Replay';
+        play.disabled = !file.closed || BigInt(file.bytes) === 0n;
+        play.title = 'Prepare this file in the independent replay session; live reception continues';
+        play.addEventListener('click', async () => {
+          try {
+            if (selectedSession !== 'replay') {
+              if ((dirty || analysisDirty) && !confirm('Discard this session’s unsaved draft and open independent replay?')) return;
+              await selectReceiverSession('replay');
+            }
+            renderStatus(await api('status'));
+            await openReplayPicker(result.directory, `${result.directory}/${file.name}`);
+          } catch (error) { notice(error.message, true); }
+        }); replayCell.append(play);
+      } else replayCell.textContent = '—';
+      row.append(replayCell);
       const manage = document.createElement('td'), remove = document.createElement('button');
       remove.className = 'danger delete-file'; remove.textContent = 'Delete'; remove.dataset.filename = file.name;
       remove.disabled = !file.closed || deletingFile; remove.title = file.closed ? 'Delete this file on the receiver' : 'Stop recording before deleting this file';
       remove.addEventListener('click', () => deleteFile(file.name, result.directory, result.revision)); manage.append(remove); row.append(manage); $('files').append(row);
     }
-    if (!result.files.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.className = 'empty-table'; cell.textContent = 'No recordings yet. Start the receiver, then start recording.'; row.append(cell); $('files').append(row); }
+    if (!result.files.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 6; cell.className = 'empty-table'; cell.textContent = 'No recordings yet. Start the receiver, then start recording.'; row.append(cell); $('files').append(row); }
     $('fileNote').textContent = result.truncated ? 'Showing at most 200 files. All recordings remain on the receiver disk.' : 'Closed means no longer being written. Check capture metadata for completion and gap information.';
   } catch (error) { log(`File list: ${error.message}`, true); }
   finally { fileBusy = false; }
@@ -467,8 +484,8 @@ export {psdIntegrity, renderAnalysis, displayFrequency};
 
 document.querySelectorAll('[data-settings]').forEach(button => button.addEventListener('click', () => selectSettings(button.dataset.settings)));
 
-$('receiverSession').addEventListener('change', async () => {
-  selectedSession = $('receiverSession').value;
+async function selectReceiverSession(session) {
+  selectedSession = session; $('receiverSession').value = session;
   pendingTelemetry = null;
   // Disconnect the old poll so an in-flight primary snapshot cannot enter replay history.
   status = null; dirty = false; analysisDirty = false; pendingCommand = null;
@@ -477,5 +494,107 @@ $('receiverSession').addEventListener('change', async () => {
   if(socket){socket.onclose=null;socket.close();socket=null;}
   $('events').replaceChildren();
   await connect();
+  if (socket && !connected()) await new Promise((resolve, reject) => {
+    const target = socket;
+    const timer = setTimeout(() => { cleanup(); reject(new Error('Timed out connecting to the selected session.')); }, 5000);
+    const opened = () => { cleanup(); resolve(); };
+    const closed = () => { cleanup(); reject(new Error('Selected session disconnected.')); };
+    const cleanup = () => { clearTimeout(timer); target.removeEventListener('open', opened); target.removeEventListener('close', closed); };
+    target.addEventListener('open', opened, {once:true}); target.addEventListener('close', closed, {once:true});
+  });
   notice(selectedSession==='replay'?'Independent playback session. The primary stream continues running.':'Primary receiver session. File replay continues independently.');
+}
+$('receiverSession').addEventListener('change', () => selectReceiverSession($('receiverSession').value));
+
+let pickerListing = null, replaySelection = null, pickerBusy = false, pickerSession = null, pickerRequestId = 0, pickerFilterTimer = null;
+/** Join paths for the receiver OS without using the browser's local filesystem. */
+function pickerPath(directory, name) { return directory ? `${directory.replace(/[\\/]$/, '')}/${name}` : name; }
+/** Inspect one closed CI8 selection. This request never changes or starts a receiver. */
+async function inspectReplaySelection(path) {
+  const requestId = ++pickerRequestId;
+  replaySelection = null; $('pickerUse').disabled = true; $('pickerMetadata').replaceChildren();
+  $('pickerSelection').textContent = path; $('pickerNotice').textContent = 'Reading capture metadata…';
+  const result = await api('replay-files/inspect', {path});
+  if (requestId !== pickerRequestId || pickerSession !== selectedSession || !$('replayFileDialog').open) return;
+  replaySelection = result;
+  const settings = parseIni(result.ini);
+  const lines = [['Samples', pairs(result.samples)], ['Format', 'Signed int8 · I,Q interleaved']];
+  if (result.metadata_available) {
+    lines.push(['Metadata', result.metadata_path], ['Sample rate', `${settings['frontend.sample_rate_hz']} complex pairs/s (nominal)`],
+      ['SDR tuning', `${settings['frontend.center_frequency_hz']} Hz`], ['Signal centre', `${settings['frontend.signal_frequency_hz']} Hz`],
+      ['Digital IF', `${Number(settings['frontend.signal_frequency_hz']) - Number(settings['frontend.center_frequency_hz'])} Hz`],
+      ['Saved samples', result.recording_point], ['Recorded conditioner', result.recorded_conditioning],
+      ['Completion', result.complete ? 'Complete' : 'Incomplete / interrupted'], ['Stream gaps', result.has_gaps ? 'Present — see sample index' : 'See session sample index'],
+      ['Replay conditioner', 'Bypass — saved sample values are preserved']);
+  } else lines.push(['Metadata', 'Not found — set sampling rate and RF parameters manually']);
+  for (const [label, value] of lines) {
+    const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = value; $('pickerMetadata').append(dt, dd);
+  }
+  $('pickerNotice').textContent = result.metadata_available ? (result.complete ? 'Metadata loaded. Review the settings before starting.' : 'Capture is marked incomplete. Review the capture/index before playback.') : 'This file has no sidecar; its stream parameters cannot be inferred from raw bytes.';
+  $('pickerUse').disabled = false;
+}
+/** Render a bounded, filterable receiver-side directory listing using text-only names. */
+function renderPickerEntries() {
+  $('pickerEntries').replaceChildren();
+  if (!pickerListing) return;
+  const filter = $('pickerFilter').value.toLowerCase();
+  const entries = pickerListing.entries.filter(entry => entry.directory || entry.name.toLowerCase().includes(filter));
+  entries.sort((a,b) => Number(b.directory)-Number(a.directory) || a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const row = document.createElement('tr'), name = document.createElement('td'), size = document.createElement('td'), action = document.createElement('td'), button = document.createElement('button');
+    name.textContent = entry.name; size.textContent = entry.directory ? 'Folder' : bytes(entry.bytes);
+    button.textContent = entry.directory ? 'Open folder' : 'Select'; button.disabled = pickerBusy || !entry.selectable;
+    button.title = entry.selectable ? '' : 'File is empty, incomplete as I/Q pairs, too long or currently being written';
+    button.addEventListener('click', async () => {
+      if (pickerBusy) return; pickerBusy = true; renderPickerEntries();
+      try { const path = pickerPath(pickerListing.directory, entry.name); if (entry.directory) await browseReplayDirectory(path); else await inspectReplaySelection(path); }
+      catch (error) { $('pickerNotice').textContent = error.message; }
+      finally { pickerBusy = false; renderPickerEntries(); }
+    }); action.append(button); row.append(name, size, action); $('pickerEntries').append(row);
+  }
+  if (!entries.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 3; cell.textContent = 'No matching CI8 files or folders.'; row.append(cell); $('pickerEntries').append(row); }
+}
+/** Browse one existing receiver folder; navigation performs no filesystem writes. */
+async function browseReplayDirectory(path) {
+  const requestId = ++pickerRequestId;
+  replaySelection = null; $('pickerUse').disabled = true;
+  $('pickerSelection').textContent = 'No file selected.'; $('pickerMetadata').replaceChildren();
+  $('pickerNotice').textContent = 'Reading receiver folder…';
+  const body = {filter:$('pickerFilter').value}; if (path !== undefined) body.path = path;
+  const result = await api('replay-files/browse', body);
+  if (requestId !== pickerRequestId || pickerSession !== selectedSession || !$('replayFileDialog').open) return;
+  pickerListing = result; replaySelection = null; $('pickerUse').disabled = true;
+  $('pickerSelection').textContent = 'No file selected.'; $('pickerMetadata').replaceChildren();
+  $('pickerDirectory').value = result.directory;
+  $('pickerNotice').textContent = result.truncated ? 'Showing at most 500 entries; refine the filename filter or open a subfolder.' : 'Choose a closed .cs8 file. Its adjacent metadata is loaded automatically.';
+  renderPickerEntries();
+}
+/** Open selection for the currently stopped session; a table Replay action chooses replay first. */
+async function openReplayPicker(directory, selectedPath) {
+  if (!editable()) throw new Error('Stop the selected session before choosing another input file.');
+  pickerSession = selectedSession; replaySelection = null; $('pickerFilter').value = '';
+  $('replayFileDialog').showModal();
+  try { await browseReplayDirectory(directory); if (selectedPath) await inspectReplaySelection(selectedPath); }
+  catch (error) { $('pickerNotice').textContent = error.message; }
+}
+$('browseReplay').addEventListener('click', () => openReplayPicker().catch(error => notice(error.message, true)));
+$('pickerClose').addEventListener('click', () => $('replayFileDialog').close());
+$('replayFileDialog').addEventListener('close', () => { ++pickerRequestId; clearTimeout(pickerFilterTimer); replaySelection = null; });
+$('pickerRoots').addEventListener('click', () => browseReplayDirectory('').catch(error => $('pickerNotice').textContent = error.message));
+$('pickerParent').addEventListener('click', () => browseReplayDirectory(pickerListing?.parent || '').catch(error => $('pickerNotice').textContent = error.message));
+$('pickerNavigation').addEventListener('submit', event => { event.preventDefault(); browseReplayDirectory($('pickerDirectory').value.trim()).catch(error => $('pickerNotice').textContent = error.message); });
+$('pickerFilter').addEventListener('input', () => {
+  renderPickerEntries(); clearTimeout(pickerFilterTimer);
+  pickerFilterTimer = setTimeout(() => browseReplayDirectory(pickerListing?.directory).catch(error => $('pickerNotice').textContent = error.message), 180);
+});
+$('pickerUse').addEventListener('click', () => {
+  if (!replaySelection || pickerSession !== selectedSession || !editable()) return;
+  if (replaySelection.revision !== revision) { $('pickerNotice').textContent = 'The profile changed. Select the file again.'; return; }
+  const draft = parseIni(replaySelection.ini);
+  const keys = ['frontend.type','replay.path','replay.start_sample','replay.sample_limit','receiver.run_seconds','receiver.mode','recording.enabled','conditioning.module'];
+  if (replaySelection.metadata_available) keys.push('frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz','conditioning.dc_shift','buffer.window_samples');
+  for (const key of keys) values[key] = draft[key];
+  buildForm(); dirtyState(true); selectSettings('source'); $('showConfiguration').click();
+  notice(replaySelection.metadata_available ? 'Replay metadata loaded into the draft. Review, Apply & save, then Start receiver.' : 'File selected. Set sampling rate and RF parameters, then Apply & save.');
+  $('replayFileDialog').close();
 });

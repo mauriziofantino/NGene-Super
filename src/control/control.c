@@ -742,6 +742,11 @@ int NgControlRequest(TNgControl *control, TNgCommand command, uint64_t revision,
     if (control->busy == 0 && control->pending == 0 && revision == control->status.revision) {
         if (command == NG_CMD_START &&
             (control->status.state == NG_STOPPED || control->status.state == NG_FAILED)) {
+            if (control->config.frontend == NG_FRONTEND_FILE &&
+                control->config.replayPath[0] == '\0') {
+                NgMutexUnlock(&control->mutex);
+                return NgFail(error, "Choose a replay file before starting the receiver");
+            }
             NgAtomicSet(&control->stop, 0);
             control->runConfig = control->config;
             control->status.activeRevision = revision;

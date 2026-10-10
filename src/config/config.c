@@ -426,12 +426,17 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
         *equals = '\0';
         text = Trim(text);
         value = Trim(equals + 1);
-        if (*text == '\0' || *value == '\0' || strlen(section) + strlen(text) + 2 > sizeof(key)) {
+        if (*text == '\0' || strlen(section) + strlen(text) + 2 > sizeof(key)) {
             return NgFail(error, "Empty/long key or value at line %zu", number);
         }
         memcpy(key, section, strlen(section));
         key[strlen(section)] = '.';
         memcpy(key + strlen(section) + 1, text, strlen(text) + 1);
+        /* Empty optional strings also recover profiles written by earlier releases. */
+        if (*value == '\0' && strcmp(key, "frontend.serial") != 0 &&
+            strcmp(key, "recording.directory") != 0 && strcmp(key, "replay.path") != 0) {
+            return NgFail(error, "Missing value at line %zu: %s", number, key);
+        }
         for (i = 0; i < keyCount; ++i) {
             if (strcmp(key, keys[i]) == 0) {
                 return NgFail(error, "Duplicate config key %s", key);
@@ -537,6 +542,10 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
          strchr(config->recordingPrefix, ':'))) {
         return NgFail(error, "Use a base filename when recording.directory is set");
     }
+    if (strchr(config->replayPath, '\n') != NULL || strchr(config->replayPath, '\r') != NULL ||
+        strchr(config->serial, '\n') != NULL || strchr(config->serial, '\r') != NULL) {
+        return NgFail(error, "Replay path and serial cannot contain line breaks");
+    }
     if (config->replayStartSample > (uint64_t)INT64_MAX / sizeof(TNgIq8)) {
         return NgFail(error, "Replay offset exceeds the supported file range");
     }
@@ -618,10 +627,12 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     if (config->recordingDirectory[0] != 0) {
         fprintf(output, "directory=%s\n", config->recordingDirectory);
     }
-    fprintf(output,
-            "\n[replay]\npath=%s\nstart_sample=%" PRIu64 "\nsample_limit=%" PRIu64
-            "\nrealtime=%s\nloop=%s\n",
-            config->replayPath, config->replayStartSample, config->replaySampleLimit,
+    fprintf(output, "\n[replay]\n");
+    if (config->replayPath[0] != '\0') {
+        fprintf(output, "path=%s\n", config->replayPath);
+    }
+    fprintf(output, "start_sample=%" PRIu64 "\nsample_limit=%" PRIu64 "\nrealtime=%s\nloop=%s\n",
+            config->replayStartSample, config->replaySampleLimit,
             (config->replayRealtime) != 0 ? "true" : "false",
             (config->replayLoop) != 0 ? "true" : "false");
     fprintf(

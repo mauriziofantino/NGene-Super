@@ -846,3 +846,11 @@ Il log MSVC della 0.6.1 segnala C4701 sul draft della configurazione HTTP e CMP0
   three successful builds with 0 warnings/errors and functional tests passing,
   but build_dependency_contract failed before install/package verification.
   Linux host/fixture tests do not certify native MSVC or the VS Code UI.
+
+## 20. Replay e profili 0.6.3
+
+Errore GUI individuato: il writer emetteva `replay.path=` e il parser rifiutava ogni valore vuoto, anche se il frontend era HackRF o si salvava una bozza replay senza file. Ora solo path replay, serial e directory opzionali ammettono vuoto; i parametri numerici/bool obbligatori rimangono rigorosi. Writer e GUI omettono il path replay vuoto. La lettura accetta i profili già salvati con questi campi vuoti. Start file senza percorso è rifiutato prima di cambiare stato.
+
+Ogni raw ha un sidecar schema 2, finalizzato dal writer, con formato signed CI8, Fs nominale, RF hardware/segnale, digital IF, bandwidth e conditioning/punto di cattura. Importazione validata e compatibilità schema 1. File picker sul ricevitore, navigazione cartelle/drive e filtro prima del limite di 500. Replay dalla lista usa il controller indipendente; nessun avvio implicito o cambiamento del live. Importazione usa bypass per evitare doppio DC removal. Comandi HTTP di lifecycle e controllo cancellazione condividono un mutex che non coinvolge producer real-time.
+
+Non ricostruire automaticamente gap/epoche dal solo raw; indice conservato, concatenazione e replay temporale dell’indice rimangono attività future. Non dichiarare misurato il rate HackRF. Non modificare FFT, SIMD, ring o tuning globale per problemi di profilo/selezione. Prove e limiti di questa revisione in ITERATION_063.md; validazione nativa MSVC e hardware ancora da eseguire.

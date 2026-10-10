@@ -91,4 +91,56 @@ int NgRegularFile(const char *path, uint64_t *bytes);
  * @return Zero if removed; 1 if absent; -1 for nonregular entries or filesystem errors.
  */
 int NgDirectoryRemoveFile(const char *directory, const char *name);
+
+/** @brief Visitor for one immediate browsable directory or regular file.
+ * @param context Borrowed caller accumulator.
+ * @param name Borrowed immediate name (or absolute drive root), valid during this call.
+ * @param bytes Regular-file length, or zero for directories.
+ * @param directory Nonzero for a directory.
+ */
+typedef void (*TNgPathVisitor)(void *context, const char *name, uint64_t bytes, int directory);
+
+/** @brief Resolve an existing directory without creating or modifying it.
+ * @param path Existing directory.
+ * @param absolute Receives its NUL-terminated absolute path.
+ * @param capacity Destination capacity, including terminator.
+ * @return Zero on success; -1 on path, type or capacity failure.
+ */
+int NgDirectoryResolve(const char *path, char *absolute, size_t capacity);
+
+/** @brief Enumerate immediate nonsymlink files and subdirectories for a receiver-side picker.
+ * @details Read-only, synchronous and nonrecursive; order is unspecified.
+ * @param path Existing directory.
+ * @param visitor Callback retaining no borrowed names.
+ * @param context Borrowed accumulator.
+ * @return Zero on success; -1 on directory or enumeration failure.
+ */
+int NgDirectoryBrowse(const char *path, TNgPathVisitor visitor, void *context);
+
+/** @brief List existing Windows drive roots, or the POSIX filesystem root.
+ * @param visitor Synchronous root visitor.
+ * @param context Borrowed accumulator.
+ */
+void NgDirectoryRoots(TNgPathVisitor visitor, void *context);
+
+/** @brief Resolve an existing nonsymlink regular file without changing it.
+ * @param path Existing file.
+ * @param absolute Receives absolute path.
+ * @param capacity Destination capacity including terminator.
+ * @return Zero on success; -1 if absent, nonregular or too long.
+ */
+int NgFileAbsolute(const char *path, char *absolute, size_t capacity);
+
+/** @brief Compare two resolved paths with the target OS's filename case convention.
+ * @param first NUL-terminated resolved path.
+ * @param second NUL-terminated resolved path.
+ * @return Nonzero when equal.
+ */
+int NgPathEqual(const char *first, const char *second);
+
+/** @brief Determine whether an entry exists, including nonregular entries.
+ * @param path NUL-terminated path.
+ * @return Zero when absent; nonzero for an existing entry or an inspection error.
+ */
+int NgPathExists(const char *path);
 #endif

@@ -19,10 +19,10 @@
  * Used for unpredictable web tokens/capture suffixes, not GNSS signal generation. No new
  * caller-owned allocation occurs.
  *
- * @param bytes Writable destination with count bytes.
- * @param count Number of random bytes requested.
+ * Parameter bytes: Writable destination with count bytes.
+ * Parameter count: Number of random bytes requested.
  *
- * @return Zero if fully filled; -1 on source/range/read failure.
+ * Result: Zero if fully filled; -1 on source/range/read failure.
  */
 int NgRandomBytes(unsigned char *bytes, size_t count)
 {
@@ -39,11 +39,11 @@ int NgRandomBytes(unsigned char *bytes, size_t count)
  * Does not recursively create missing parents. Uses narrow OS path APIs; Windows non-ASCII
  * paths are not yet a portable contract.
  *
- * @param path Existing directory or one new child directory path.
- * @param absolute Receives NUL-terminated absolute directory on success.
- * @param capacity Destination capacity including terminator.
+ * Parameter path: Existing directory or one new child directory path.
+ * Parameter absolute: Receives NUL-terminated absolute directory on success.
+ * Parameter capacity: Destination capacity including terminator.
  *
- * @return Zero on success; -1 for filesystem or capacity errors.
+ * Result: Zero on success; -1 for filesystem or capacity errors.
  */
 int NgDirectoryPrepare(const char *path, char *absolute, size_t capacity)
 {
@@ -68,10 +68,10 @@ int NgDirectoryPrepare(const char *path, char *absolute, size_t capacity)
  * Both files must be on the same filesystem. Caller writes and closes temporary contents
  * before calling; it becomes the destination on success.
  *
- * @param temporary Closed prepared temporary file path.
- * @param destination Destination file path.
+ * Parameter temporary: Closed prepared temporary file path.
+ * Parameter destination: Destination file path.
  *
- * @return Zero on success; -1 on filesystem failure.
+ * Result: Zero on success; -1 on filesystem failure.
  */
 int NgFileReplace(const char *temporary, const char *destination)
 {
@@ -87,10 +87,10 @@ int NgFileReplace(const char *temporary, const char *destination)
  * Rejects directories and Windows reparse points. This is metadata inspection, not an opened-
  * file lease; callers must account for external filesystem changes.
  *
- * @param path File path to inspect.
- * @param bytes Receives byte length on success.
+ * Parameter path: File path to inspect.
+ * Parameter bytes: Receives byte length on success.
  *
- * @return Zero for a regular file; -1 otherwise.
+ * Result: Zero for a regular file; -1 otherwise.
  */
 int NgRegularFile(const char *path, uint64_t *bytes)
 {
@@ -110,11 +110,11 @@ int NgRegularFile(const char *path, uint64_t *bytes)
  * No recursion. Calls the visitor synchronously with a filename borrowed for that call.
  * Enumeration order is unspecified and caller retains context ownership.
  *
- * @param path Directory to enumerate.
- * @param visitor Visitor invoked for each regular entry.
- * @param context Borrowed visitor context for this enumeration.
+ * Parameter path: Directory to enumerate.
+ * Parameter visitor: Visitor invoked for each regular entry.
+ * Parameter context: Borrowed visitor context for this enumeration.
  *
- * @return Zero on successful enumeration; -1 if directory cannot be opened/read.
+ * Result: Zero on successful enumeration; -1 if directory cannot be opened/read.
  */
 int NgDirectoryFiles(const char *path, TNgFileVisitor visitor, void *context)
 {
@@ -147,10 +147,10 @@ int NgDirectoryFiles(const char *path, TNgFileVisitor visitor, void *context)
  * descriptor and no-follow metadata; Windows rejects reparse points. Does not recursively
  * remove directories or follow file symlinks.
  *
- * @param directory Absolute selected directory.
- * @param name Validated immediate filename.
+ * Parameter directory: Absolute selected directory.
+ * Parameter name: Validated immediate filename.
  *
- * @return Zero if removed; 1 if absent; -1 for nonregular entries or filesystem errors.
+ * Result: Zero if removed; 1 if absent; -1 for nonregular entries or filesystem errors.
  */
 int NgDirectoryRemoveFile(const char *directory, const char *name)
 {
@@ -333,3 +333,215 @@ int NgDirectoryRemoveFile(const char *directory, const char *name)
     return result;
 }
 #endif
+
+/** @brief Resolve an existing directory without filesystem mutation.
+ * Parameter path: Existing directory.
+ * Parameter absolute: Writable absolute-path destination.
+ * Parameter capacity: Destination capacity.
+ * Result: Zero on success; -1 otherwise.
+ */
+int NgDirectoryResolve(const char *path, char *absolute, size_t capacity)
+{
+#ifdef _WIN32
+    DWORD attributes;
+    DWORD length;
+    if (capacity > UINT32_MAX) {
+        return -1;
+    }
+    length = GetFullPathNameA(path, (DWORD)capacity, absolute, NULL);
+    if (length == 0 || length >= capacity) {
+        return -1;
+    }
+    attributes = GetFileAttributesA(absolute);
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+                   (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0
+               ? 0
+               : -1;
+#else
+    char *resolved = realpath(path, NULL);
+    struct stat status;
+    if (resolved == NULL) {
+        return -1;
+    }
+    if (strlen(resolved) >= capacity || stat(resolved, &status) != 0 ||
+        S_ISDIR(status.st_mode) == 0) {
+        free(resolved);
+        return -1;
+    }
+    memcpy(absolute, resolved, strlen(resolved) + 1);
+    free(resolved);
+    return 0;
+#endif
+}
+
+/** @brief Browse one existing directory without following entry symlinks.
+ * Parameter path: Existing directory.
+ * Parameter visitor: Synchronous visitor; copied names are caller-owned.
+ * Parameter context: Borrowed accumulator.
+ * Result: Zero on success; -1 on enumeration failure.
+ */
+int NgDirectoryBrowse(const char *path, TNgPathVisitor visitor, void *context)
+{
+    char full[1024];
+#ifdef _WIN32
+    WIN32_FIND_DATAA data;
+    HANDLE handle;
+    DWORD ended;
+    if (snprintf(full, sizeof(full), "%s/*", path) >= (int)sizeof(full)) {
+        return -1;
+    }
+    handle = FindFirstFileA(full, &data);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return GetLastError() == ERROR_FILE_NOT_FOUND ? 0 : -1;
+    }
+    do {
+        if (strcmp(data.cFileName, ".") != 0 && strcmp(data.cFileName, "..") != 0 &&
+            (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
+            int directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            visitor(context, data.cFileName,
+                    ((uint64_t)data.nFileSizeHigh << 32) | data.nFileSizeLow, directory);
+        }
+    } while (FindNextFileA(handle, &data) != 0);
+    ended = GetLastError();
+    FindClose(handle);
+    return ended == ERROR_NO_MORE_FILES ? 0 : -1;
+#else
+    DIR *directory = opendir(path);
+    struct dirent *entry;
+    int failed = 0;
+    if (directory == NULL) {
+        return -1;
+    }
+    for (;;) {
+        struct stat status;
+        errno = 0;
+        entry = readdir(directory);
+        if (entry == NULL) {
+            failed = errno != 0;
+            break;
+        }
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        if (snprintf(full, sizeof(full), "%s/%s", path, entry->d_name) >= (int)sizeof(full) ||
+            lstat(full, &status) != 0 || status.st_size < 0) {
+            continue;
+        }
+        if (S_ISDIR(status.st_mode) != 0 || S_ISREG(status.st_mode) != 0) {
+            visitor(context, entry->d_name, (uint64_t)status.st_size, S_ISDIR(status.st_mode) != 0);
+        }
+    }
+    if (closedir(directory) != 0) {
+        failed = 1;
+    }
+    return failed != 0 ? -1 : 0;
+#endif
+}
+
+/** @brief List OS filesystem roots for the read-only picker.
+ * Parameter visitor: Synchronous root visitor.
+ * Parameter context: Borrowed accumulator.
+ */
+void NgDirectoryRoots(TNgPathVisitor visitor, void *context)
+{
+#ifdef _WIN32
+    DWORD drives = GetLogicalDrives();
+    unsigned index;
+    for (index = 0; index < 26; ++index) {
+        if ((drives & ((DWORD)1 << index)) != 0) {
+            char root[4] = {(char)('A' + index), ':', '/', '\0'};
+            visitor(context, root, 0, 1);
+        }
+    }
+#else
+    visitor(context, "/", 0, 1);
+#endif
+}
+
+/** @brief Resolve one existing regular file to an absolute path.
+ * Parameter path: Existing nonsymlink file.
+ * Parameter absolute: Writable result buffer.
+ * Parameter capacity: Result capacity.
+ * Result: Zero on success; -1 otherwise.
+ */
+int NgFileAbsolute(const char *path, char *absolute, size_t capacity)
+{
+    uint64_t bytes;
+    if (NgRegularFile(path, &bytes) != 0) {
+        return -1;
+    }
+#ifdef _WIN32
+    {
+        DWORD length;
+        if (capacity > UINT32_MAX) {
+            return -1;
+        }
+        length = GetFullPathNameA(path, (DWORD)capacity, absolute, NULL);
+        return length != 0 && length < capacity ? 0 : -1;
+    }
+#else
+    {
+        char *resolved = realpath(path, NULL);
+        if (resolved == NULL) {
+            return -1;
+        }
+        if (strlen(resolved) >= capacity) {
+            free(resolved);
+            return -1;
+        }
+        memcpy(absolute, resolved, strlen(resolved) + 1);
+        free(resolved);
+        return 0;
+    }
+#endif
+}
+
+/** @brief Compare canonical paths using OS case rules and either Windows separator.
+ * Parameter first: Resolved first path.
+ * Parameter second: Resolved second path.
+ * Result: Nonzero for equality.
+ */
+int NgPathEqual(const char *first, const char *second)
+{
+#ifdef _WIN32
+    while (*first != '\0' && *second != '\0') {
+        unsigned char a = (unsigned char)*first++;
+        unsigned char b = (unsigned char)*second++;
+        if (a == '\\') {
+            a = '/';
+        }
+        if (b == '\\') {
+            b = '/';
+        }
+        if (a >= 'A' && a <= 'Z') {
+            a = (unsigned char)(a + ('a' - 'A'));
+        }
+        if (b >= 'A' && b <= 'Z') {
+            b = (unsigned char)(b + ('a' - 'A'));
+        }
+        if (a != b) {
+            return 0;
+        }
+    }
+    return *first == *second;
+#else
+    return strcmp(first, second) == 0;
+#endif
+}
+
+/** @brief Check existence without treating nonregular sidecars as missing.
+ * Parameter path: Path to inspect.
+ * Result: Zero if absent; nonzero if present or inaccessible.
+ */
+int NgPathExists(const char *path)
+{
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    DWORD error = attributes == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    return attributes != INVALID_FILE_ATTRIBUTES ||
+           (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND);
+#else
+    struct stat status;
+    return lstat(path, &status) == 0 || (errno != ENOENT && errno != ENOTDIR);
+#endif
+}

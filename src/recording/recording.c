@@ -2,6 +2,7 @@
  * @brief NGene recording implementation.
  */
 #include "ngene/recording.h"
+#include "ngene/capture.h"
 #include "ngene/ring.h"
 #include "platform/platform.h"
 #include <errno.h>
@@ -30,6 +31,12 @@ struct TNgRecorder {
     FILE *index;
     /** Writer-owned metadata stream; finalized before the session closes. */
     FILE *metadata;
+    /** Writer-owned sidecar for the current raw segment. */
+    FILE *segmentMetadata;
+    /** Owned stream description used by every segment header. */
+    TNgCaptureMetadata capture;
+    /** Discontinuities observed in the current segment. */
+    uint64_t segmentGaps;
     /** Current raw segment number, starting at zero. */
     uint64_t segment;
     /** Complex pairs already written to the current raw segment. */
@@ -60,11 +67,74 @@ static int SegmentOpen(TNgRecorder *r)
     if (r->raw == NULL) {
         return NgFail(&r->writerError, "Cannot create %s: %s", path, strerror(errno));
     }
+    {
+        char sidecar[672];
+        const char *name = path;
+        const char *cursor;
+        for (cursor = path; *cursor != '\0'; ++cursor) {
+            if (*cursor == '/' || *cursor == '\\') {
+                name = cursor + 1;
+            }
+        }
+        (void)snprintf(sidecar, sizeof(sidecar), "%s.meta.ini", path);
+        r->segmentMetadata = NgFopenExclusive(sidecar);
+        if (r->segmentMetadata == NULL) {
+            return NgFail(&r->writerError, "Cannot create segment sidecar: %s", strerror(errno));
+        }
+        if (fprintf(r->segmentMetadata,
+                    "[capture]\nversion=2\nformat=CI8\nlayout=I,Q interleaved\n"
+                    "component_bits=8\ncomponent_signed=true\ndata_file=%s\n"
+                    "sample_rate_hz=%u\nsample_rate_basis=configured_nominal\n"
+                    "center_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
+                    "\ndigital_if_hz=%" PRId64 "\nbandwidth_hz=%u\nconditioning=%s\n"
+                    "dc_shift=%u\nrecording_point=%s\nhardware_timestamp=false\n"
+                    "host_start_unix_seconds=%" PRId64 "\n",
+                    name, r->capture.sampleRateHz, r->capture.centerFrequencyHz,
+                    r->capture.signalFrequencyHz,
+                    (int64_t)r->capture.signalFrequencyHz - (int64_t)r->capture.centerFrequencyHz,
+                    r->capture.bandwidthHz, r->capture.conditioningName, r->capture.dcShift,
+                    r->capture.preConditioning != 0 ? "pre_conditioning" : "post_conditioning",
+                    (int64_t)time(NULL)) < 0 ||
+            fflush(r->segmentMetadata) != 0) {
+            return NgFail(&r->writerError, "Cannot write segment metadata");
+        }
+    }
     NgMutexLock(&r->statsMutex);
     ++r->stats.segments;
     NgMutexUnlock(&r->statsMutex);
     r->segmentOffset = 0;
+    r->segmentGaps = 0;
     return NG_OK;
+}
+
+/** @brief Close one raw segment and finalize its adjacent, portable sidecar.
+ * @details Only the disk writer or the joined recorder owner may call this function.
+ * A segment becomes complete only after the raw close succeeds; failures remain explicit.
+ * @param r Owned recorder state.
+ * @param successful Nonzero if upstream and writer operations succeeded.
+ * @return NG_OK if both files close successfully; NG_ERROR otherwise.
+ */
+static int SegmentClose(TNgRecorder *r, int successful)
+{
+    int failed = 0;
+    if (r->raw != NULL) {
+        failed = fclose(r->raw) != 0;
+        r->raw = NULL;
+    }
+    if (r->segmentMetadata != NULL) {
+        if (fprintf(r->segmentMetadata,
+                    "\n[result]\ncomplete=%s\nwritten_samples=%" PRIu64 "\ngap_events=%" PRIu64
+                    "\n",
+                    successful != 0 && failed == 0 ? "true" : "false", r->segmentOffset,
+                    r->segmentGaps) < 0) {
+            failed = 1;
+        }
+        if (fclose(r->segmentMetadata) != 0) {
+            failed = 1;
+        }
+        r->segmentMetadata = NULL;
+    }
+    return failed != 0 ? NgFail(&r->writerError, "Cannot finalize recording segment") : NG_OK;
 }
 
 /**
@@ -86,10 +156,8 @@ static int WriteWindow(TNgRecorder *r, const TNgIqView *view)
     while (offset < view->meta.count) {
         size_t count = view->meta.count - offset;
         if (r->config.segmentSamples != 0 && r->segmentOffset == r->config.segmentSamples) {
-            int closed = fclose(r->raw);
-            r->raw = NULL;
-            if (closed != 0) {
-                return NgFail(&r->writerError, "Cannot flush recording segment");
+            if (SegmentClose(r, 1) != NG_OK) {
+                return NG_ERROR;
             }
             ++r->segment;
             if (SegmentOpen(r) != NG_OK) {
@@ -113,6 +181,9 @@ static int WriteWindow(TNgRecorder *r, const TNgIqView *view)
             return NgFail(&r->writerError, "Recording index write failed");
         }
         r->segmentOffset += count;
+        if (offset == 0 && (view->meta.flags & NG_BLOCK_GAP) != 0) {
+            ++r->segmentGaps;
+        }
         NgMutexLock(&r->statsMutex);
         r->stats.samples += count;
         NgMutexUnlock(&r->statsMutex);
@@ -193,6 +264,21 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
         return NgFail(error, "Cannot initialize recorder counters");
     }
     r->config = *config;
+    r->capture.sampleRateHz = info->sampleRateHz;
+    r->capture.centerFrequencyHz = info->centerFrequencyHz;
+    r->capture.signalFrequencyHz =
+        info->signalFrequencyHz != 0 ? info->signalFrequencyHz : info->centerFrequencyHz;
+    r->capture.bandwidthHz = info->bandwidthHz;
+    r->capture.preConditioning = config->recordingPreConditioning;
+    r->capture.dcShift = config->dcShift;
+    if (conditioningName == NULL ||
+        strlen(conditioningName) >= sizeof(r->capture.conditioningName)) {
+        NgMutexDestroy(&r->statsMutex);
+        free(r);
+        return NgFail(error, "Invalid recording conditioner label");
+    }
+    (void)snprintf(r->capture.conditioningName, sizeof(r->capture.conditioningName), "%s",
+                   conditioningName);
     if (config->recordingDirectory[0] != 0 &&
         snprintf(r->config.recordingPrefix, sizeof(r->config.recordingPrefix), "%s/%s",
                  config->recordingDirectory,
@@ -255,9 +341,7 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
     *out = r;
     return NG_OK;
 failed:
-    if (r->raw != NULL) {
-        (void)fclose(r->raw);
-    }
+    (void)SegmentClose(r, 0);
     if (r->index != NULL) {
         (void)fclose(r->index);
     }
@@ -317,7 +401,7 @@ int NgRecorderFinish(TNgRecorder *recorder, int successfulRun, const TNgFrontend
     NgRingClose(recorder->queue);
     NgThreadJoin(recorder->thread);
     failed = NgAtomicGet(&recorder->failed);
-    if (recorder->raw != NULL && fclose(recorder->raw) != 0) {
+    if (SegmentClose(recorder, successfulRun != 0 && failed == 0) != NG_OK) {
         failed = 1;
     }
     if (fclose(recorder->index) != 0) {

@@ -1,8 +1,8 @@
-# Windows — build MSVC nativa e dipendenze, v0.6.2 (candidate)
+# Windows — build MSVC nativa e dipendenze, v0.6.3 (candidate)
 
 Il percorso standard parte da un checkout pulito: Visual Studio 18/2026 con workload C/C++, Windows SDK, Git e CMake >=4.2. Nessun file di progetto deve essere modificato. Il toolset ARM64 è richiesto soltanto per un target ARM64. Il minimo CMake generale resta 3.26 per gli altri generatori/OS.
 
-**Accettazione nativa ancora aperta.** Il log Windows della 0.6.1 ha evidenziato C4701 e CMP0207. Le correzioni sono nel sorgente della 0.6.2; questa revisione non è stata ancora eseguita su Windows. I test Linux e le fixture non certificano una build MSVC.
+**Accettazione nativa completa ancora aperta.** Il log fornito per la 0.6.2 documenta HackRF ON Release, test e staging/package riusciti senza warning. Non contiene l’intera matrice OFF/ON × Debug/Release. La 0.6.3 aggiunge selezione file e metadati replay; non è stata eseguita qui su MSVC. I test Linux e le fixture non certificano una build Windows.
 
 ## Procedura standard
 
@@ -110,7 +110,7 @@ Per la verifica completa su Windows nativo, dal checkout Git **con le correzioni
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1
 ```
 
-Lo script rifiuta una working tree sporca per non certificare per errore una revisione precedente. Chi usa l'archivio consegnato può ottenere il checkout con `git clone ngene-0.6.2.bundle NGene-git`, poi eseguire lo script dentro `NGene-git`. Non occorre inizializzare o aggiornare il baseline.
+Lo script rifiuta una working tree sporca per non certificare per errore una revisione precedente. Chi usa l'archivio consegnato può ottenere il checkout con `git clone ngene-0.6.3.bundle NGene-git`, poi eseguire lo script dentro `NGene-git`. Non occorre inizializzare o aggiornare il baseline.
 
 Lo script:
 
@@ -128,9 +128,9 @@ Su ARM64 nativo usare `-Architecture ARM64`. Il verificatore rifiuta l'esecuzion
 
 ## Stato della validazione
 
-Sono disponibili build/test reali Linux della 0.6.2 nelle quattro combinazioni e la regressione browser della configurazione. Il contratto dello staging usa output `dumpbin` simulato per testare policy, dipendenze transitive, spazi nei path, CRT, esclusione dei file OS e fallimento per DLL mancanti. Il test PowerShell verifica parsing e cattura di exit/warning, anche localizzati. **Nessuna di queste prove è un build nativo Windows.**
+Sono disponibili build/test reali Linux della 0.6.3 nelle quattro combinazioni e la regressione browser di configurazione, file picker e metadati replay. Il contratto dello staging usa output `dumpbin` simulato per testare policy, dipendenze transitive, spazi nei path, CRT, esclusione dei file OS e fallimento per DLL mancanti. Il test PowerShell verifica parsing e cattura di exit/warning, anche localizzati. **Nessuna di queste prove è un build nativo Windows.**
 
-Mancano un host/runner Windows accessibile e i quattro risultati MSVC con smoke test e clone pulito. L'acceptance resta aperta; il report [WINDOWS_BUILD_062.md](WINDOWS_BUILD_062.md) distingue implementazione, prove eseguite e prove mancanti. La nuova CI è configurata, non dichiarata eseguita.
+Il log utente della 0.6.2 copre ON Release. Per la 0.6.3 manca un host/runner Windows accessibile: i quattro risultati MSVC con smoke test e clone pulito non sono ancora disponibili. L'acceptance resta aperta; il report [WINDOWS_BUILD_062.md](WINDOWS_BUILD_062.md) distingue implementazione, prove eseguite e prove mancanti. La nuova CI è configurata, non dichiarata eseguita.
 
 Driver USB, dispositivo collegato e validazione RF restano prove sul computer ricevitore: `ngene --list-devices`. Il build non installa driver o firmware. Il supporto Unicode dei percorsi Windows rimane quello precedente, basato sulle API narrow: usare percorsi ASCII in questa revisione.
 
@@ -138,7 +138,7 @@ Driver USB, dispositivo collegato e validazione RF restano prove sul computer ri
 
 Il percorso predefinito del checkout viene risolto dopo il binding dei parametri,
 per evitare il valore vuoto di `$PSScriptRoot` osservato nel parametro della prima
-consegna 0.6.2. Per continuare da quel bundle senza modificare file:
+consegna 0.6.3. Per continuare da quel bundle senza modificare file:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1 -SourceRepository "$PWD"
@@ -178,7 +178,7 @@ nella directory che contiene `NGene-git` (sostituendo il vecchio bundle), quindi
 eseguire dal checkout:
 
 ```powershell
-git fetch ..\ngene-0.6.2.bundle main
+git fetch ..\ngene-0.6.3.bundle main
 git merge --ff-only FETCH_HEAD
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows.ps1
 ```

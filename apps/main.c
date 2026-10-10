@@ -2,6 +2,7 @@
  * @brief NGene command-line and embedded console entry point.
  */
 #include "ngene/receiver.h"
+#include "ngene/capture.h"
 #include "ngene/build.h"
 #include "ngene/dsp/fft.h"
 #ifdef NGENE_HAVE_WEB
@@ -62,6 +63,7 @@ static int ShouldStop(void *context)
 int main(int argc, char **argv)
 {
     const char *path = "config/hackrf.ini";
+    const char *replayPath = NULL;
     TNgError error = {{0}};
     TNgConfig config;
     TNgFrontend frontend;
@@ -74,7 +76,8 @@ int main(int argc, char **argv)
     const char *outputDirectory = "captures";
     int explicitConfig = 0;
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
-        puts("NGene: [--web] [--config FILE] [--port 8080] [--output-dir captures]\n       "
+        puts("NGene: [--web] [--config FILE] [--replay FILE] [--port 8080] [--output-dir "
+             "captures]\n       "
              "--list-devices | --version\nC receiver and local web console; no acquisition, "
              "tracking or PVT yet.");
         return 0;
@@ -97,6 +100,8 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[k], "--config") == 0 && k + 1 < argc) {
             path = argv[++k];
             explicitConfig = 1;
+        } else if (strcmp(argv[k], "--replay") == 0 && k + 1 < argc) {
+            replayPath = argv[++k];
         } else if (strcmp(argv[k], "--output-dir") == 0 && k + 1 < argc) {
             outputDirectory = argv[++k];
         } else if (strcmp(argv[k], "--port") == 0 && k + 1 < argc) {
@@ -110,7 +115,9 @@ int main(int argc, char **argv)
             }
             port = (unsigned)value;
         } else {
-            fputs("Usage: ngene [--web] [--config FILE] [--port N] [--output-dir DIR]\n", stderr);
+            fputs("Usage: ngene [--web] [--config FILE] [--replay FILE] [--port N] [--output-dir "
+                  "DIR]\n",
+                  stderr);
             return 2;
         }
     }
@@ -149,6 +156,17 @@ int main(int argc, char **argv)
                 }
             }
         }
+        if (replayPath != NULL) {
+            TNgCaptureMetadata metadata = {0};
+            if (NgReplayConfigure(replayPath, &config, &metadata, &error) != NG_OK ||
+                (metadata.available == 0 && explicitConfig == 0)) {
+                fprintf(stderr, "%s\n",
+                        error.message[0] != '\0' ? error.message
+                                                 : "No capture metadata; provide an explicit "
+                                                   "--config with stream parameters");
+                return 1;
+            }
+        }
         result = NgWebRun(&config, port, outputDirectory, ShouldStop, NULL, &error);
         if (result != NG_OK) {
             fprintf(stderr, "%s\n", error.message);
@@ -159,8 +177,24 @@ int main(int argc, char **argv)
         return 1;
 #endif
     }
-    if (NgConfigLoad(path, &config, &error) != NG_OK ||
-        NgFrontendOpen(&config, &frontend, &error) != NG_OK) {
+    if (replayPath != NULL) {
+        TNgCaptureMetadata metadata = {0};
+        NgConfigDefaults(&config);
+        if ((explicitConfig != 0 && NgConfigLoad(path, &config, &error) != NG_OK) ||
+            NgReplayConfigure(replayPath, &config, &metadata, &error) != NG_OK ||
+            (metadata.available == 0 && explicitConfig == 0)) {
+            fprintf(
+                stderr, "%s\n",
+                error.message[0] != '\0'
+                    ? error.message
+                    : "No capture metadata; provide an explicit --config with stream parameters");
+            return 1;
+        }
+    } else if (NgConfigLoad(path, &config, &error) != NG_OK) {
+        fprintf(stderr, "%s\n", error.message);
+        return 1;
+    }
+    if (NgFrontendOpen(&config, &frontend, &error) != NG_OK) {
         fprintf(stderr, "%s\n", error.message);
         return 1;
     }

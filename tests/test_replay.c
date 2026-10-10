@@ -1,5 +1,6 @@
 /** @file test_replay.c @brief CI8 replay ranges, leases, EOF and independent-source contracts. */
 #include "ngene/frontend.h"
+#include "ngene/capture.h"
 #include "platform/platform.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,6 +130,60 @@ static void CheckLoopAndValidation(const char *path)
     CHECK(NgFrontendOpen(&config, &frontend, &error) == NG_ERROR);
 }
 
+/** @brief Reject malformed or mismatched sidecars while preserving a caller's draft.
+ * @param path Existing complete CI8 fixture; its temporary sidecar is removed before return.
+ */
+static void CheckMetadata(const char *path)
+{
+    TNgCaptureMetadata found;
+    TNgConfig config;
+    TNgConfig original;
+    TNgError error = {{0}};
+    char sidecar[640];
+    FILE *file;
+    const char *header = "[capture]\nversion=2\nformat=CI8\nlayout=I,Q interleaved\n"
+                         "component_bits=8\ncomponent_signed=true\n"
+                         "sample_rate_hz=8000000\ncenter_frequency_hz=1576420000\n"
+                         "signal_frequency_hz=1575420000\ndigital_if_hz=-1000000\n"
+                         "conditioning=dc_iir\ndc_shift=17\nrecording_point=post_conditioning\n";
+    CHECK(NgReplayInspect(path, &found, &error) == NG_OK && found.available == 0);
+    CHECK(found.samples == NG_TEST_PAIRS);
+    CHECK(snprintf(sidecar, sizeof(sidecar), "%s.meta.ini", path) > 0);
+    file = NgFopenExclusive(sidecar);
+    CHECK(file != NULL);
+    CHECK(fprintf(file, "%sdata_file=%s\n[result]\ncomplete=true\nwritten_samples=17\n", header,
+                  path) > 0 &&
+          fclose(file) == 0);
+    NgConfigDefaults(&config);
+    config.frontend = NG_FRONTEND_HACKRF;
+    config.dcRemoval = 1;
+    CHECK(NgReplayConfigure(path, &config, &found, &error) == NG_OK);
+    CHECK(found.version == 2 && found.available && found.complete && found.dcRemoval);
+    CHECK(config.sampleRateHz == 8000000 && config.windowSamples == 8000);
+    CHECK(config.centerFrequencyHz == UINT64_C(1576420000));
+    CHECK(config.signalFrequencyHz == UINT64_C(1575420000) && config.dcRemoval == 0);
+    CHECK(config.dcShift == 17 && config.recordingEnabled == 0);
+    original = config;
+    file = fopen(sidecar, "wb");
+    CHECK(file != NULL &&
+          fprintf(file, "%sdata_file=%s\n[result]\ncomplete=true\nwritten_samples=18\n", header,
+                  path) > 0);
+    CHECK(fclose(file) == 0);
+    CHECK(NgReplayConfigure(path, &config, &found, &error) == NG_ERROR);
+    CHECK(memcmp(&config, &original, sizeof(config)) == 0);
+    file = fopen(sidecar, "wb");
+    CHECK(file != NULL &&
+          fprintf(file, "%sdata_file=other.cs8\n[result]\ncomplete=true\nwritten_samples=17\n",
+                  header) > 0);
+    CHECK(fclose(file) == 0);
+    CHECK(NgReplayInspect(path, &found, &error) == NG_ERROR);
+    file = fopen(sidecar, "wb");
+    CHECK(file != NULL && fputs("[capture]\nformat=CF32\n", file) >= 0);
+    CHECK(fclose(file) == 0);
+    CHECK(NgReplayInspect(path, &found, &error) == NG_ERROR);
+    CHECK(remove(sidecar) == 0);
+}
+
 /** @brief Run file-source contract tests and release all temporary fixtures.
  * @details No SDR or GUI is required; process failure reports the first violated contract.
  * @return EXIT_SUCCESS after ownership, range, signedness and format checks pass.
@@ -139,6 +194,7 @@ int main(void)
     CHECK(snprintf(path, sizeof(path), "ngene_replay_%llu.cs8",
                    (unsigned long long)(NgMonotonicSeconds() * 1000000.0)) > 0);
     WriteFixture(path);
+    CheckMetadata(path);
     CheckIndependentSources(path);
     CheckLoopAndValidation(path);
     CHECK(remove(path) == 0);
