@@ -52,12 +52,14 @@
 </div></main></div><dialog id="deleteFileDialog" aria-labelledby="deleteFileTitle">
 <form method="dialog"><span class="eyebrow">CAPTURE STORAGE</span><h2 id="deleteFileTitle">Delete this file?</h2><p>This permanently removes the selected file from the receiver computer. Related data and metadata files are kept.</p><strong id="deleteFileName" class="mono"></strong><p id="deleteFileDirectory" class="muted"></p><div class="dialog-actions"><button value="cancel" autofocus>Cancel</button><button id="confirmDeleteFile" value="delete" class="danger">Delete file</button></div></form></dialog><dialog id="replayFileDialog" aria-labelledby="replayFileTitle">
   <div class="picker-heading"><div><span class="eyebrow">RECEIVER STORAGE</span><h2 id="replayFileTitle">Choose recorded I/Q</h2></div><button id="pickerClose" type="button">Close</button></div>
+  <div class="picker-body">
   <p class="muted">Browse files on the computer running NGene. Selection prepares a draft; reception starts only after Apply &amp; save and Start receiver.</p>
   <form id="pickerNavigation" class="picker-navigation"><button id="pickerRoots" type="button">Drives / roots</button><button id="pickerParent" type="button">Parent folder</button><label>Current folder<input id="pickerDirectory" type="text" autocomplete="off"></label><button type="submit">Open folder</button></form>
   <label class="field">Filter filenames<input id="pickerFilter" type="search" placeholder="Filter I/Q names…"></label>
   <p id="pickerNotice" class="muted" role="status"></p>
   <div class="table-wrap picker-list"><table><thead><tr><th>Name</th><th>Size</th><th>Action</th></tr></thead><tbody id="pickerEntries"></tbody></table></div>
   <section class="picker-preview"><h3>Selected capture</h3><p id="pickerSelection">No file selected.</p><dl id="pickerMetadata"></dl></section>
+  </div>
   <div class="picker-actions"><button id="pickerUse" type="button" class="primary" disabled>Use selected file</button></div>
 </dialog>
 </body></html>
