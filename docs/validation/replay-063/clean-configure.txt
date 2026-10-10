@@ -1,0 +1,19 @@
+-- The C compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Performing Test NG_TARGET_ARM64
+-- Performing Test NG_TARGET_ARM64 - Failed
+-- Performing Test NG_TARGET_X64
+-- Performing Test NG_TARGET_X64 - Success
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- The ASM compiler identification is GNU
+-- Found assembler: /usr/bin/cc
+-- NGene target Linux/x86_64; native HackRF=OFF
+-- Configuring done (1.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: <workspace>/replay-063/clean-build

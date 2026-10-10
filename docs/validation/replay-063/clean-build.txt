@@ -1,0 +1,17 @@
+-- NGene target Linux/x86_64; native HackRF=OFF
+-- Configuring done (0.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: <workspace>/replay-063/clean-build
+[  7%] Built target ngene_http
+[ 51%] Built target ngene_core
+[ 56%] Built target ngene_control
+[ 63%] Built target ngene_sample_tests
+[ 68%] Built target ngene_replay_tests
+[ 73%] Built target ngene_analysis_tests
+[ 78%] Built target ngene_fft_tests
+[ 85%] Built target ngene_control_tests
+[ 90%] Built target ngene_tests
+[ 92%] Building C object CMakeFiles/ngene.dir/generated/web_assets.c.o
+[ 95%] Building C object CMakeFiles/ngene.dir/src/web/server.c.o
+[ 97%] Linking C executable ngene
+[100%] Built target ngene

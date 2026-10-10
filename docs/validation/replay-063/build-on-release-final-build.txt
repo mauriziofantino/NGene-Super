@@ -1,0 +1,20 @@
+-- NGene HackRF provider: upstream source <workspace>/dependencies/hackrf; library 0.9
+-- NGene target Linux/x86_64; native HackRF=ON
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: <workspace>/replay-063/build-on-release
+[  4%] Built target ngene_hackrf_native
+[ 10%] Built target ngene_http
+[ 50%] Built target ngene_core
+[ 54%] Built target ngene_control
+[ 60%] Built target ngene_sample_tests
+[ 64%] Built target ngene_analysis_tests
+[ 68%] Built target ngene_replay_tests
+[ 72%] Built target ngene_fft_tests
+[ 77%] Built target ngene_tests
+[ 85%] Built target ngene_hackrf_tests
+[ 91%] Built target ngene_control_tests
+[ 93%] Building C object CMakeFiles/ngene.dir/generated/web_assets.c.o
+[ 95%] Building C object CMakeFiles/ngene.dir/src/web/server.c.o
+[ 97%] Linking C executable ngene
+[100%] Built target ngene

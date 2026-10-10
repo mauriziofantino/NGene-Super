@@ -1,0 +1,3 @@
+NGene: [--web] [--config FILE] [--replay FILE] [--port 8080] [--output-dir captures]
+       --list-devices | --version
+C receiver and local web console; no acquisition, tracking or PVT yet.

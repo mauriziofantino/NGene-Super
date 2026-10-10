@@ -1,0 +1,12 @@
+AssertionError [ERR_ASSERTION]: One delayed request must not trigger a burst or disconnect
+
+4 !== 3
+
+    at <workspace>/config-inspection-20261009/current/tests/web_ui.cjs:207:12 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 4,
+  expected: 3,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

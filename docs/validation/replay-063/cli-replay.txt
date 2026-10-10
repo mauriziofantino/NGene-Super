@@ -1,0 +1,5 @@
+NGene 0.6.3 Linux/x86_64
+source=file format=CI8 fs=1000000 pairs/s tune=1575520000 Hz filter=0 Hz window=1000 pairs
+Capture core active; GNSS algorithms are not yet attached.
+signal=1575420000 Hz digital_IF=-100000 Hz conditioning=bypass
+windows=2 processed_pairs=2000 written_pairs=0 gaps=0 known_input_drops=0 queued_discarded_at_stop=0 wall_seconds=0.002177

@@ -1,0 +1,10 @@
+[ 43%] Built target ngene_core
+[ 51%] Built target ngene_http
+[ 58%] Built target ngene_sample_tests
+[ 63%] Built target ngene_control
+[ 68%] Built target ngene_analysis_tests
+[ 73%] Built target ngene_replay_tests
+[ 78%] Built target ngene_tests
+[ 82%] Built target ngene_fft_tests
+[ 90%] Built target ngene_control_tests
+[100%] Built target ngene

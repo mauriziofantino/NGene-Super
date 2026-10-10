@@ -1,0 +1,18 @@
+{
+  "version": "0.6.3",
+  "implementation_commit": "282a8528be9d94942229adb455f5cd9cc9a51450",
+  "native_windows_tested": false,
+  "linux_x64": {
+    "hackrf_off_debug": "10/10",
+    "hackrf_off_release": "10/10",
+    "hackrf_on_debug": "11/11",
+    "hackrf_on_release": "11/11"
+  },
+  "clean_checkout_off_release": "10/10",
+  "browser_clean_checkout": "pass",
+  "delayed_poll_before_fix": "reproduced disconnect",
+  "delayed_poll_after_fix": "pass",
+  "doxygen": "1.18.0, warnings as errors, pass",
+  "arm64": "metadata/files/recorder object compilation only",
+  "rf_hardware_tested": false
+}
