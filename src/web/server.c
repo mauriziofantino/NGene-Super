@@ -716,7 +716,8 @@ static int FileInUse(TNgWebServer *server, const char *full, int includeReaders)
         uint64_t revision;
         char directory[512];
         char candidate[512];
-        const char *name = full, *cursor;
+        const char *name = full;
+        const char *cursor;
         NgControlSnapshot(controllers[index], &status);
         for (cursor = full; *cursor != '\0'; ++cursor) {
             if (*cursor == '/' || *cursor == '\\') {
