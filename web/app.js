@@ -36,7 +36,7 @@ const fields = [
 ];
 let values = {}, savedValues = {}, revision = '1', token = '', status = null, capabilities = null;
 let dirty = false, httpBusy = false, pendingCommand = null, socket = null, reconnectTimer = null;
-let waiting = false, lastRequest = 0, lastSample = null, lastMessage = '', lastCommand = '', lastRun = '';
+let waiting = false, lastRequest = 0, lastResponse = -Infinity, lastSample = null, lastMessage = '', lastCommand = '', lastRun = '';
 let paused = false, fileBusy = false, lastFileRefresh = 0;
 let selectedSettings = 'source', deletingFile = false;
 let quitting = false, pendingTelemetry=null, renderPending=false;
@@ -178,7 +178,9 @@ async function command(path) {
   finally { httpBusy = false; controls(); }
 }
 function requestStatus() {
-  if (!connected() || waiting || performance.now()-lastRequest < 34) return;
+  // Space requests after receiving the previous reply, even if that request was delayed.
+  const now = performance.now();
+  if (!connected() || waiting || now-lastRequest < 34 || now-lastResponse < 34) return;
   waiting = true; lastRequest = performance.now(); socket.send(`${selectedSession==='replay'?'replay':'status'}:${diagnosticInterest()}`);
 }
 function renderStatus(next) {
@@ -286,8 +288,8 @@ async function connect() {
     $('platform').textContent = `${capabilities.os} / ${capabilities.architecture}`; $('version').textContent = `v${capabilities.version}`;
     await loadConfig();
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/v1/events?token=${encodeURIComponent(token)}`);
-    socket.onopen = () => { $('connection').textContent = 'Connected'; $('connection').classList.add('online'); waiting = false; log('Connected to NGene.'); requestStatus(); refreshFiles(); };
-    socket.onmessage = event => { waiting=false; try { pendingTelemetry=JSON.parse(event.data); if(!renderPending){renderPending=true;requestAnimationFrame(()=>{renderPending=false;const latest=pendingTelemetry;pendingTelemetry=null;if(latest)renderStatus(latest);});} } catch(error){log(`Invalid telemetry: ${error.message}`,true);} };
+    socket.onopen = () => { lastResponse=-Infinity; $('connection').textContent = 'Connected'; $('connection').classList.add('online'); waiting = false; log('Connected to NGene.'); requestStatus(); refreshFiles(); };
+    socket.onmessage = event => { waiting=false; lastResponse=performance.now(); try { pendingTelemetry=JSON.parse(event.data); if(!renderPending){renderPending=true;requestAnimationFrame(()=>{renderPending=false;const latest=pendingTelemetry;pendingTelemetry=null;if(latest)renderStatus(latest);});} } catch(error){log(`Invalid telemetry: ${error.message}`,true);} };
     socket.onclose = () => { waiting = false; pendingCommand = null; $('connection').textContent = quitting ? 'Service closed' : 'Disconnected'; $('connection').classList.remove('online'); controls(); if (!quitting) { notice('Connection lost. Receiver state is unknown; reconnecting…', true); reconnectTimer = setTimeout(connect, 1500); } };
     socket.onerror = () => socket.close();
   } catch (error) { $('connection').textContent = 'Disconnected'; notice(error.message, true); controls(); reconnectTimer = setTimeout(connect, 2000); }
@@ -490,8 +492,8 @@ async function selectReceiverSession(session) {
   // Disconnect the old poll so an in-flight primary snapshot cannot enter replay history.
   status = null; dirty = false; analysisDirty = false; pendingCommand = null;
   lastRun = null; lastCommand = null; lastMessage = null; lastSample = null;
-  waiting = false; lastRequest = 0; resetAnalysis();
-  if(socket){socket.onclose=null;socket.close();socket=null;}
+  waiting = false; lastRequest = 0; lastResponse = -Infinity; resetAnalysis();
+  if(socket){socket.onclose=null;socket.onmessage=null;socket.onerror=null;socket.close();socket=null;}
   $('events').replaceChildren();
   await connect();
   if (socket && !connected()) await new Promise((resolve, reject) => {

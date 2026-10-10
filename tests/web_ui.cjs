@@ -40,8 +40,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     page.on('request',request=>{if(process.env.NGENE_DEBUG_TEST && request.method()==='POST')console.log('POST',request.url(),request.postData()?.slice(0,120));});
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error' && !message.text().includes('status of 400')) errors.push(message.text()); });
-    let websocketFrames = 0;
-    page.on('websocket', ws => ws.on('framereceived', () => websocketFrames++));
+    let websocketFrames = 0, websocketCloses = 0;
+    page.on('websocket', ws => { ws.on('framereceived', () => websocketFrames++); ws.on('close', () => websocketCloses++); });
     const state = text => page.waitForFunction(value => document.getElementById('runState').textContent === value, text);
     const recording = text => page.waitForFunction(value => document.getElementById('recordBadge').textContent === value, text);
     await page.goto(base);
@@ -192,7 +192,19 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert(slow.skipped>diagnostics.skipped,'Slow GUI must discard obsolete frames');
     assert(slow.history.every(row=>row!==null),'Skipped sequences must not create coloured separator rows');
     await page.locator('#refresh').selectOption('33');
-    await delay(1000);
+    const closesBeforeDelay = websocketCloses;
+    await page.evaluate(() => {
+      const original = WebSocket.prototype.send;
+      let delayed = false;
+      WebSocket.prototype.send = function(data) {
+        if (!delayed && typeof data==='string' && data.startsWith('status')) {
+          delayed = true; setTimeout(() => original.call(this,data),80);
+        } else original.call(this,data);
+      };
+      setTimeout(() => { WebSocket.prototype.send = original; },1000);
+    });
+    await delay(1200);
+    assert.equal(websocketCloses,closesBeforeDelay,'One delayed request must not trigger a burst or disconnect');
     assert.equal(await page.locator('#connection').textContent(),'Connected','30 Hz selection must not cause unanswered requests');
     await page.locator('#showSpectrum').uncheck();await page.locator('#showHistogram').uncheck();
     await delay(2400);
