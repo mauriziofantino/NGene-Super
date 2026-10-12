@@ -13,3 +13,8 @@
 
 /CMakeUserPresets.json
 /vcpkg_installed/
+
+/deps/
+/validation/
+*.cu8
+*.sc16q11

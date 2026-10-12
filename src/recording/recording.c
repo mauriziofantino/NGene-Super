@@ -59,8 +59,10 @@ struct TNgRecorder {
 static int SegmentOpen(TNgRecorder *r)
 {
     char path[640];
-    if (snprintf(path, sizeof(path), "%s_%06" PRIu64 ".cs8", r->config.recordingPrefix,
-                 r->segment) >= (int)sizeof(path)) {
+    if (snprintf(path, sizeof(path), "%s_%06" PRIu64 ".%s", r->config.recordingPrefix, r->segment,
+                 r->capture.format == NG_FORMAT_SC16_Q11 ? "sc16q11"
+                 : r->capture.format == NG_FORMAT_CU8    ? "cu8"
+                                                         : "cs8") >= (int)sizeof(path)) {
         return NgFail(&r->writerError, "Recording path is too long");
     }
     r->raw = NgFopenExclusive(path);
@@ -81,20 +83,29 @@ static int SegmentOpen(TNgRecorder *r)
         if (r->segmentMetadata == NULL) {
             return NgFail(&r->writerError, "Cannot create segment sidecar: %s", strerror(errno));
         }
-        if (fprintf(r->segmentMetadata,
-                    "[capture]\nversion=2\nformat=CI8\nlayout=I,Q interleaved\n"
-                    "component_bits=8\ncomponent_signed=true\ndata_file=%s\n"
-                    "sample_rate_hz=%u\nsample_rate_basis=configured_nominal\n"
-                    "center_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
-                    "\ndigital_if_hz=%" PRId64 "\nbandwidth_hz=%u\nconditioning=%s\n"
-                    "dc_shift=%u\nrecording_point=%s\nhardware_timestamp=false\n"
-                    "host_start_unix_seconds=%" PRId64 "\n",
-                    name, r->capture.sampleRateHz, r->capture.centerFrequencyHz,
-                    r->capture.signalFrequencyHz,
-                    (int64_t)r->capture.signalFrequencyHz - (int64_t)r->capture.centerFrequencyHz,
-                    r->capture.bandwidthHz, r->capture.conditioningName, r->capture.dcShift,
-                    r->capture.preConditioning != 0 ? "pre_conditioning" : "post_conditioning",
-                    (int64_t)time(NULL)) < 0 ||
+        if (fprintf(
+                r->segmentMetadata,
+                "[capture]\nversion=2\nformat=%s\nlayout=I,Q interleaved\n"
+                "component_bits=%u\ncomponent_signed=%s\nbyte_order=little_endian\n"
+                "significant_bits=%u\nfractional_bits=%u\ndata_file=%s\n"
+                "sample_rate_hz=%u\nsample_rate_basis=configured_nominal\n"
+                "center_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
+                "\ndigital_if_hz=%" PRId64 "\nbandwidth_hz=%u\nconditioning=%s\n"
+                "dc_shift=%u\nrecording_point=%s\nhardware_timestamp=%s\n"
+                "host_start_unix_seconds=%" PRId64 "\n",
+                NgSampleFormatName(r->capture.format),
+                r->capture.format == NG_FORMAT_SC16_Q11 ? 16u : 8u,
+                r->capture.format == NG_FORMAT_CU8 ? "false" : "true",
+                r->capture.format == NG_FORMAT_SC16_Q11 ? 12u : 8u,
+                r->capture.format == NG_FORMAT_SC16_Q11 ? 11u : 0u, name, r->capture.sampleRateHz,
+                r->capture.centerFrequencyHz, r->capture.signalFrequencyHz,
+                (int64_t)r->capture.signalFrequencyHz - (int64_t)r->capture.centerFrequencyHz,
+                r->capture.bandwidthHz, r->capture.conditioningName, r->capture.dcShift,
+                r->capture.preConditioning != 0 ? "pre_conditioning" : "post_conditioning",
+                r->capture.format == NG_FORMAT_SC16_Q11 && r->config.frontend == NG_FRONTEND_BLADERF
+                    ? "true"
+                    : "false",
+                (int64_t)time(NULL)) < 0 ||
             fflush(r->segmentMetadata) != 0) {
             return NgFail(&r->writerError, "Cannot write segment metadata");
         }
@@ -167,17 +178,24 @@ static int WriteWindow(TNgRecorder *r, const TNgIqView *view)
         if (r->config.segmentSamples != 0 && r->config.segmentSamples - r->segmentOffset < count) {
             count = (size_t)(r->config.segmentSamples - r->segmentOffset);
         }
-        if (fwrite(view->samples + offset, sizeof(TNgIq8), count, r->raw) != count) {
+        if (fwrite((const unsigned char *)(const void *)view->samples +
+                       offset * NgSampleBytes(view->format),
+                   NgSampleBytes(view->format), count, r->raw) != count) {
             return NgFail(&r->writerError,
                           "I/Q write failed (disk full or I/O error); capture is incomplete");
         }
         if (fprintf(r->index,
-                    "%" PRIu64 ",%" PRIu64 ",%zu,%" PRIu64 ",%" PRIu64 ",%u,%d,%" PRIu64 "\n",
+                    "%" PRIu64 ",%" PRIu64 ",%zu,%" PRIu64 ",%" PRIu64 ",%u,%d,%" PRIu64
+                    ",%d,%" PRIu64 "\n",
                     view->meta.epoch, view->meta.firstSample + offset, count, r->segment,
                     r->segmentOffset,
                     offset == 0 ? view->meta.flags : (view->meta.flags & ~(unsigned)NG_BLOCK_GAP),
                     offset == 0 ? view->meta.missingKnown : 1,
-                    offset == 0 ? view->meta.missingBefore : UINT64_C(0)) < 0) {
+                    offset == 0 ? view->meta.missingBefore : UINT64_C(0),
+                    (view->meta.flags & NG_BLOCK_HARDWARE_TIME) != 0,
+                    (view->meta.flags & NG_BLOCK_HARDWARE_TIME) != 0
+                        ? view->meta.hardwareTimestamp + offset
+                        : 0) < 0) {
             return NgFail(&r->writerError, "Recording index write failed");
         }
         r->segmentOffset += count;
@@ -264,6 +282,7 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
         return NgFail(error, "Cannot initialize recorder counters");
     }
     r->config = *config;
+    r->capture.format = info->format;
     r->capture.sampleRateHz = info->sampleRateHz;
     r->capture.centerFrequencyHz = info->centerFrequencyHz;
     r->capture.signalFrequencyHz =
@@ -287,8 +306,8 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
         free(r);
         return NgFail(error, "Recording path is too long");
     }
-    if (NgRingCreate(config->recordingQueueBlocks, config->windowSamples, &r->queue, error) !=
-        NG_OK) {
+    if (NgRingCreateFormat(config->recordingQueueBlocks, config->windowSamples, info->format,
+                           &r->queue, error) != NG_OK) {
         NgMutexDestroy(&r->statsMutex);
         free(r);
         return NG_ERROR;
@@ -312,24 +331,30 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
         goto failed;
     }
     if (fprintf(r->metadata,
-                "[capture]\nversion=1\nformat=CI8\nlayout=I,Q "
-                "interleaved\ncomponent_bits=8\ncomponent_signed=true\n"
+                "[capture]\nversion=1\nformat=%s\nlayout=I,Q "
+                "interleaved\ncomponent_bits=%u\ncomponent_signed=%s\n"
+                "byte_order=little_endian\nsignificant_bits=%u\nfractional_bits=%u\n"
                 "sample_rate_hz=%u\ncenter_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
                 "\ndigital_if_hz=%" PRId64 "\nbandwidth_hz=%u\n"
-                "source=%s\nclock_domain=%s\nhardware_timestamp=false\n"
+                "source=%s\nclock_domain=%s\nhardware_timestamp=%s\n"
                 "host_start_unix_seconds=%" PRId64 "\nconditioning=%s\nrecording_point=%s\n"
                 "device_identifier=%s\nserial_requested=%s\nlna_gain_db=%u\nvga_gain_db=%u\nrf_amp="
                 "%d\nantenna_power=%d\n"
                 "segment_samples=%" PRIu64 "\n",
-                info->sampleRateHz, info->centerFrequencyHz, info->signalFrequencyHz,
-                info->digitalIfHz, info->bandwidthHz, info->sourceName, info->clockDomain,
-                (int64_t)time(NULL), conditioningName,
+                NgSampleFormatName(info->format), info->format == NG_FORMAT_SC16_Q11 ? 16u : 8u,
+                info->format == NG_FORMAT_CU8 ? "false" : "true",
+                info->format == NG_FORMAT_SC16_Q11 ? 12u : 8u,
+                info->format == NG_FORMAT_SC16_Q11 ? 11u : 0u, info->sampleRateHz,
+                info->centerFrequencyHz, info->signalFrequencyHz, info->digitalIfHz,
+                info->bandwidthHz, info->sourceName, info->clockDomain,
+                config->frontend == NG_FRONTEND_BLADERF ? "true" : "false", (int64_t)time(NULL),
+                conditioningName,
                 (config->recordingPreConditioning) != 0 ? "pre_conditioning" : "post_conditioning",
                 info->deviceIdentifier == NULL ? "unavailable" : info->deviceIdentifier,
                 config->serial, config->lnaGainDb, config->vgaGainDb, config->rfAmp,
                 config->antennaPower, config->segmentSamples) < 0 ||
         fprintf(r->index, "epoch,first_sample,count,segment,segment_offset_samples,flags,missing_"
-                          "known,missing_before\n") < 0 ||
+                          "known,missing_before,hardware_time_valid,hardware_timestamp\n") < 0 ||
         fflush(r->metadata) != 0 || fflush(r->index) != 0) {
         NgFail(error, "Cannot write capture headers");
         goto failed;

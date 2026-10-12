@@ -9,6 +9,8 @@ typedef struct {
     int available;
     /** Metadata schema: 2 for a per-file sidecar, 1 for a historical session sidecar. */
     unsigned version;
+    /** Native IQ representation stored in the raw file. */
+    TNgSampleFormat format;
     /** Sampling frequency in complex pairs per second; recorded nominal clock rate. */
     uint32_t sampleRateHz;
     /** SDR hardware tuning frequency in Hz. */

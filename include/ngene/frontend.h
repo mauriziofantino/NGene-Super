@@ -2,6 +2,15 @@
 #ifndef NGENE_FRONTEND_H
 #define NGENE_FRONTEND_H
 #include "ngene/config.h"
+#include "ngene/ring.h"
+
+/** @brief Availability is independent of a counter's numeric value. */
+typedef enum {
+    NG_DIAGNOSTIC_UNSUPPORTED,
+    NG_DIAGNOSTIC_VALID,
+    NG_DIAGNOSTIC_UNAVAILABLE,
+    NG_DIAGNOSTIC_ERROR
+} TNgDiagnosticState;
 
 /** @brief Transport counters measured in complex pairs. */
 typedef struct {
@@ -13,7 +22,67 @@ typedef struct {
     uint64_t discardedOnStop;
     /** Complex pairs currently awaiting consumption or disk writing. */
     uint64_t queuedSamples;
+    /** Existing ingress-ring counters; all zero and ingressAvailable false for files. */
+    TNgRingStats ingress;
+    /** Nonzero if the source has a measured preallocated ingress ring. */
+    int ingressAvailable;
+    /** Observed vendor/stream errors; excludes software queue overflow. */
+    uint64_t transportErrors;
+    /** Device/library-reported discontinuity events; not necessarily hardware-only loss. */
+    uint64_t deviceGapEvents;
+    /** Exact missing pairs from hardware timestamps when available. */
+    uint64_t deviceMissingSamples;
+    /** Availability of the device continuity counters. */
+    TNgDiagnosticState deviceContinuityState;
+    /** Hardware-only loss cannot be inferred from zero software loss. */
+    TNgDiagnosticState hardwareLossState;
 } TNgFrontendStats;
+
+/** @brief Owned frontend limits; zero bounds denote an unavailable queried capability. */
+typedef struct {
+    /** Native input representation. */
+    TNgSampleFormat format;
+    /** Nominal sample-rate bounds in complex pairs/s. */
+    uint32_t sampleRateMinHz;
+    /** Highest supported nominal complex sample rate. */
+    uint32_t sampleRateMaxHz;
+    /** Hardware tuning range, in Hz. */
+    uint64_t frequencyMinHz;
+    /** Maximum supported hardware tuning frequency in Hz. */
+    uint64_t frequencyMaxHz;
+    /** Copied discrete tuner gains in tenth-dB; RTL-SDR only. */
+    int tunerGains[64];
+    /** Number of populated tunerGains elements. */
+    size_t tunerGainCount;
+    /** bladeRF overall RX gain bounds in dB. */
+    int gainMinDb;
+    /** Maximum overall RX gain in dB. */
+    int gainMaxDb;
+    /** Supported increment of overall RX gain in dB. */
+    int gainStepDb;
+} TNgFrontendCaps;
+
+/** @brief Query compiled support without opening USB hardware.
+ * @param kind Frontend kind, including file replay.
+ * @return Nonzero if the corresponding native driver is compiled in.
+ */
+int NgFrontendAvailable(TNgFrontendKind kind);
+/** @brief Enumerate one native driver without starting reception.
+ * @param kind Compiled native frontend type.
+ * @param output Caller-owned writable text stream.
+ * @param error Optional diagnostic destination.
+ * @return NG_OK for successful enumeration (including zero devices), NG_ERROR otherwise.
+ */
+int NgFrontendList(TNgFrontendKind kind, FILE *output, TNgError *error);
+/** @brief Query device-specific limits outside sample processing.
+ * @details RTL-SDR/bladeRF briefly open the selected device to read its native gain/rate
+ * capabilities, then close it. Call only while stopped; no firmware is loaded or flashed.
+ * @param config Source type and optional serial identifier.
+ * @param caps Writable copied result; no vendor-owned pointers escape.
+ * @param error Optional diagnostic destination.
+ * @return NG_OK on success, NG_ERROR on unsupported driver, device or query failure.
+ */
+int NgFrontendCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgError *error);
 
 /** @brief Native source operations, called by one receiver reader thread.
  * @details An opened instance supports one run. No vendor types escape this interface.

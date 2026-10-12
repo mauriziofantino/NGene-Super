@@ -125,7 +125,8 @@ int NgControlDeleteFile(TNgControl *control, const char *name, uint64_t expected
             return NgFail(error, "Invalid capture filename");
         }
     }
-    if (((n > 4 && strcmp(name + n - 4, ".cs8") == 0) ||
+    if (((n > 4 && (strcmp(name + n - 4, ".cs8") == 0 || strcmp(name + n - 4, ".cu8") == 0)) ||
+         (n > 8 && strcmp(name + n - 8, ".sc16q11") == 0) ||
          (n > 9 && strcmp(name + n - 9, ".meta.ini") == 0) ||
          (n > 10 && strcmp(name + n - 10, ".index.csv") == 0)) == 0) {
         return NgFail(error, "Only capture data, index and metadata files can be deleted");
@@ -296,6 +297,7 @@ static void Started(void *context, const TNgStreamInfo *info)
     NgMutexLock(&c->mutex);
     c->status.actualBandwidthHz = info->bandwidthHz;
     c->status.actualSampleRateHz = info->sampleRateHz;
+    c->status.sampleFormat = info->format;
     c->status.hardwareFrequencyHz = info->centerFrequencyHz;
     c->status.signalFrequencyHz = info->signalFrequencyHz;
     c->status.digitalIfHz = info->digitalIfHz;
@@ -398,15 +400,18 @@ static void ReceiverWorker(void *context)
     memset(&source, 0, sizeof(source));
     memset(&c->finalStats, 0, sizeof(c->finalStats));
     memset(&c->workerError, 0, sizeof(c->workerError));
-    if (c->runConfig.dcRemoval != 0 &&
-        NgConditionerDcCreate(c->runConfig.windowSamples, c->runConfig.dcShift, &conditioner,
-                              &c->workerError) != NG_OK) {
-        c->workerResult = NG_ERROR;
-        NgAtomicSet(&c->done, 1);
-        return;
-    }
     c->workerResult = NgFrontendOpen(&c->runConfig, &source, &c->workerError);
     if (c->workerResult == NG_OK) {
+        if (c->runConfig.dcRemoval != 0 &&
+            NgConditionerDcCreateFormat(c->runConfig.windowSamples, c->runConfig.dcShift,
+                                        source.info.format, &conditioner,
+                                        &c->workerError) != NG_OK) {
+            NgFrontendDestroy(&source);
+            c->workerResult = NG_ERROR;
+            NgAtomicSet(&c->done, 1);
+            return;
+        }
+        (void)NgAnalysisSetSampleRate(c->analysis, source.info.sampleRateHz);
         /* Strings outlive source destruction while recorder headers are written. */
         snprintf(c->source, sizeof(c->source), "%s", source.info.sourceName);
         snprintf(c->clock, sizeof(c->clock), "%s", source.info.clockDomain);

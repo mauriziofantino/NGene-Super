@@ -1,6 +1,6 @@
 /** @file hackrf.c @brief Native libhackrf adapter. No RF transmission or firmware writes. */
 #include "frontend/hackrf_adapter.h"
-#include "ngene/ring.h"
+#include "frontend/ingress.h"
 #include "platform/platform.h"
 #include <hackrf.h>
 #include <inttypes.h>
@@ -21,26 +21,14 @@
 typedef struct {
     /** Native device handle or copied device identity; owned for this instance lifetime. */
     hackrf_device *device;
-    /** Owned preallocated queue containing copies of vendor USB sample buffers. */
-    TNgRing *ingress;
-    /** Copied validated configuration; owned by this instance. */
+    /** Shared existing ingress ring and common integrity counters. */
+    TNgIngress ingress;
+    /** Copied validated startup settings. */
     TNgConfig config;
-    /** Atomic callback failure reason; zero means no asynchronous failure. */
-    TNgAtomicInt callbackError;
-    /** Callback-owned count of received complex pairs. */
-    uint64_t received;
-    /** Callback-owned count of ingress-overflow losses. */
-    uint64_t dropped;
-    /** Protects published counters; acquired once per USB transfer. */
-    TNgMutex countersMutex;
-    /** Tracks mutex initialization for cleanup after partial open failures. */
-    int countersInitialized;
-    /** Synchronized snapshot of callback received pairs. */
-    uint64_t publishedReceived;
-    /** Synchronized snapshot of callback ingress losses. */
-    uint64_t publishedDropped;
     /** Nonzero after transport start and before a successful stop. */
     int started;
+    /** One-run guard: a stopped ring must never be restarted. */
+    int hasRun;
     /** Nonzero when this instance owes a matching hackrf_exit call. */
     int libraryInitialized;
     /** Copied device serial retained after enumeration resources are released. */
@@ -59,67 +47,24 @@ typedef struct {
  *
  * @return Zero for a consumed transfer; -1 to stop reception after invalid data/overflow.
  */
-static int ConsumeTransfer(hackrf_transfer *transfer)
-{
-    TNgHackrfSource *s = transfer->rx_ctx;
-    size_t count;
-    size_t offset = 0;
-    if (transfer->valid_length < 0 || ((transfer->valid_length) & (1)) != 0 ||
-        transfer->valid_length > transfer->buffer_length) {
-        NgAtomicSet(&s->callbackError, 1);
-        return -1;
-    }
-    count = (size_t)transfer->valid_length / sizeof(TNgIq8);
-    if (s->received > UINT64_MAX - count) {
-        NgAtomicSet(&s->callbackError, 1);
-        return -1;
-    }
-    while (offset < count) {
-        TNgIqView view;
-        int result;
-        memset(&view, 0, sizeof(view));
-        view.samples = (const TNgIq8 *)(const void *)(transfer->buffer + offset * sizeof(TNgIq8));
-        view.meta.firstSample = s->received + offset;
-        view.meta.count = count - offset;
-        if (view.meta.count > s->config.windowSamples) {
-            view.meta.count = s->config.windowSamples;
-        }
-        result = NgRingPush(s->ingress, &view);
-        if (result != NG_OK) {
-            s->dropped += view.meta.count;
-            if (result != NG_FULL || s->config.overflowPolicy == NG_OVERFLOW_STOP) {
-                s->dropped += count - offset - view.meta.count;
-                s->received += count;
-                NgAtomicSet(&s->callbackError, 2);
-                return -1;
-            }
-        }
-        offset += view.meta.count;
-    }
-    s->received += count;
-    return 0;
-}
-
-/**
- * @brief Consume one USB transfer and publish counters once.
- *
- * @details
- * Vendor-owned sample storage is copied before callback returns. Counter publication is
- * outside the chunk loop; no retained vendor pointer.
- *
- * @param transfer Borrowed libhackrf transfer with valid source rx_ctx.
- *
- * @return Zero to continue reception; nonzero to stop on callback error.
- */
 static int OnSamples(hackrf_transfer *transfer)
 {
-    TNgHackrfSource *s = transfer->rx_ctx;
-    int result = ConsumeTransfer(transfer);
-    NgMutexLock(&s->countersMutex);
-    s->publishedReceived = s->received;
-    s->publishedDropped = s->dropped;
-    NgMutexUnlock(&s->countersMutex);
-    return result;
+    TNgHackrfSource *source = transfer->rx_ctx;
+    TNgIqView view = {0};
+    if (transfer->valid_length < 0 || (transfer->valid_length & 1) != 0 ||
+        transfer->valid_length > transfer->buffer_length ||
+        (transfer->valid_length != 0 && transfer->buffer == NULL)) {
+        NgIngressTransportError(&source->ingress);
+        return -1;
+    }
+    if (transfer->valid_length == 0) {
+        return 0;
+    }
+    view.samples = (const TNgIq8 *)(const void *)transfer->buffer;
+    view.format = NG_FORMAT_CI8;
+    view.meta.firstSample = source->ingress.received;
+    view.meta.count = (size_t)transfer->valid_length / 2u;
+    return NgIngressSubmit(&source->ingress, &view) == NG_OK ? 0 : -1;
 }
 
 /**
@@ -137,8 +82,14 @@ static int OnSamples(hackrf_transfer *transfer)
 static int Start(void *context, TNgError *error)
 {
     TNgHackrfSource *s = context;
-    int code = hackrf_start_rx(s->device, OnSamples, s);
+    int code;
+    if (s->hasRun != 0) {
+        return NgFail(error, "HackRF instance supports one run");
+    }
+    s->hasRun = 1;
+    code = hackrf_start_rx(s->device, OnSamples, s);
     if (code != HACKRF_SUCCESS) {
+        NgIngressTransportError(&s->ingress);
         return NgFail(error, "hackrf_start_rx: %s", hackrf_error_name((enum hackrf_error)code));
     }
     s->started = 1;
@@ -170,13 +121,14 @@ static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError 
     TNgHackrfSource *s = context;
     int result;
     int failure;
-    failure = NgAtomicGet(&s->callbackError);
+    failure = NgAtomicGet(&s->ingress.failure);
     if (failure != 0) {
         return NgFail(error, "HackRF callback stopped: %s",
                       failure == 2 ? "ingress overflow" : "invalid transfer/index");
     }
-    result = NgRingAcquire(s->ingress, view, timeoutMs);
+    result = NgRingAcquire(s->ingress.ring, view, timeoutMs);
     if (result == NG_TIMEOUT && hackrf_is_streaming(s->device) != HACKRF_TRUE) {
+        NgIngressTransportError(&s->ingress);
         return NgFail(error,
                       "HackRF stream stopped/disconnected; duration of missing RF data is unknown");
     }
@@ -193,7 +145,7 @@ static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError 
  */
 static void Release(void *context)
 {
-    NgRingRelease(((TNgHackrfSource *)context)->ingress);
+    NgRingRelease(((TNgHackrfSource *)context)->ingress.ring);
 }
 
 /**
@@ -216,7 +168,7 @@ static int Stop(void *context, TNgError *error)
         result = hackrf_stop_rx(s->device);
         s->started = 0;
     }
-    NgRingClose(s->ingress);
+    NgRingClose(s->ingress.ring);
     if (result != HACKRF_SUCCESS && result != HACKRF_ERROR_STREAMING_STOPPED) {
         return NgFail(error, "hackrf_stop_rx: %s", hackrf_error_name((enum hackrf_error)result));
     }
@@ -236,12 +188,7 @@ static int Stop(void *context, TNgError *error)
 static void Stats(void *context, TNgFrontendStats *out)
 {
     TNgHackrfSource *s = context;
-    NgMutexLock(&s->countersMutex);
-    out->receivedSamples = s->publishedReceived;
-    out->droppedSamples = s->publishedDropped;
-    NgMutexUnlock(&s->countersMutex);
-    out->queuedSamples = NgRingPendingSamples(s->ingress);
-    out->discardedOnStop = (s->started) != 0 ? 0 : out->queuedSamples;
+    NgIngressSnapshot(&s->ingress, s->started == 0, out);
 }
 
 /**
@@ -268,10 +215,7 @@ static void Destroy(void *context)
     if (s->libraryInitialized != 0) {
         (void)hackrf_exit();
     }
-    NgRingDestroy(s->ingress);
-    if (s->countersInitialized != 0) {
-        NgMutexDestroy(&s->countersMutex);
-    }
+    NgIngressDestroy(&s->ingress);
     free(s);
 }
 
@@ -301,14 +245,9 @@ int NgHackrfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error
     if (s == NULL) {
         return NgFail(error, "Cannot allocate HackRF adapter");
     }
-    if (NgMutexInit(&s->countersMutex) != 0) {
-        free(s);
-        return NgFail(error, "Cannot initialize counters");
-    }
-    s->countersInitialized = 1;
     s->config = *config;
-    if (NgRingCreate(config->ingressBlocks, config->windowSamples, &s->ingress, error) != NG_OK) {
-        Destroy(s);
+    if (NgIngressInit(&s->ingress, config, NG_FORMAT_CI8, error) != NG_OK) {
+        free(s);
         return NG_ERROR;
     }
     code = hackrf_init();

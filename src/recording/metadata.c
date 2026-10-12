@@ -101,6 +101,9 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
     int resultSeen = 0;
     int digitalSeen = 0;
     int64_t digitalIf = 0;
+    unsigned componentBits = 0;
+    int componentSigned = -1;
+    out->format = NG_FORMAT_CI8;
     out->dcShift = NG_DEFAULT_DC_SHIFT;
     while (fgets(line, sizeof(line), file) != NULL) {
         char *text;
@@ -165,8 +168,14 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
         NG_META_INTEGER_KEY("result.gap_events", UINT64_MAX, out->hasGaps = number != 0)
 #undef NG_META_INTEGER_KEY
         if (strcmp(key, "capture.format") == 0) {
-            if (strcmp(value, "CI8") != 0) {
-                return NgFail(error, "Replay supports signed CI8 capture metadata only");
+            if (strcmp(value, "CI8") == 0) {
+                out->format = NG_FORMAT_CI8;
+            } else if (strcmp(value, "CU8") == 0) {
+                out->format = NG_FORMAT_CU8;
+            } else if (strcmp(value, "SC16_Q11") == 0) {
+                out->format = NG_FORMAT_SC16_Q11;
+            } else {
+                return NgFail(error, "Unsupported recorded IQ representation");
             }
             required |= 8u;
         } else if (strcmp(key, "capture.layout") == 0) {
@@ -175,15 +184,27 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
             }
             required |= 16u;
         } else if (strcmp(key, "capture.component_bits") == 0) {
-            if (strcmp(value, "8") != 0) {
-                return NgFail(error, "Replay requires 8-bit components");
+            if (strcmp(value, "8") == 0) {
+                componentBits = 8;
+            } else if (strcmp(value, "16") == 0) {
+                componentBits = 16;
+            } else {
+                return NgFail(error, "Unsupported recorded component width");
             }
             required |= 32u;
         } else if (strcmp(key, "capture.component_signed") == 0) {
-            if (strcmp(value, "true") != 0) {
-                return NgFail(error, "Replay requires signed components");
+            if (strcmp(value, "true") == 0) {
+                componentSigned = 1;
+            } else if (strcmp(value, "false") == 0) {
+                componentSigned = 0;
+            } else {
+                return NgFail(error, "Invalid recorded component signedness");
             }
             required |= 64u;
+        } else if (strcmp(key, "capture.byte_order") == 0) {
+            if (strcmp(value, "little_endian") != 0) {
+                return NgFail(error, "Only little-endian SC16 recordings are supported");
+            }
         } else if (strcmp(key, "capture.recording_point") == 0) {
             if (strcmp(value, "pre_conditioning") != 0 && strcmp(value, "post_conditioning") != 0) {
                 return NgFail(error, "Invalid capture recording point");
@@ -220,6 +241,16 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
             out->complete = strcmp(value, "true") == 0;
             resultSeen = 1;
         }
+    }
+    if (out->format == NG_FORMAT_SC16_Q11) {
+        if (out->samples % 2u != 0) {
+            return NgFail(error, "Incomplete SC16 Q11 sample pair");
+        }
+        out->samples /= 2u;
+    }
+    if (componentBits != (out->format == NG_FORMAT_SC16_Q11 ? 16u : 8u) ||
+        componentSigned != (out->format == NG_FORMAT_CU8 ? 0 : 1)) {
+        return NgFail(error, "Capture format contradicts component width/signedness");
     }
     if (ferror(file) != 0 || required != 511u || out->version == 0 || out->sampleRateHz == 0 ||
         out->dcShift < 4 ||
@@ -259,6 +290,7 @@ int NgReplayInspect(const char *path, TNgCaptureMetadata *metadata, TNgError *er
         return NgFail(error, "Select a nonempty regular file of complete signed CI8 pairs");
     }
     result.samples = bytes / sizeof(TNgIq8);
+    result.format = NG_FORMAT_CI8;
     (void)snprintf(result.metadataPath, sizeof(result.metadataPath), "%s.meta.ini", path);
     if (NgRegularFile(result.metadataPath, &metaBytes) != 0) {
         if (NgPathExists(result.metadataPath) != 0) {
@@ -279,6 +311,16 @@ int NgReplayInspect(const char *path, TNgCaptureMetadata *metadata, TNgError *er
                 return NgFail(error, "Capture sidecar is not a readable regular file");
             }
             result.metadataPath[0] = '\0';
+            n = strlen(path);
+            if (n >= 8 && strcmp(path + n - 8, ".sc16q11") == 0) {
+                result.format = NG_FORMAT_SC16_Q11;
+                if (bytes % 4u != 0) {
+                    return NgFail(error, "Incomplete SC16 Q11 IQ pair");
+                }
+                result.samples = bytes / 4u;
+            } else if (n >= 4 && strcmp(path + n - 4, ".cu8") == 0) {
+                result.format = NG_FORMAT_CU8;
+            }
             *metadata = result;
             return NG_OK;
         }
@@ -320,6 +362,7 @@ int NgReplayConfigure(const char *path, TNgConfig *config, TNgCaptureMetadata *m
     }
     draft = *config;
     draft.frontend = NG_FRONTEND_FILE;
+    draft.replayFormat = found.format;
     (void)snprintf(draft.replayPath, sizeof(draft.replayPath), "%s", path);
     draft.replayStartSample = 0;
     draft.replaySampleLimit = 0;

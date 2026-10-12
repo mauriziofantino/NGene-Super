@@ -6,7 +6,12 @@
 #include <stdio.h>
 
 /** @brief Implemented independent stream source kinds. */
-typedef enum { NG_FRONTEND_FILE, NG_FRONTEND_HACKRF } TNgFrontendKind;
+typedef enum {
+    NG_FRONTEND_FILE,
+    NG_FRONTEND_HACKRF,
+    NG_FRONTEND_RTLSDR,
+    NG_FRONTEND_BLADERF
+} TNgFrontendKind;
 
 /** @brief Mandatory stream-buffer overflow policy. */
 typedef enum { NG_OVERFLOW_STOP, NG_OVERFLOW_DROP_NEWEST } TNgOverflowPolicy;
@@ -37,6 +42,20 @@ typedef struct {
     int rfAmp;
     /** Enable HackRF antenna power when nonzero; explicit user configuration. */
     int antennaPower;
+    /** RTL-SDR manual tuner gain, in tenth-dB; validated against the connected tuner. */
+    int rtlGainTenthsDb;
+    /** Use the RTL-SDR tuner automatic gain mode when nonzero. */
+    int rtlAutoGain;
+    /** RTL-SDR oscillator correction in ppm. */
+    int rtlPpm;
+    /** Explicitly requested RTL-SDR bias-tee state. */
+    int rtlBiasTee;
+    /** bladeRF total RX gain in dB, validated using the device gain range. */
+    int bladeGainDb;
+    /** Explicitly requested bladeRF RX bias-tee state. */
+    int bladeBiasTee;
+    /** IQ representation for replay without a sidecar; metadata overrides this selection. */
+    TNgSampleFormat replayFormat;
     /** Complex pairs in each shared engine window. */
     size_t windowSamples;
     /** Capacity of the bounded device-callback ingress queue, in windows. */

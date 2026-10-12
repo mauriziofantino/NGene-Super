@@ -43,7 +43,8 @@ typedef struct {
  */
 static int RewindRange(TNgFileSource *source)
 {
-    int64_t offset = (int64_t)(source->config.replayStartSample * sizeof(TNgIq8));
+    int64_t offset =
+        (int64_t)(source->config.replayStartSample * NgSampleBytes(source->config.replayFormat));
 #ifdef _WIN32
     return _fseeki64(source->input, offset, SEEK_SET) == 0 ? NG_OK : NG_ERROR;
 #else
@@ -120,11 +121,13 @@ static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError 
             NgSleepMs((unsigned)ceil(wait * NG_MILLISECONDS_PER_SECOND));
         }
     }
-    if (fread(source->buffer, sizeof(TNgIq8), count, source->input) != count) {
+    if (fread(source->buffer, NgSampleBytes(source->config.replayFormat), count, source->input) !=
+        count) {
         return NgFail(error, "Replay read failed or the input file was truncated");
     }
     memset(view, 0, sizeof(*view));
     view->samples = source->buffer;
+    view->format = source->config.replayFormat;
     view->meta.count = count;
     view->meta.firstSample = source->produced;
     view->meta.epoch = source->epoch;
@@ -223,11 +226,11 @@ int NgFileOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
 #else
     bytes = fseeko(source->input, 0, SEEK_END) == 0 ? (int64_t)ftello(source->input) : -1;
 #endif
-    if (bytes <= 0 || (uint64_t)bytes % sizeof(TNgIq8) != 0) {
+    if (bytes <= 0 || (uint64_t)bytes % NgSampleBytes(config->replayFormat) != 0) {
         Destroy(source);
         return NgFail(error, "Replay requires a nonempty file of complete CI8 pairs");
     }
-    samples = (uint64_t)bytes / sizeof(TNgIq8);
+    samples = (uint64_t)bytes / NgSampleBytes(config->replayFormat);
     if (config->replayStartSample >= samples) {
         Destroy(source);
         return NgFail(error, "Replay start offset is outside the file");
@@ -236,7 +239,7 @@ int NgFileOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
     if (config->replaySampleLimit != 0 && config->replaySampleLimit < source->rangeSamples) {
         source->rangeSamples = config->replaySampleLimit;
     }
-    source->buffer = malloc(config->windowSamples * sizeof(TNgIq8));
+    source->buffer = malloc(config->windowSamples * NgSampleBytes(config->replayFormat));
     if (source->buffer == NULL || RewindRange(source) != NG_OK) {
         Destroy(source);
         return NgFail(error, "Cannot allocate or position the replay window");
@@ -250,7 +253,7 @@ int NgFileOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
         config->signalFrequencyHz != 0 ? config->signalFrequencyHz : config->centerFrequencyHz;
     frontend->info.digitalIfHz =
         (int64_t)frontend->info.signalFrequencyHz - (int64_t)frontend->info.centerFrequencyHz;
-    frontend->info.format = NG_FORMAT_CI8;
+    frontend->info.format = config->replayFormat;
     frontend->info.sourceName = "file";
     frontend->info.clockDomain = "file-playback";
     frontend->info.deviceIdentifier = source->config.replayPath;

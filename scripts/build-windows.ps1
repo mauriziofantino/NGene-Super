@@ -4,6 +4,7 @@ param(
     [ValidateSet('Configure', 'Build', 'Test', 'Package')][string]$Action = 'Build',
     [ValidateSet('x64', 'ARM64')][string]$Architecture = 'x64',
     [ValidateSet('ON', 'OFF')][string]$Hackrf = 'ON',
+    [switch]$MultiSdr,
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
     [ValidateRange(1, 64)][int]$Parallel = 2,
     [string]$SourceDirectory = '',
@@ -18,7 +19,8 @@ $SourceDirectory = [IO.Path]::GetFullPath($SourceDirectory)
 . (Join-Path $PSScriptRoot 'windows-tools.ps1')
 $configurePreset = 'windows-msvc-' + $Architecture.ToLowerInvariant()
 $relativeBuild = 'build/msvc-' + $Architecture.ToLowerInvariant()
-if ($Hackrf -eq 'ON') { $configurePreset += '-hackrf'; $relativeBuild += '-hackrf' }
+if ($MultiSdr) { $configurePreset += '-multisdr'; $relativeBuild += '-multisdr' }
+elseif ($Hackrf -eq 'ON') { $configurePreset += '-hackrf'; $relativeBuild += '-hackrf' }
 $buildPreset = $configurePreset
 if ($Configuration -eq 'Debug') { $buildPreset += '-debug' }
 $build = Join-Path $SourceDirectory $relativeBuild

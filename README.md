@@ -1,4 +1,4 @@
-# NGene — kernel e WebGUI · v0.6.3 (candidate)
+# NGene — kernel e WebGUI · v0.6.4 (multi-SDR candidate)
 
 **NGene è la base funzionale e algoritmica di questo progetto.** L'evoluzione resta incrementale: frontend I/Q, conditioning, ring condiviso, scheduler e librerie DSP interne. La [mappa di migrazione](docs/LEGACY_MIGRATION.md) collega questo codice al ricevitore originale.
 
@@ -6,13 +6,28 @@ Il kernel è C11, con FFT su interi e butterfly assembly SSE2/NEON, primitive SI
 
 Questa versione riceve e registra I/Q e produce diagnostica. Acquisizione satelliti, tracking, demodulazione e PVT verranno innestati sulle interfacce già presenti.
 
+## Incremento multi-SDR 0.6.4
+
+Driver nativi HackRF, RTL-SDR e bladeRF RX0; formati CI8, CU8 e SC16 Q11 mantenuti attraverso ingress, conditioning, ring e registrazione. Istogrammi e PSD usano la risoluzione ADC nativa; FFT assembly e SIMD CI8 esistenti restano invariati. Una sola sorgente attiva nella GUI, scelta in Configuration. Contatori comuni di occupazione/high-water/overflow/trasporto, con disponibilità esplicita delle informazioni del device.
+
+[Contratti, procedura di build, limiti e verifica hardware](docs/MULTISDR_064.md) · [Prove realmente eseguite](docs/VALIDATION_064.md).
+
+Per compilare tutti i frontend da PowerShell, senza la matrice di test:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -MultiSdr
+.\build\msvc-x64-multisdr\Release\ngene.exe --web --port 8080
+```
+
+Aprire la cartella del progetto in VS Code e usare il task **NGene: Build multi-SDR (Windows MSVC)** per la stessa compilazione. Il supporto native MSVC rimane configurato; questa iterazione è stata eseguita su Linux, non su Windows o schede fisiche.
+
 ## Consolidamento 0.6
 
 - Manifest **vcpkg con baseline e versioni fissate**, bootstrap automatico se vcpkg non è installato; HackRF `v2026.01.3` scaricata con controllo SHA-256.
 - Windows **MSVC nativo**, x64 e ARM64: nessuna modifica ai file CMake, aggiornamento manuale del baseline o copia manuale delle DLL. [Procedura e validazione Windows](docs/WINDOWS.md).
 - Warning severi esclusivi dei target NGene; dipendenze `SYSTEM`, `/W0` solo sui target esterni. Header HackRF di import generato senza alterare upstream o duplicare `ADD_EXPORTS`.
 - Naming ESA per **funzioni, tipi, tag delle struct, membri e variabili**: `NgRingDestroy`, `TNgRing`, `TNgRecorder`, `statsMutex`, `segmentOffset`. [Convenzioni e verifiche](docs/CODING_STANDARD.md), [migrazione degli identificatori](docs/IDENTIFIER_RENAMES.csv).
-- **Replay di file CI8**, con range, pacing e loop; nessun frontend sintetico. Una sessione replay indipendente può funzionare insieme alla sessione live, senza mescolare campioni, ring o clock.
+- **Replay di file CI8**, con range, pacing e loop; nessun frontend sintetico. La GUI usa una sola sorgente attiva, scelta in Configuration: file oppure frontend live.
 - Doxygen verificato con warning trattati come errori; documentati anche ownership, lifetime e membri delle strutture. [Report dell'incremento](docs/ITERATION_06.md).
 
 Ulteriore consolidamento 0.6.1: selezione corretta del triplet anche con piattaforma Visual Studio composta e host ARM64, riparazione del cache manifest, header import anche per SDK installati, controllo clang-tidy su produzione/test e verifica del vero archivio CPack. [Report finale](docs/ITERATION_06_COMPLETION.md).

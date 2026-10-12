@@ -79,7 +79,7 @@ int main(void)
     TNgError e = {{0}};
     size_t i;
     uint64_t sum;
-    TNgIqView v = {data, {0}};
+    TNgIqView v = {data, {0}, NG_FORMAT_CI8};
     NgAnalysisDefaults(&c);
     c.fftSize = 1024;
     c.window = NG_WINDOW_RECT;

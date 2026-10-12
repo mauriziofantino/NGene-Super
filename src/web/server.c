@@ -49,17 +49,15 @@
         continue;                                                                                  \
     }
 
-/** @brief Local HTTP service with independent primary and replay controllers. */
+/** @brief Local HTTP service with one selected file or native SDR source. */
 typedef struct {
-    /** Owned primary controller, independent of replayControl. */
+    /** Owned controller for the single configured file or SDR input. */
     TNgControl *control;
-    /** Owned file-replay controller with its own engine, clock and rings. */
-    TNgControl *replayControl;
     /** Owned CivetWeb listener stopped before controller destruction. */
     struct mg_context *http;
     /** Serializes creation/copy of request-local large status JSON snapshots. */
     TNgMutex jsonMutex;
-    /** Serializes start/stop requests with cross-session file deletion checks. */
+    /** Serializes start/stop requests with file ownership checks and device capability queries. */
     TNgMutex commandMutex;
     /** Atomic shutdown request polled by the service owner. */
     TNgAtomicInt quit;
@@ -320,6 +318,9 @@ static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s)
     cJSON_AddItemToObject(o, "stats_i", ComponentJson(&s->statsI));
     cJSON_AddItemToObject(o, "stats_q", ComponentJson(&s->statsQ));
     Number(o, "dc_magnitude", s->dcMagnitude);
+    Number(o, "histogram_min", s->histogramMin);
+    Number(o, "histogram_max", s->histogramMax);
+    String(o, "sample_format", NgSampleFormatName(s->sampleFormat));
     String(o, "sample_backend", NgSampleOpsBackend());
     Counter(o, "revision", s->revision);
     Counter(o, "epoch", s->epoch);
@@ -477,7 +478,8 @@ static cJSON *StatusJson(TNgControl *control)
     Number(object, "signal_frequency_hz", (double)status.signalFrequencyHz);
     Number(object, "digital_if_hz", (double)status.digitalIfHz);
     Number(object, "actual_sample_rate_hz", status.actualSampleRateHz);
-    String(object, "sample_rate_basis", "configured_nominal");
+    String(object, "sample_format", NgSampleFormatName(status.sampleFormat));
+    String(object, "sample_rate_basis", "device_reported_nominal");
     String(object, "state", states[status.state]);
     String(object, "recording_state", recordStates[status.recordingState]);
     String(object, "message", status.message);
@@ -499,6 +501,34 @@ static cJSON *StatusJson(TNgControl *control)
     Counter(object, "input_queued_samples", status.receiver.frontend.queuedSamples);
     Counter(object, "input_discarded_on_stop", status.receiver.frontend.discardedOnStop);
     Counter(object, "ring_high_water", status.receiver.ringHighWater);
+    cJSON_AddBoolToObject(object, "ingress_available", status.receiver.frontend.ingressAvailable);
+    Counter(object, "ingress_capacity_blocks", status.receiver.frontend.ingress.capacityBlocks);
+    Counter(object, "ingress_block_samples", status.receiver.frontend.ingress.blockSamples);
+    Counter(object, "ingress_used_blocks", status.receiver.frontend.ingress.usedBlocks);
+    Counter(object, "ingress_high_water_blocks", status.receiver.frontend.ingress.highWaterBlocks);
+    Counter(object, "ingress_accepted_samples", status.receiver.frontend.ingress.acceptedSamples);
+    Counter(object, "ingress_consumed_samples", status.receiver.frontend.ingress.consumedSamples);
+    Counter(object, "ingress_overflow_events", status.receiver.frontend.ingress.overflowEvents);
+    Number(object, "ingress_occupancy_percent", status.receiver.frontend.ingress.occupancyPercent);
+    Number(object, "ingress_available_ms", status.receiver.frontend.ingress.availableMs);
+    Counter(object, "transport_errors", status.receiver.frontend.transportErrors);
+    String(object, "hardware_loss_state",
+           status.receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_VALID   ? "valid"
+           : status.receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_ERROR ? "error"
+           : status.receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_UNAVAILABLE
+               ? "unavailable"
+               : "unsupported");
+    cJSON_AddNullToObject(object, "hardware_lost_samples");
+    String(object, "device_continuity_state",
+           status.receiver.frontend.deviceContinuityState == NG_DIAGNOSTIC_VALID ? "valid"
+                                                                                 : "unsupported");
+    if (status.receiver.frontend.deviceContinuityState == NG_DIAGNOSTIC_VALID) {
+        Counter(object, "device_gap_events", status.receiver.frontend.deviceGapEvents);
+        Counter(object, "device_missing_samples", status.receiver.frontend.deviceMissingSamples);
+    } else {
+        cJSON_AddNullToObject(object, "device_gap_events");
+        cJSON_AddNullToObject(object, "device_missing_samples");
+    }
     Counter(object, "written_samples", status.totalWrittenSamples);
     Counter(object, "session_written_samples", status.recording.samples);
     Counter(object, "recording_queued_samples", status.recording.queuedSamples);
@@ -630,7 +660,8 @@ static int FileNameValid(const char *name)
             return 0;
         }
     }
-    return (n > 4 && strcmp(name + n - 4, ".cs8") == 0) ||
+    return (n > 4 && (strcmp(name + n - 4, ".cs8") == 0 || strcmp(name + n - 4, ".cu8") == 0)) ||
+           (n > 8 && strcmp(name + n - 8, ".sc16q11") == 0) ||
            (n > 9 && strcmp(name + n - 9, ".meta.ini") == 0) ||
            (n > 10 && strcmp(name + n - 10, ".index.csv") == 0);
 }
@@ -699,18 +730,18 @@ static void AddFile(void *context, const char *name, uint64_t bytes)
     cJSON_AddItemToArray(list->files, entry);
 }
 
-/** @brief Check an absolute file against both active capture/replay sessions.
+/** @brief Check an absolute file against the active capture or selected replay input.
  * @details Uses copied status/profile snapshots; no sample-thread work is introduced.
- * @param server Live server containing both independent controllers.
+ * @param server Live server containing the single controller.
  * @param full Resolved absolute candidate path.
  * @param includeReaders Nonzero also protects inputs of running replay sessions.
  * @return Nonzero if a receiver currently owns the file for writing or selected reading.
  */
 static int FileInUse(TNgWebServer *server, const char *full, int includeReaders)
 {
-    TNgControl *controllers[2] = {server->control, server->replayControl};
+    TNgControl *controllers[1] = {server->control};
     size_t index;
-    for (index = 0; index < 2; ++index) {
+    for (index = 0; index < 1; ++index) {
         TNgControlStatus status;
         TNgConfig config = {0};
         uint64_t revision;
@@ -821,8 +852,11 @@ static void AddPickerEntry(void *context, const char *name, uint64_t bytes, int 
     char absolute[512];
     size_t length = strlen(name);
     int usable = 1;
-    if (directory == 0 && (length < 4 || strcmp(name + length - 4, ".cs8") != 0 ||
-                           NameContains(name, list->nameFilter) == 0)) {
+    if (directory == 0 &&
+        (length < 4 ||
+         (strcmp(name + length - 4, ".cs8") != 0 && strcmp(name + length - 4, ".cu8") != 0 &&
+          (length < 8 || strcmp(name + length - 8, ".sc16q11") != 0)) ||
+         NameContains(name, list->nameFilter) == 0)) {
         return;
     }
     if (list->count == 500) {
@@ -830,10 +864,12 @@ static void AddPickerEntry(void *context, const char *name, uint64_t bytes, int 
         return;
     }
     if (directory == 0) {
-        usable = bytes > 0 && bytes % sizeof(TNgIq8) == 0 &&
-                 snprintf(full, sizeof(full), "%s/%s", list->directory, name) < (int)sizeof(full) &&
-                 NgFileAbsolute(full, absolute, sizeof(absolute)) == 0 &&
-                 FileInUse(list->server, absolute, 0) == 0;
+        usable =
+            bytes > 0 &&
+            bytes % ((length >= 8 && strcmp(name + length - 8, ".sc16q11") == 0) ? 4u : 2u) == 0 &&
+            snprintf(full, sizeof(full), "%s/%s", list->directory, name) < (int)sizeof(full) &&
+            NgFileAbsolute(full, absolute, sizeof(absolute)) == 0 &&
+            FileInUse(list->server, absolute, 0) == 0;
     }
     entry = cJSON_CreateObject();
     String(entry, "name", name);
@@ -956,6 +992,7 @@ static int PickerInspect(TNgWebServer *server, TNgControl *control,
     reply = cJSON_CreateObject();
     String(reply, "ini", ini);
     String(reply, "path", full);
+    String(reply, "format", NgSampleFormatName(metadata.format));
     Counter(reply, "revision", revision);
     Counter(reply, "samples", metadata.samples);
     cJSON_AddBoolToObject(reply, "metadata_available", metadata.available);
@@ -987,16 +1024,10 @@ static int Handle(struct mg_connection *connection, void *context)
     const struct mg_request_info *request = mg_get_request_info(connection);
     const char *path = request->local_uri;
     TNgControl *control = server->control;
-    char scopedPath[1024];
-    int replay = 0;
     if (strncmp(path, "/api/v1/replay/", 15) == 0) {
-        if (snprintf(scopedPath, sizeof(scopedPath), "/api/v1/%s", path + 15) >=
-            (int)sizeof(scopedPath)) {
-            return Failure(connection, 400, "Replay endpoint is too long");
-        }
-        path = scopedPath;
-        control = server->replayControl;
-        replay = 1;
+        return Failure(
+            connection, 410,
+            "Independent replay sessions were removed; configure the receiver source as file");
     }
     cJSON *body = NULL;
     cJSON *reply;
@@ -1027,6 +1058,9 @@ static int Handle(struct mg_connection *connection, void *context)
             String(reply, "os", NGENE_OS);
             String(reply, "architecture", NGENE_ARCH);
             cJSON_AddBoolToObject(reply, "hackrf", NgHackrfAvailable());
+            cJSON_AddBoolToObject(reply, "rtlsdr", NgFrontendAvailable(NG_FRONTEND_RTLSDR));
+            cJSON_AddBoolToObject(reply, "bladerf", NgFrontendAvailable(NG_FRONTEND_BLADERF));
+            cJSON_AddBoolToObject(reply, "single_source", 1);
             cJSON_AddBoolToObject(reply, "periodogram", 1);
             String(reply, "fft_backend", NgFftBackend());
             return JsonReply(connection, 200, reply);
@@ -1136,7 +1170,53 @@ static int Handle(struct mg_connection *connection, void *context)
             }
         }
     }
-    if (strcmp(path, "/api/v1/replay-files/browse") == 0) {
+    if (strcmp(path, "/api/v1/frontend/capabilities") == 0) {
+        TNgControlStatus status;
+        TNgConfig config = {0};
+        TNgFrontendCaps caps = {0};
+        TNgError error = {{0}};
+        cJSON *ini = cJSON_GetObjectItemCaseSensitive(body, "ini");
+        FILE *input = NULL;
+        NgMutexLock(&server->commandMutex);
+        NgControlSnapshot(control, &status);
+        if (status.state != NG_STOPPED && status.state != NG_FAILED) {
+            code = Failure(connection, 409, "Stop the receiver before querying device limits");
+        } else if (!cJSON_IsString(ini) || (input = tmpfile()) == NULL) {
+            code = Failure(connection, 400, "Expected a source profile in ini");
+        } else {
+            int result = NG_ERROR;
+            if (fwrite(ini->valuestring, 1, strlen(ini->valuestring), input) ==
+                    strlen(ini->valuestring) &&
+                fseek(input, 0, SEEK_SET) == 0) {
+                result = NgConfigRead(input, &config, &error);
+            }
+            fclose(input);
+            if (result == NG_OK) {
+                result = NgFrontendCapabilities(&config, &caps, &error);
+            }
+            if (result != NG_OK) {
+                code = Failure(connection, 400, error.message);
+            } else {
+                size_t index;
+                cJSON *gains = cJSON_CreateArray();
+                reply = cJSON_CreateObject();
+                String(reply, "format", NgSampleFormatName(caps.format));
+                Number(reply, "sample_rate_min_hz", caps.sampleRateMinHz);
+                Number(reply, "sample_rate_max_hz", caps.sampleRateMaxHz);
+                Number(reply, "frequency_min_hz", (double)caps.frequencyMinHz);
+                Number(reply, "frequency_max_hz", (double)caps.frequencyMaxHz);
+                Number(reply, "gain_min_db", caps.gainMinDb);
+                Number(reply, "gain_max_db", caps.gainMaxDb);
+                Number(reply, "gain_step_db", caps.gainStepDb);
+                for (index = 0; index < caps.tunerGainCount; ++index) {
+                    cJSON_AddItemToArray(gains, cJSON_CreateNumber(caps.tunerGains[index]));
+                }
+                cJSON_AddItemToObject(reply, "tuner_gains_tenths_db", gains);
+                code = JsonReply(connection, 200, reply);
+            }
+        }
+        NgMutexUnlock(&server->commandMutex);
+    } else if (strcmp(path, "/api/v1/replay-files/browse") == 0) {
         code = PickerBrowse(server, connection, body);
     } else if (strcmp(path, "/api/v1/replay-files/inspect") == 0) {
         code = PickerInspect(server, control, connection, body);
@@ -1212,9 +1292,7 @@ static int Handle(struct mg_connection *connection, void *context)
                 result = NgConfigRead(file, &config, &error);
             }
             fclose(file);
-            if (result == NG_OK && replay != 0 && config.frontend != NG_FRONTEND_FILE) {
-                result = NgFail(&error, "Replay session accepts recorded files only");
-            }
+
             if (result == NG_OK) {
                 result = NgControlValidate(&config, &error);
             }
@@ -1364,8 +1442,7 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
     if (((bits) & (15)) != 1) {
         return 1;
     }
-    if (((bits) & (128)) == 0 || (length != 6 && length != 8) ||
-        (memcmp(data, "status", 6) != 0 && memcmp(data, "replay", 6) != 0) ||
+    if (((bits) & (128)) == 0 || (length != 6 && length != 8) || memcmp(data, "status", 6) != 0 ||
         (length == 8 && (data[6] != ':' || data[7] < '0' || data[7] > '3'))) {
         return 0;
     }
@@ -1380,7 +1457,7 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
         }
         session->lastReply = now;
     }
-    TNgControl *control = memcmp(data, "replay", 6) == 0 ? server->replayControl : server->control;
+    TNgControl *control = server->control;
     NgControlDiagnosticInterest(control, length == 8 ? (unsigned)(data[7] - '0') : 3u);
     object = StatusJson(control);
     text = (object) != NULL ? cJSON_PrintUnformatted(object) : NULL;
@@ -1452,51 +1529,12 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
         NgMutexDestroy(&server.jsonMutex);
         return NG_ERROR;
     }
-    {
-        TNgConfig replayConfig = *config;
-        char replayDirectory[1024];
-        char replayProfile[1200];
-        FILE *saved;
-        replayConfig.frontend = NG_FRONTEND_FILE;
-        replayConfig.runSeconds = 0;
-        replayConfig.recordingEnabled = 0;
-        replayConfig.recordingDirectory[0] = '\0';
-        replayConfig.replayPath[0] = '\0';
-        if (snprintf(replayDirectory, sizeof(replayDirectory), "%s/replay", outputDirectory) >=
-                (int)sizeof(replayDirectory) ||
-            snprintf(replayProfile, sizeof(replayProfile), "%s/receiver.ini", replayDirectory) >=
-                (int)sizeof(replayProfile)) {
-            NgControlDestroy(server.control);
-            NgMutexDestroy(&server.commandMutex);
-            NgMutexDestroy(&server.jsonMutex);
-            return NgFail(error, "Replay profile path is too long");
-        }
-        saved = fopen(replayProfile, "rb");
-        if (saved != NULL) {
-            int result = NgConfigRead(saved, &replayConfig, error);
-            if (fclose(saved) != 0 || result != NG_OK ||
-                replayConfig.frontend != NG_FRONTEND_FILE) {
-                NgControlDestroy(server.control);
-                NgMutexDestroy(&server.commandMutex);
-                NgMutexDestroy(&server.jsonMutex);
-                return NgFail(error, "Cannot load the replay profile");
-            }
-        }
-        if (NgControlCreate(&replayConfig, replayDirectory, &server.replayControl, error) !=
-            NG_OK) {
-            NgControlDestroy(server.control);
-            NgMutexDestroy(&server.commandMutex);
-            NgMutexDestroy(&server.jsonMutex);
-            return NG_ERROR;
-        }
-    }
     snprintf(server.host, sizeof(server.host), "127.0.0.1:%u", port);
     snprintf(server.localhost, sizeof(server.localhost), "localhost:%u", port);
     snprintf(listening, sizeof(listening), "127.0.0.1:%u", port);
     mg_init_library(0);
     server.http = mg_start(NULL, &server, options);
     if (server.http == NULL) {
-        NgControlDestroy(server.replayControl);
         NgControlDestroy(server.control);
         NgMutexDestroy(&server.commandMutex);
         NgMutexDestroy(&server.jsonMutex);
@@ -1515,7 +1553,6 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     }
     NgAtomicSet(&server.quit, 1);
     mg_stop(server.http);
-    NgControlDestroy(server.replayControl);
     NgControlDestroy(server.control);
     mg_exit_library();
     NgMutexDestroy(&server.commandMutex);

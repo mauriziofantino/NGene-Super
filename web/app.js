@@ -1,19 +1,27 @@
-let selectedSession = 'primary';
-const sessionPrefix = () => selectedSession === 'replay' ? 'replay/' : '';
+const selectedSession = 'receiver';
+const sessionPrefix = () => '';
+let deviceCaps = null;
 /* NGene browser UI: presentation and commands only. No receiver/DSP implementation. */
 const $ = id => document.getElementById(id);
 const fields = [
-  ['Frontend', 'frontend.type', 'Source', 'select', ['file', 'hackrf']],
-  ['Frontend', 'frontend.serial', 'Device serial', 'text', null, '', 'Optional when exactly one HackRF is connected'],
+  ['Frontend', 'frontend.type', 'Source', 'select', ['file', 'hackrf', 'rtlsdr', 'bladerf']],
+  ['Frontend', 'frontend.serial', 'Device serial', 'text', null, '', 'Empty selects the only connected device of the selected type'],
   ['Frontend', 'frontend.sample_rate_hz', 'Sample rate', 'number', null, 'pairs/s'],
   ['Frontend', 'frontend.center_frequency_hz', 'SDR hardware tuning frequency', 'number', null, 'Hz'],
   ['Frontend', 'frontend.signal_frequency_hz', 'Signal centre frequency', 'number', null, 'Hz', '0 = follow hardware; digital IF = signal − hardware'],
-  ['HackRF', 'hackrf.bandwidth_hz', 'Analogue filter', 'number', null, 'Hz', '0 = automatic supported filter'],
+  ['Frontend', 'hackrf.bandwidth_hz', 'Analogue filter', 'number', null, 'Hz', '0 = automatic supported filter'],
   ['HackRF', 'hackrf.lna_gain_db', 'LNA gain', 'select', [0,8,16,24,32,40], 'dB · step 8'],
   ['HackRF', 'hackrf.vga_gain_db', 'VGA gain', 'select', Array.from({length:32},(_,k)=>k*2), 'dB · step 2'],
   ['HackRF', 'hackrf.rf_amp', 'RF amplifier', 'select', ['false', 'true']],
   ['HackRF', 'hackrf.antenna_power', 'Antenna power', 'select', ['false', 'true']],
-  ['File replay', 'replay.path', 'Input file on receiver computer', 'text', null, '', 'Signed interleaved I/Q (.cs8); configure sample rate and RF metadata above'],
+  ['RTL-SDR', 'rtlsdr.auto_gain', 'Automatic tuner gain', 'select', ['true','false']],
+  ['RTL-SDR', 'rtlsdr.gain_tenths_db', 'Tuner gain', 'select', [], '0.1 dB', 'Query device limits to load this tuner’s exact supported gains'],
+  ['RTL-SDR', 'rtlsdr.ppm', 'Frequency correction', 'number', null, 'ppm'],
+  ['RTL-SDR', 'rtlsdr.bias_tee', 'Bias tee', 'select', ['false','true']],
+  ['bladeRF', 'bladerf.gain_db', 'RX gain', 'number', null, 'dB', 'Query device limits for frequency-dependent min, max and step'],
+  ['bladeRF', 'bladerf.bias_tee', 'Bias tee', 'select', ['false','true']],
+  ['File replay', 'replay.format', 'Native IQ format', 'select', ['CI8','CU8','SC16_Q11']],
+  ['File replay', 'replay.path', 'Input file on receiver computer', 'text', null, '', 'Native I/Q (.cs8, .cu8, .sc16q11); sidecar loads format, rate and tuning'],
   ['File replay', 'replay.start_sample', 'Start sample pair', 'number', null, 'pairs'],
   ['File replay', 'replay.sample_limit', 'Range length', 'number', null, 'pairs', '0 = remainder of file'],
   ['File replay', 'replay.realtime', 'Real-time pacing', 'select', ['true', 'false']],
@@ -96,7 +104,7 @@ function selectSettings(topic) {
   document.querySelectorAll('[data-settings]').forEach(button => { const active = button.dataset.settings === topic; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
   const [title, hint, mode] = settingsTopics[topic]; $('settingsTitle').textContent = title; $('settingsHint').textContent = hint; $('settingsMode').textContent = mode;
   $('configForm').classList.toggle('hidden', !['source', 'receiver', 'recording'].includes(topic));
-  const groups = {source: ['Frontend', 'HackRF', 'File replay'], receiver: ['Receiver', 'Buffers'], recording: ['Recording']};
+  const groups = {source: ['Frontend', 'HackRF', 'RTL-SDR', 'bladeRF', 'File replay'], receiver: ['Receiver', 'Buffers'], recording: ['Recording']};
   document.querySelectorAll('#fields [data-group]').forEach(group => group.classList.toggle('topic-hidden', !(groups[topic] || []).includes(group.dataset.group)));
   $('sourcePresets').classList.toggle('hidden', topic !== 'source');
   for (const [id, key] of [['analysisSettings', 'analysis'], ['displaySettings', 'display'], ['profileSettings', 'profile']]) $(id).classList.toggle('hidden', topic !== key);
@@ -120,29 +128,44 @@ function buildForm() {
     const wrapper = document.createElement('label'), title = document.createElement('span'), units = document.createElement('span');
     wrapper.className = `field${['frontend.serial', 'frontend.center_frequency_hz', 'recording.prefix', 'recording.directory', 'recording.point', 'recording.enabled', 'buffer.overflow_policy', 'replay.path'].includes(key) ? ' full' : ''}`;
     title.textContent = label; units.className = 'unit'; units.textContent = unit || ''; title.append(units); wrapper.append(title);
-    const input = document.createElement(type === 'select' ? 'select' : 'input'); input.name = key;
-    if (type === 'select') for (const option of options) { const element = document.createElement('option'); element.value = option; element.textContent = option === 'true' ? 'On' : option === 'false' ? 'Off' : option === 'record' ? 'Record only' : option === 'capture' ? 'Capture' : option; input.append(element); }
-    else { input.type = type; if(type==='number'){input.step='any';input.min='0'; if(key==='conditioning.dc_shift'){input.min='4';input.max='24';input.step='1';} if(key==='frontend.sample_rate_hz'){input.min='1';input.max='20000000';input.step='1';} if(key.endsWith('frequency_hz')){input.max='6000000000';input.step='1';} } input.inputMode = type === 'number' ? 'decimal' : 'text'; input.autocomplete = 'off'; }
+    const nativeBandwidth = key === 'hackrf.bandwidth_hz' && values['frontend.type'] !== 'hackrf';
+    const input = document.createElement(type === 'select' && !nativeBandwidth ? 'select' : 'input'); input.name = key;
+    if (type === 'select' && !nativeBandwidth) for (const option of (key === 'rtlsdr.gain_tenths_db' ? (deviceCaps?.tuner_gains_tenths_db || [values[key] || '0']) : options)) { const element = document.createElement('option'); element.value = option; element.textContent = option === 'true' ? 'On' : option === 'false' ? 'Off' : option === 'record' ? 'Record only' : option === 'capture' ? 'Capture' : option; input.append(element); }
+    else { input.type = nativeBandwidth ? 'number' : type; if(input.type==='number'){input.step='any';input.min='0'; if(key==='conditioning.dc_shift'){input.min='4';input.max='24';input.step='1';} if(key==='frontend.sample_rate_hz'){input.min='1';input.max='20000000';input.step='1';} if(key.endsWith('frequency_hz')){input.max='6000000000';input.step='1';} } input.inputMode = type === 'number' ? 'decimal' : 'text'; input.autocomplete = 'off'; }
     input.value = values[key] ?? ''; input.addEventListener('input', () => { values[key] = input.value.trim(); dirtyState(true); updateSourceFields(); });
     wrapper.append(input); if (hint) { const small = document.createElement('small'); small.textContent = hint; wrapper.append(small); } grid.append(wrapper);
   }
   selectSettings(selectedSettings); controls();
 }
 function updateSourceFields() {
-  const rate=document.querySelector('[name="frontend.sample_rate_hz"]');if(rate)rate.min=values['frontend.type']==='hackrf'?2000000:1;
+  const source = values['frontend.type'];
+  const caps = deviceCaps && deviceCaps.source === source && deviceCaps.serial === (values['frontend.serial'] || '') && deviceCaps.tuning === values['frontend.center_frequency_hz'] ? deviceCaps : null;
+  if (!caps) deviceCaps = null;
+  const rate=document.querySelector('[name="frontend.sample_rate_hz"]');
+  if(rate) { rate.min=caps?.sample_rate_min_hz || (source==='hackrf'?2000000:source==='rtlsdr'?225001:1); rate.max=caps?.sample_rate_max_hz || (source==='hackrf'?20000000:source==='rtlsdr'?3200000:61440000); }
+  const gain=document.querySelector('[name="bladerf.gain_db"]');
+  if(gain){gain.min=caps?.gain_min_db??-100;gain.max=caps?.gain_max_db??100;gain.step=caps?.gain_step_db||1;gain.disabled=!editable()||source==='bladerf'&&!caps;}
+  const rtlGain=document.querySelector('[name="rtlsdr.gain_tenths_db"]');
+  if(rtlGain)rtlGain.disabled=!editable()||values['rtlsdr.auto_gain']!=='false'||!caps;
+  const ppm=document.querySelector('[name="rtlsdr.ppm"]');if(ppm){ppm.min=-1000;ppm.max=1000;ppm.step=1;}
+  const tuning=document.querySelector('[name="frontend.center_frequency_hz"]');
+  if(tuning){tuning.min=caps?.frequency_min_hz||0;tuning.max=caps?.frequency_max_hz||(source==='rtlsdr'?4294967295:6000000000);}
   for (const group of document.querySelectorAll('[data-group]')) {
-    const hide = group.dataset.group === 'HackRF' && values['frontend.type'] !== 'hackrf' || group.dataset.group === 'File replay' && values['frontend.type'] !== 'file';
-    group.classList.toggle('hidden', hide);
+    const kind = {'HackRF':'hackrf','RTL-SDR':'rtlsdr','bladeRF':'bladerf','File replay':'file'}[group.dataset.group];
+    group.classList.toggle('hidden', Boolean(kind && source !== kind));
   }
 }
+
 function controls() {
-  $('receiverSession').disabled = !connected() || httpBusy || pendingCommand !== null || dirty || analysisDirty || fileBusy;
   const ready = editable(), running = connected() && status?.state === 'running';
   const commandPending = httpBusy || pendingCommand !== null;
   for (const field of $('configForm').elements) field.disabled = !ready;
-  for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
-  if (selectedSession==='replay' || (capabilities && !capabilities.hackrf)) $('hackrfPreset').disabled = true;
-  const sourceSelect=document.querySelector('[name="frontend.type"]'); if(sourceSelect){for(const option of sourceSelect.options)option.disabled=option.value==='hackrf' && (selectedSession==='replay'||!capabilities?.hackrf);}
+  for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
+  if (capabilities && !capabilities.hackrf) $('hackrfPreset').disabled = true;
+  $('rtlPreset').disabled = !ready || !capabilities?.rtlsdr;
+  $('bladePreset').disabled = !ready || !capabilities?.bladerf;
+  updateSourceFields();
+  const sourceSelect=document.querySelector('[name="frontend.type"]'); if(sourceSelect){for(const option of sourceSelect.options)option.disabled=option.value!=='file' && !capabilities?.[option.value];}
   $('validate').disabled = !connected() || httpBusy;
   $('start').disabled = !ready || dirty || (values['frontend.type']==='file' && !values['replay.path']);
   $('stop').disabled = !connected() || !['running', 'starting'].includes(status?.state) || httpBusy;
@@ -181,7 +204,7 @@ function requestStatus() {
   // Space requests after receiving the previous reply, even if that request was delayed.
   const now = performance.now();
   if (!connected() || waiting || now-lastRequest < 34 || now-lastResponse < 34) return;
-  waiting = true; lastRequest = performance.now(); socket.send(`${selectedSession==='replay'?'replay':'status'}:${diagnosticInterest()}`);
+  waiting = true; lastRequest = performance.now(); socket.send(`status:${diagnosticInterest()}`);
 }
 function renderStatus(next) {
   status = next;
@@ -198,14 +221,17 @@ function renderStatus(next) {
   if (!lastSample || next.wall_seconds !== lastSample.time) lastSample = {samples:BigInt(next.received_samples), time:next.wall_seconds};
   $('rate').textContent = next.state !== 'running' ? '—' : rate === null ? $('rate').textContent : `${(Math.max(0, rate) / 1e6).toFixed(3)} Msps`;
   $('elapsed').textContent = `Elapsed ${duration(next.wall_seconds)}`;
-  $('written').textContent = bytes(BigInt(next.written_samples) * 2n);
+  $('written').textContent = bytes(BigInt(next.written_samples) * (next.sample_format==='SC16_Q11'?4n:2n));
   $('recordState').textContent = next.recording_state === 'recording' ? 'Recording active' : `Recording ${next.recording_state}`;
   $('dropped').textContent = pairs(next.known_dropped_samples); $('gaps').textContent = `${pairs(next.gap_events)} gap events`;
   $('inputQueue').textContent = `${pairs(next.input_queued_samples)} pairs`; $('recordQueue').textContent = `${pairs(next.recording_queued_samples)} pairs`;
-  $('inputProgress').value = 100 * Number(next.input_queued_samples) / (Number(savedValues['buffer.ingress_blocks']) * Number(savedValues['buffer.window_samples']) || 1);
+  $('inputProgress').value = next.ingress_available ? Number(next.ingress_occupancy_percent) : 0;
   $('recordProgress').value = 100 * Number(next.recording_queued_samples) / (Number(savedValues['recording.queue_blocks']) * Number(savedValues['buffer.window_samples']) || 1);
   $('bandwidth').textContent = next.actual_bandwidth_hz ? `${(next.actual_bandwidth_hz / 1e6).toFixed(2)} MHz` : 'Not applicable / not started';
   $('ringHigh').textContent = `${next.ring_high_water} blocks`; $('discarded').textContent = pairs(next.input_discarded_on_stop);
+  $('ingressStatus').textContent=next.ingress_available ?
+    `${next.ingress_used_blocks}/${next.ingress_capacity_blocks} blocks · ${Number(next.ingress_occupancy_percent).toFixed(1)}% · high-water ${next.ingress_high_water_blocks} · free buffering ${Number(next.ingress_available_ms).toFixed(2)} ms · overflow events ${pairs(next.ingress_overflow_events)} · transport errors ${pairs(next.transport_errors)}` : 'No ingress queue for file replay / receiver stopped.';
+  $('deviceIntegrity').textContent=`Device continuity: ${next.device_continuity_state}${next.device_continuity_state==='valid'?` · gaps ${pairs(next.device_gap_events)} · timestamp-derived missing pairs ${pairs(next.device_missing_samples)}`:''}. Hardware-only loss: ${next.hardware_loss_state}. Native format: ${next.sample_format}.`;
   $('health').textContent = next.state === 'running' ? (next.known_dropped_samples !== '0' ? 'Losses detected' : 'Streaming') : next.state;
   $('recordBadge').textContent = next.recording_state; $('sessionName').textContent = next.recording_name || 'No recording yet';
   $('sessionSamples').textContent = pairs(next.session_written_samples); $('segments').textContent = next.recording_segments;
@@ -231,17 +257,13 @@ async function refreshFiles() {
       if (file.closed) { const link = document.createElement('a'); link.textContent = 'Transfer ↓'; link.title = 'Download to the computer running this browser'; link.href = `/api/v1/${sessionPrefix()}files/${encodeURIComponent(file.name)}`; link.download = file.name; cell.append(link); }
       else cell.textContent = '—'; row.append(cell);
       const replayCell = document.createElement('td');
-      if (file.name.endsWith('.cs8')) {
+      if (['.cs8','.cu8','.sc16q11'].some(ext=>file.name.endsWith(ext))) {
         const play = document.createElement('button'); play.textContent = 'Replay';
         play.disabled = !file.closed || BigInt(file.bytes) === 0n;
-        play.title = 'Prepare this file in the independent replay session; live reception continues';
+        play.title = 'Select this file as the receiver input; stop reception first';
         play.addEventListener('click', async () => {
           try {
-            if (selectedSession !== 'replay') {
-              if ((dirty || analysisDirty) && !confirm('Discard this session’s unsaved draft and open independent replay?')) return;
-              await selectReceiverSession('replay');
-            }
-            renderStatus(await api('status'));
+            if (!editable()) throw new Error('Stop the receiver before choosing a recorded file.');
             await openReplayPicker(result.directory, `${result.directory}/${file.name}`);
           } catch (error) { notice(error.message, true); }
         }); replayCell.append(play);
@@ -392,7 +414,7 @@ function renderAnalysis(a){
     }$(id).replaceChildren(dl);
   }
   $('dcMagnitude').textContent=`DC magnitude √(mean I² + mean Q²): ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
-  $('histogramRails').textContent=`Clipping indicator (−128 / +127): I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
+  $('histogramRails').textContent=`Clipping indicator (${a.histogram_min ?? -128} / ${a.histogram_max ?? 127}): I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
   $('analysisCost').textContent=`Worker ${a.compute_ms.toFixed(2)} ms · ${a.sample_backend} · skipped bursts ${a.skipped_bursts} · contended blocks ${a.contention_blocks}`;
   $('waterfallInfo').textContent=`Newest at top · ${waterfallHistory.length} snapshots · display skips ${skippedDisplay} · sample ${a.first_sample}`;
   $('frameIntegrity').textContent=`PSD #${incoming} · produced ${a.produced_seconds.toFixed(3)} s · min/max/mean ${a.min.toFixed(2)} / ${a.max.toFixed(2)} / ${a.mean.toFixed(2)} · NaN/Inf ${a.nan_count}/${a.inf_count} · hash ${a.checksum.toString(16)} · rejected ${rejectedFrames}`;
@@ -453,7 +475,7 @@ function drawHistogram(id,data,color){
   for(let j=0;j<=2;j++){const y=top+j*(bottom-top)/2;ctx.strokeStyle='#233446';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText((max*(1-j/2)).toFixed(percent?1:0),4,y+4);}
   const dw=(right-left)/(values.length||1);ctx.fillStyle=color;
   values.forEach((v,k)=>{const bh=(bottom-top)*Math.min(1,v/max);ctx.fillRect(left+k*dw,bottom-bh,Math.max(1,dw-1),bh);});
-  ctx.fillStyle='#8fa6ba';for(let j=0;j<=4;j++)ctx.fillText(String(j===4?127:-128+j*64),Math.min(w-28,left+j*(right-left)/4-10),h-10);
+  ctx.fillStyle='#8fa6ba';for(let j=0;j<=4;j++)ctx.fillText(String(j===4?(analysisSnapshot?.histogram_max??127):Math.round((analysisSnapshot?.histogram_min??-128)+j*((analysisSnapshot?.histogram_max??127)-(analysisSnapshot?.histogram_min??-128)+1)/4)),Math.min(w-28,left+j*(right-left)/4-10),h-10);
 }
 function drawAnalysis(){drawSpectrum();drawWaterfall();drawHistogram('histogramI',analysisSnapshot?.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot?.histogram_q,'#62a6ff');}
 $('clearWaterfall').addEventListener('click',()=>{waterfallHistory=[];drawWaterfall();});
@@ -467,6 +489,24 @@ $('pausePlot').addEventListener('click', () => { paused = !paused; $('pausePlot'
 $('useIni').addEventListener('click', () => { try { values = parseIni($('iniEditor').value); buildForm(); dirtyState(true); } catch (error) { notice(error.message, true); } });
 $('importIni').addEventListener('change', async event => { try { const file = event.target.files[0]; if (!file) return; if (file.size > 12000) throw new Error('INI file exceeds 12 kB.'); values = parseIni(await file.text()); buildForm(); dirtyState(true); notice('INI imported into draft. Validate and apply before starting.'); } catch (error) { notice(error.message, true); } finally { event.target.value = ''; } });
 $('exportIni').addEventListener('click', () => { const url = URL.createObjectURL(new Blob([toIni(values)], {type:'text/plain'})), link = document.createElement('a'); link.href = url; link.download = 'receiver.ini'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); });
+$('rtlPreset').addEventListener('click', () => {
+  deviceCaps = null;
+  Object.assign(values, {'frontend.type':'rtlsdr','frontend.sample_rate_hz':'2400000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'2400','hackrf.bandwidth_hz':'0','rtlsdr.auto_gain':'true','rtlsdr.gain_tenths_db':'0','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
+  buildForm(); dirtyState(true);
+});
+$('bladePreset').addEventListener('click', () => {
+  deviceCaps = null;
+  Object.assign(values, {'frontend.type':'bladerf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','bladerf.gain_db':'30','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
+  buildForm(); dirtyState(true);
+});
+$('deviceLimits').addEventListener('click', async () => {
+  if (!editable()) return;
+  try {
+    const result = await api('frontend/capabilities', {ini: toIni(values)});
+    deviceCaps = { ...result, source: values['frontend.type'], serial: values['frontend.serial'] || '', tuning: values['frontend.center_frequency_hz'] };
+    buildForm(); notice(`Native device limits loaded · ${result.format}`);
+  } catch(error) { notice(error.message, true); }
+});
 $('filePreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'file','replay.realtime':'true','replay.loop':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
 $('frequencyReference').addEventListener('change',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
 $('resetFrequency').addEventListener('click',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
@@ -485,28 +525,6 @@ export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:s
 export {psdIntegrity, renderAnalysis, displayFrequency};
 
 document.querySelectorAll('[data-settings]').forEach(button => button.addEventListener('click', () => selectSettings(button.dataset.settings)));
-
-async function selectReceiverSession(session) {
-  selectedSession = session; $('receiverSession').value = session;
-  pendingTelemetry = null;
-  // Disconnect the old poll so an in-flight primary snapshot cannot enter replay history.
-  status = null; dirty = false; analysisDirty = false; pendingCommand = null;
-  lastRun = null; lastCommand = null; lastMessage = null; lastSample = null;
-  waiting = false; lastRequest = 0; lastResponse = -Infinity; resetAnalysis();
-  if(socket){socket.onclose=null;socket.onmessage=null;socket.onerror=null;socket.close();socket=null;}
-  $('events').replaceChildren();
-  await connect();
-  if (socket && !connected()) await new Promise((resolve, reject) => {
-    const target = socket;
-    const timer = setTimeout(() => { cleanup(); reject(new Error('Timed out connecting to the selected session.')); }, 5000);
-    const opened = () => { cleanup(); resolve(); };
-    const closed = () => { cleanup(); reject(new Error('Selected session disconnected.')); };
-    const cleanup = () => { clearTimeout(timer); target.removeEventListener('open', opened); target.removeEventListener('close', closed); };
-    target.addEventListener('open', opened, {once:true}); target.addEventListener('close', closed, {once:true});
-  });
-  notice(selectedSession==='replay'?'Independent playback session. The primary stream continues running.':'Primary receiver session. File replay continues independently.');
-}
-$('receiverSession').addEventListener('change', () => selectReceiverSession($('receiverSession').value));
 
 let pickerListing = null, replaySelection = null, pickerBusy = false, pickerSession = null, pickerRequestId = 0, pickerFilterTimer = null;
 /** Join paths for the receiver OS without using the browser's local filesystem. */
@@ -568,12 +586,12 @@ async function browseReplayDirectory(path) {
   pickerListing = result; replaySelection = null; $('pickerUse').disabled = true;
   $('pickerSelection').textContent = 'No file selected.'; $('pickerMetadata').replaceChildren();
   $('pickerDirectory').value = result.directory;
-  $('pickerNotice').textContent = result.truncated ? 'Showing at most 500 entries; refine the filename filter or open a subfolder.' : 'Choose a closed .cs8 file. Its adjacent metadata is loaded automatically.';
+  $('pickerNotice').textContent = result.truncated ? 'Showing at most 500 entries; refine the filename filter or open a subfolder.' : 'Choose a closed .cs8, .cu8 or .sc16q11 file. Its adjacent metadata is loaded automatically.';
   renderPickerEntries();
 }
 /** Open selection for the currently stopped session; a table Replay action chooses replay first. */
 async function openReplayPicker(directory, selectedPath) {
-  if (!editable()) throw new Error('Stop the selected session before choosing another input file.');
+  if (!editable()) throw new Error('Stop the receiver before choosing another input file.');
   pickerSession = selectedSession; replaySelection = null; $('pickerFilter').value = '';
   $('replayFileDialog').showModal();
   try { await browseReplayDirectory(directory); if (selectedPath) await inspectReplaySelection(selectedPath); }
@@ -593,7 +611,7 @@ $('pickerUse').addEventListener('click', () => {
   if (!replaySelection || pickerSession !== selectedSession || !editable()) return;
   if (replaySelection.revision !== revision) { $('pickerNotice').textContent = 'The profile changed. Select the file again.'; return; }
   const draft = parseIni(replaySelection.ini);
-  const keys = ['frontend.type','replay.path','replay.start_sample','replay.sample_limit','receiver.run_seconds','receiver.mode','recording.enabled','conditioning.module'];
+  const keys = ['frontend.type','replay.format','replay.path','replay.start_sample','replay.sample_limit','receiver.run_seconds','receiver.mode','recording.enabled','conditioning.module'];
   if (replaySelection.metadata_available) keys.push('frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz','conditioning.dc_shift','buffer.window_samples');
   for (const key of keys) values[key] = draft[key];
   buildForm(); dirtyState(true); selectSettings('source'); $('showConfiguration').click();

@@ -25,7 +25,7 @@ typedef struct {
 _Static_assert(sizeof(TNgIq8) == 2, "CI8 must occupy exactly two bytes");
 
 /** @brief Wire representation of complex frontend samples. */
-typedef enum { NG_FORMAT_CI8 = 1 } TNgSampleFormat;
+typedef enum { NG_FORMAT_CI8 = 1, NG_FORMAT_CU8 = 2, NG_FORMAT_SC16_Q11 = 3 } TNgSampleFormat;
 
 /** @brief Rate, RF reference and borrowed frontend identity for one stream. */
 typedef struct {
@@ -49,7 +49,7 @@ typedef struct {
     int64_t digitalIfHz;
 } TNgStreamInfo;
 
-enum { NG_BLOCK_GAP = 1u, NG_BLOCK_PARTIAL = 2u };
+enum { NG_BLOCK_GAP = 1u, NG_BLOCK_PARTIAL = 2u, NG_BLOCK_HARDWARE_TIME = 4u };
 
 /** @brief Sample-index and discontinuity information for an immutable block. */
 typedef struct {
@@ -65,6 +65,8 @@ typedef struct {
     unsigned flags;
     /** Complex pairs. */
     size_t count;
+    /** Device sample-clock ticks; valid only with NG_BLOCK_HARDWARE_TIME. */
+    uint64_t hardwareTimestamp;
 } TNgBlockMeta;
 
 /** Read-only view. Valid until release/return from the receiving callback. */
@@ -73,7 +75,41 @@ typedef struct {
     const TNgIq8 *samples;
     /** Sample indices, continuity and length for this view. */
     TNgBlockMeta meta;
+    /** Native representation; zero is the legacy CI8 default. For other formats use
+     * NgIqComponent/NgIqStore rather than dereferencing samples as TNgIq8. The borrowed
+     * storage contains exactly meta.count * NgSampleBytes(format) bytes. */
+    TNgSampleFormat format;
 } TNgIqView;
+
+/** @brief Describe the native IQ pair stride; zero denotes legacy CI8.
+ * @param format Native sample representation.
+ * @return Two bytes for CI8/CU8, four for little-endian SC16 Q11, zero if unsupported.
+ */
+size_t NgSampleBytes(TNgSampleFormat format);
+/** @brief Return the stable name of a native sample representation.
+ * @param format Native format; zero denotes CI8 compatibility.
+ * @return Borrowed static name, or "invalid".
+ */
+const char *NgSampleFormatName(TNgSampleFormat format);
+/** @brief Read one signed ADC component without losing bladeRF precision.
+ * @details CI8 reads are signed; CU8 subtracts 128; SC16 Q11 reads little-endian
+ * signed 16-bit storage. Call only with a validated view and an in-range index.
+ * @param view Borrowed native input.
+ * @param index Complex-pair index smaller than meta.count.
+ * @param quadrature Zero selects I, one selects Q.
+ * @return Signed ADC level, in native ADC units.
+ */
+int NgIqComponent(const TNgIqView *view, size_t index, unsigned quadrature);
+/** @brief Store a signed ADC component in native sample storage.
+ * @details Value must lie within the representation's ADC range. SC16 Q11 is
+ * written little-endian. No scaling or quantization is performed.
+ * @param storage Writable native IQ pair array.
+ * @param format Native representation.
+ * @param index Complex-pair index within caller-owned capacity.
+ * @param quadrature Zero selects I, one selects Q.
+ * @param value Signed ADC level; CU8 is recentered by adding 128.
+ */
+void NgIqStore(void *storage, TNgSampleFormat format, size_t index, unsigned quadrature, int value);
 
 /**
  * @brief Convert physical Doppler into a receiver carrier-NCO frequency.

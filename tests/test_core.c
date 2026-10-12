@@ -464,7 +464,8 @@ static void TestRecording(void)
     size_t done = 0;
     size_t count;
     size_t index;
-    TNgFrontendStats sourceStats = {13, 0, 0, 0};
+    TNgFrontendStats sourceStats = {0};
+    sourceStats.receivedSamples = 13;
     NgConfigDefaults(&c);
     c.windowSamples = 5;
     c.sampleRateHz = 100000;

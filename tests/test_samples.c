@@ -67,7 +67,7 @@ static void Benchmark(void)
     {
         TNgConditioner dc;
         TNgError e = {{0}};
-        TNgIqView in = {samples, {0}};
+        TNgIqView in = {samples, {0}, NG_FORMAT_CI8};
         TNgIqView out;
         in.meta.count = n;
         CHECK(NgConditionerDcCreate(n, 16, &dc, &e) == NG_OK);
@@ -128,7 +128,7 @@ int main(int argc, char **argv)
     {
         TNgConditioner whole;
         TNgConditioner chunks;
-        TNgIqView in = {samples, {0}};
+        TNgIqView in = {samples, {0}, NG_FORMAT_CI8};
         TNgIqView out;
         CHECK(NgConditionerDcCreate(4096, 8, &whole, &e) == NG_OK);
         CHECK(NgConditionerDcCreate(4096, 8, &chunks, &e) == NG_OK);

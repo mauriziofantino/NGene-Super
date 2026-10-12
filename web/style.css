@@ -75,3 +75,8 @@ th{background:#0f1b28;color:#8da9bf}th,td{border-color:#233548}td a{color:#70dfb
 .picker-preview p { overflow-wrap:anywhere; }
 .picker-preview dl { display:grid; grid-template-columns:minmax(120px,1fr) 3fr; gap:8px 16px; font-size:13px; }
 .picker-preview dt { color:#9aafbf; }.picker-preview dd { margin:0; overflow-wrap:anywhere; }
+
+/* Native frontend presets stay in one compact row; inactive driver fields stay hidden. */
+.settings-content .preset-row{max-width:none;display:flex;flex-wrap:wrap;gap:8px}
+.settings-content .preset-row button{flex:0 1 auto;padding:8px 12px;font-size:12px}
+@media(min-width:1001px){#configForm{overflow:visible}#fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}#fields .field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#fields .field.full{grid-column:1/-1}}

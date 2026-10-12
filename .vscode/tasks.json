@@ -154,6 +154,42 @@
         "panel": "dedicated",
         "clear": true
       }
+    },
+    {
+      "label": "NGene: Build multi-SDR (Windows MSVC)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/build-windows.ps1",
+        "-Action",
+        "Build",
+        "-Configuration",
+        "${input:ngeneConfiguration}",
+        "-Hackrf",
+        "${input:ngeneHackrf}",
+        "-Architecture",
+        "${input:ngeneArchitecture}",
+        "-MultiSdr"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      }
     }
   ],
   "inputs": [

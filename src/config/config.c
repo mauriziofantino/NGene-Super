@@ -57,6 +57,9 @@ void NgConfigDefaults(TNgConfig *config)
     memset(config, 0, sizeof(*config));
     config->frontend = NG_FRONTEND_FILE;
     NgAnalysisDefaults(&config->analysis);
+    config->rtlAutoGain = 1;
+    config->bladeGainDb = 30;
+    config->replayFormat = NG_FORMAT_CI8;
     config->dcShift = NG_DEFAULT_DC_SHIFT;
     config->sampleRateHz = NG_DEFAULT_SAMPLE_RATE_HZ;
     config->centerFrequencyHz = NG_GNSS_L1_FREQUENCY_HZ;
@@ -228,6 +231,14 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
             c->frontend = NG_FRONTEND_FILE;
             return NG_OK;
         }
+        if (strcmp(value, "rtlsdr") == 0) {
+            c->frontend = NG_FRONTEND_RTLSDR;
+            return NG_OK;
+        }
+        if (strcmp(value, "bladerf") == 0) {
+            c->frontend = NG_FRONTEND_BLADERF;
+            return NG_OK;
+        }
         return NG_ERROR;
     }
     if (strcmp(key, "frontend.serial") == 0) {
@@ -242,6 +253,38 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("hackrf.vga_gain_db", vgaGainDb)
     BOOL_KEY("hackrf.rf_amp", rfAmp)
     BOOL_KEY("hackrf.antenna_power", antennaPower)
+    BOOL_KEY("rtlsdr.auto_gain", rtlAutoGain)
+    BOOL_KEY("rtlsdr.bias_tee", rtlBiasTee)
+    BOOL_KEY("bladerf.bias_tee", bladeBiasTee)
+    UINT_KEY("frontend.bandwidth_hz", bandwidthHz)
+    if (strcmp(key, "rtlsdr.gain_tenths_db") == 0 || strcmp(key, "rtlsdr.ppm") == 0 ||
+        strcmp(key, "bladerf.gain_db") == 0) {
+        double valueReal;
+        if (ParseReal(value, &valueReal) != NG_OK || valueReal < -1000 || valueReal > 1000 ||
+            valueReal != floor(valueReal)) {
+            return NG_ERROR;
+        }
+        if (strcmp(key, "rtlsdr.ppm") == 0) {
+            c->rtlPpm = (int)valueReal;
+        } else if (strcmp(key, "bladerf.gain_db") == 0) {
+            c->bladeGainDb = (int)valueReal;
+        } else {
+            c->rtlGainTenthsDb = (int)valueReal;
+        }
+        return NG_OK;
+    }
+    if (strcmp(key, "replay.format") == 0) {
+        if (strcmp(value, "CI8") == 0) {
+            c->replayFormat = NG_FORMAT_CI8;
+        } else if (strcmp(value, "CU8") == 0) {
+            c->replayFormat = NG_FORMAT_CU8;
+        } else if (strcmp(value, "SC16_Q11") == 0) {
+            c->replayFormat = NG_FORMAT_SC16_Q11;
+        } else {
+            return NG_ERROR;
+        }
+        return NG_OK;
+    }
     if (strcmp(key, "conditioning.module") == 0) {
         if (strcmp(value, "bypass") == 0) {
             c->dcRemoval = 0;
@@ -383,7 +426,7 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
 {
     char line[1024];
     char section[64] = "";
-    char keys[64][128];
+    char keys[96][128];
     size_t number = 0;
     size_t keyCount = 0;
     if (input == NULL || config == NULL) {
@@ -414,7 +457,8 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
                 (strcmp(section, "frontend") != 0 && strcmp(section, "hackrf") != 0 &&
                  strcmp(section, "conditioning") != 0 && strcmp(section, "buffer") != 0 &&
                  strcmp(section, "receiver") != 0 && strcmp(section, "recording") != 0 &&
-                 strcmp(section, "replay") != 0 && strcmp(section, "analysis") != 0)) {
+                 strcmp(section, "replay") != 0 && strcmp(section, "analysis") != 0 &&
+                 strcmp(section, "rtlsdr") != 0 && strcmp(section, "bladerf") != 0)) {
                 return NgFail(error, "Unknown section at line %zu", number);
             }
             continue;
@@ -442,7 +486,7 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
                 return NgFail(error, "Duplicate config key %s", key);
             }
         }
-        if (keyCount == 64) {
+        if (keyCount == 96) {
             return NgFail(error, "Too many config keys");
         }
         (void)CopyText(keys[keyCount++], sizeof(keys[0]), key);
@@ -491,13 +535,14 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (config->recordingPreConditioning != 0 && config->recordingPreConditioning != 1) {
         return NgFail(error, "Invalid recording point");
     }
-    if (config->frontend != NG_FRONTEND_HACKRF && config->frontend != NG_FRONTEND_FILE) {
+    if (config->frontend < NG_FRONTEND_FILE || config->frontend > NG_FRONTEND_BLADERF) {
         return NgFail(error, "Unsupported frontend");
     }
-    if (config->sampleRateHz == 0 || config->sampleRateHz > NG_FRONTEND_MAX_SAMPLE_RATE_HZ ||
+    if (config->sampleRateHz == 0 ||
+        config->sampleRateHz >
+            (config->frontend == NG_FRONTEND_HACKRF ? NG_FRONTEND_MAX_SAMPLE_RATE_HZ : 61440000u) ||
         config->centerFrequencyHz > NG_HACKRF_MAX_FREQUENCY_HZ) {
-        return NgFail(error,
-                      "Invalid rate or tuning: increment 1 supports up to 20 Msps and 6 GHz");
+        return NgFail(error, "Invalid rate or tuning for selected native frontend");
     }
     if (config->frontend == NG_FRONTEND_HACKRF &&
         config->sampleRateHz < NG_HACKRF_MIN_SAMPLE_RATE_HZ) {
@@ -507,13 +552,29 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
         config->vgaGainDb % 2 != 0) {
         return NgFail(error, "HackRF LNA: 0..40 step 8 dB; VGA: 0..62 step 2 dB");
     }
+    if (NgSampleBytes(config->replayFormat) == 0 || config->rtlAutoGain < 0 ||
+        config->rtlAutoGain > 1 || config->rtlBiasTee < 0 || config->rtlBiasTee > 1 ||
+        config->bladeBiasTee < 0 || config->bladeBiasTee > 1 || config->rtlPpm < -1000 ||
+        config->rtlPpm > 1000 || config->rtlGainTenthsDb < -1000 ||
+        config->rtlGainTenthsDb > 1000 || config->bladeGainDb < -100 || config->bladeGainDb > 100) {
+        return NgFail(error, "Invalid native frontend controls or replay format");
+    }
+    if (config->frontend == NG_FRONTEND_RTLSDR &&
+        (config->sampleRateHz <= 225000u || config->sampleRateHz > 3200000u ||
+         (config->sampleRateHz > 300000u && config->sampleRateHz <= 900000u))) {
+        return NgFail(error, "RTL-SDR sample rate must be (225000,300000] or (900000,3200000] Hz");
+    }
     if (config->windowSamples == 0 || config->windowSamples > 1048576 ||
         config->ingressBlocks < 2 || config->ingressBlocks > 4096 || config->ringBlocks < 2 ||
         config->ringBlocks > 4096 || config->recordingQueueBlocks < 2 ||
         config->recordingQueueBlocks > 4096) {
         return NgFail(error, "Window must be 1..1048576 pairs and queues 2..4096 blocks");
     }
-    bytes = (uint64_t)config->windowSamples * 2 *
+    bytes = (uint64_t)config->windowSamples *
+            NgSampleBytes(config->frontend == NG_FRONTEND_BLADERF  ? NG_FORMAT_SC16_Q11
+                          : config->frontend == NG_FRONTEND_RTLSDR ? NG_FORMAT_CU8
+                          : config->frontend == NG_FRONTEND_FILE   ? config->replayFormat
+                                                                   : NG_FORMAT_CI8) *
             (config->ingressBlocks + config->ringBlocks + config->recordingQueueBlocks + 2);
     if (bytes > UINT64_C(536870912)) {
         return NgFail(error, "Buffer plan exceeds the documented 512 MiB guard");
@@ -546,7 +607,7 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
         strchr(config->serial, '\n') != NULL || strchr(config->serial, '\r') != NULL) {
         return NgFail(error, "Replay path and serial cannot contain line breaks");
     }
-    if (config->replayStartSample > (uint64_t)INT64_MAX / sizeof(TNgIq8)) {
+    if (config->replayStartSample > (uint64_t)INT64_MAX / NgSampleBytes(config->replayFormat)) {
         return NgFail(error, "Replay offset exceeds the supported file range");
     }
     return NG_OK;
@@ -595,8 +656,11 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
         return NG_ERROR;
     }
     if (fprintf(output, "[frontend]\ntype=%s\nsample_rate_hz=%u\ncenter_frequency_hz=%" PRIu64 "\n",
-                config->frontend == NG_FRONTEND_HACKRF ? "hackrf" : "file", config->sampleRateHz,
-                config->centerFrequencyHz) < 0) {
+                config->frontend == NG_FRONTEND_HACKRF    ? "hackrf"
+                : config->frontend == NG_FRONTEND_RTLSDR  ? "rtlsdr"
+                : config->frontend == NG_FRONTEND_BLADERF ? "bladerf"
+                                                          : "file",
+                config->sampleRateHz, config->centerFrequencyHz) < 0) {
         return NgFail(error, "Config write failed");
     }
     if (config->serial[0] != 0) {
@@ -609,6 +673,11 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             config->bandwidthHz, config->lnaGainDb, config->vgaGainDb,
             (config->rfAmp) != 0 ? "true" : "false",
             (config->antennaPower) != 0 ? "true" : "false");
+    fprintf(output, "\n[rtlsdr]\nauto_gain=%s\ngain_tenths_db=%d\nppm=%d\nbias_tee=%s\n",
+            config->rtlAutoGain ? "true" : "false", config->rtlGainTenthsDb, config->rtlPpm,
+            config->rtlBiasTee ? "true" : "false");
+    fprintf(output, "\n[bladerf]\ngain_db=%d\nbias_tee=%s\n", config->bladeGainDb,
+            config->bladeBiasTee ? "true" : "false");
     fprintf(
         output,
         "\n[conditioning]\nmodule=%s\ndc_shift=%u\n\n[buffer]\nwindow_samples=%zu\ningress_blocks=%"
@@ -627,7 +696,7 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     if (config->recordingDirectory[0] != 0) {
         fprintf(output, "directory=%s\n", config->recordingDirectory);
     }
-    fprintf(output, "\n[replay]\n");
+    fprintf(output, "\n[replay]\nformat=%s\n", NgSampleFormatName(config->replayFormat));
     if (config->replayPath[0] != '\0') {
         fprintf(output, "path=%s\n", config->replayPath);
     }

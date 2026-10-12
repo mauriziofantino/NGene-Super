@@ -199,3 +199,16 @@ fallimento la directory resta disponibile; dopo un successo viene rimossa.
 Il verificatore usa anche un nome temporaneo più breve (`ngm-*`). Nessuna
 modifica a registro, LongPathsEnabled o file CMake del PC è richiesta.
 La correzione mantiene aperta l'accettazione fino al nuovo test nativo completo.
+
+## Multi-SDR 0.6.4
+
+Il percorso HackRF precedente rimane disponibile. Per includere HackRF, RTL-SDR e bladeRF nello stesso eseguibile:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -MultiSdr
+.\build\msvc-x64-multisdr\Release\ngene.exe --web --port 8080
+```
+
+Questa compilazione non esegue la matrice di test. In VS Code selezionare **NGene: Build multi-SDR (Windows MSVC)**. `-Configuration Debug` e `-Architecture ARM64` sono supportati dal medesimo script; i preset non impongono un generator o toolset Visual Studio specifico. Dipendenze e DLL usano bootstrap/staging automatici. La build bladeRF applica i patch RFIC in CMake, senza Unix patch o MSYS. [Procedura completa e limiti](MULTISDR_064.md).
+
+Non è stata eseguita una build MSVC della 0.6.4 in questa iterazione; i log Linux e la compilazione di oggetti ARM64 non certificano Windows. L'accettazione nativa resta da verificare sulla macchina Windows.

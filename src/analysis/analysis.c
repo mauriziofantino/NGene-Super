@@ -11,7 +11,15 @@
 /** @brief One copied diagnostic input slot; lifecycle serializes producer and worker ownership. */
 typedef struct {
     /** Owned copied CI8 observation; immutable while the worker owns the slot. */
-    TNgIq8 data[NG_ANALYSIS_PAIRS];
+    union {
+        /** Unchanged signed CI8 fast path. */
+        TNgIq8 ci8[NG_ANALYSIS_PAIRS];
+        /** Native IQ copy, large enough for SC16 Q11. */
+        unsigned char native[NG_ANALYSIS_PAIRS * 4];
+    } data; /**< Owned copied IQ payload, immutable while leased to the worker. */
+
+    /** Native representation of this copied observation. */
+    TNgSampleFormat format;
     /** Diagnostic producer selector: zero PSD, one histogram. */
     int kind;
     /** Slot ownership state: free, filling, ready, or worker-owned. */
@@ -56,6 +64,8 @@ struct TNgAnalysis {
     uint64_t skipped;
     /** Complex sample rate in pairs per second. */
     uint32_t sampleRate;
+    /** Once set, prevents sample-rate changes racing with calculation. */
+    int offered;
     /** Independent next capture deadlines for PSD and histogram, in monotonic seconds. */
     double nextCapture[2];
     /** Subscriber-interest expiry for each optional producer, in monotonic seconds. */
@@ -325,7 +335,16 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     double energy = 0;
     double start = NgMonotonicSeconds();
     TNgError error = {{0}};
+    TNgIqView native = {0};
+    int adcLimit = b->format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
+    int fftScale = b->format == NG_FORMAT_SC16_Q11 ? 8 : 128;
+    native.samples = (const TNgIq8 *)(const void *)b->data.native;
+    native.format = b->format;
+    native.meta.count = b->count;
     memset(s, 0, sizeof(*s));
+    s->histogramMin = -adcLimit;
+    s->histogramMax = adcLimit - 1;
+    s->sampleFormat = b->format;
     s->revision = b->revision;
     s->epoch = b->epoch;
     s->firstSample = b->first;
@@ -342,13 +361,37 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         s->histogramCount = (uint32_t)c->histogramPairs;
         s->histogramFirst = b->first;
         s->histogramEpoch = b->epoch;
-        NgIqMoments(b->data, c->histogramPairs, sums, squares);
-        s->statsI.min = s->statsQ.min = 127;
-        s->statsI.max = s->statsQ.max = -128;
+        if (b->format == NG_FORMAT_CI8 || b->format == 0) {
+            NgIqMoments(b->data.ci8, c->histogramPairs, sums, squares);
+        } else {
+            sums[0] = sums[1] = 0;
+            squares[0] = squares[1] = 0;
+            for (k = 0; k < c->histogramPairs; ++k) {
+                for (j = 0; j < 2; ++j) {
+                    int64_t v = NgIqComponent(&native, k, (unsigned)j);
+                    if (v < -adcLimit || v >= adcLimit) {
+                        return;
+                    }
+                    sums[j] += v;
+                    squares[j] += (uint64_t)(v * v);
+                }
+            }
+        }
+        s->statsI.min = s->statsQ.min = adcLimit - 1;
+        s->statsI.max = s->statsQ.max = -adcLimit;
         for (k = 0; k < c->histogramPairs; ++k) {
-            int values[2] = {b->data[k].i, b->data[k].q};
-            ++s->histogramI[(unsigned)(values[0] + 128) * c->histogramBins / 256];
-            ++s->histogramQ[(unsigned)(values[1] + 128) * c->histogramBins / 256];
+            int values[2];
+            if (b->format == 0 || b->format == NG_FORMAT_CI8) {
+                values[0] = b->data.ci8[k].i;
+                values[1] = b->data.ci8[k].q;
+            } else {
+                values[0] = NgIqComponent(&native, k, 0);
+                values[1] = NgIqComponent(&native, k, 1);
+            }
+            ++s->histogramI[(unsigned)(values[0] + adcLimit) * c->histogramBins /
+                            (unsigned)(2 * adcLimit)];
+            ++s->histogramQ[(unsigned)(values[1] + adcLimit) * c->histogramBins /
+                            (unsigned)(2 * adcLimit)];
             for (j = 0; j < 2; ++j) {
                 int v = values[j];
                 if (v < stats[j]->min) {
@@ -358,7 +401,7 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                     stats[j]->max = v;
                 }
                 stats[j]->zeros += v == 0;
-                stats[j]->clipping += v == -128 || v == 127;
+                stats[j]->clipping += v == -adcLimit || v == adcLimit - 1;
             }
         }
         for (j = 0; j < 2; ++j) {
@@ -403,10 +446,20 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         for (f = 0; f < c->averages; ++f) {
             size_t offset = f * (n * (100 - c->overlapPercent) / 100);
             for (k = 0; k < n; ++k) {
-                a->input[2 * k] =
-                    (int16_t)Shift15((int32_t)b->data[offset + k].i * 128 * a->window[k]);
-                a->input[2 * k + 1] =
-                    (int16_t)Shift15((int32_t)b->data[offset + k].q * 128 * a->window[k]);
+                int iValue, qValue;
+                if (b->format == 0 || b->format == NG_FORMAT_CI8) {
+                    iValue = b->data.ci8[offset + k].i;
+                    qValue = b->data.ci8[offset + k].q;
+                } else {
+                    iValue = NgIqComponent(&native, offset + k, 0);
+                    qValue = NgIqComponent(&native, offset + k, 1);
+                }
+                if (iValue < -adcLimit || iValue >= adcLimit || qValue < -adcLimit ||
+                    qValue >= adcLimit) {
+                    return;
+                }
+                a->input[2 * k] = (int16_t)Shift15((int32_t)iValue * fftScale * a->window[k]);
+                a->input[2 * k + 1] = (int16_t)Shift15((int32_t)qValue * fftScale * a->window[k]);
             }
             if (NgFftExecute(a->plan, n, a->input, a->output, &error) != NG_OK) {
                 return; /* Validated fixed workspace contract. */
@@ -543,6 +596,8 @@ static void Worker(void *context)
                 d->histogramEpoch = s->histogramEpoch;
                 d->histogramSeconds = s->histogramSeconds;
                 d->histogramBins = s->histogramBins;
+                d->histogramMin = s->histogramMin;
+                d->histogramMax = s->histogramMax;
                 d->histogramCount = s->histogramCount;
                 memcpy(d->histogramI, s->histogramI, sizeof(d->histogramI));
                 memcpy(d->histogramQ, s->histogramQ, sizeof(d->histogramQ));
@@ -556,6 +611,7 @@ static void Worker(void *context)
             d->revision = s->revision;
             d->config = s->config;
             d->sampleRateHz = s->sampleRateHz;
+            d->sampleFormat = s->sampleFormat;
             d->computeMs = s->computeMs;
             d->skippedBursts = s->skippedBursts;
         }
@@ -734,6 +790,9 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
     if (analysis == NULL || view == NULL || view->meta.count == 0) {
         return NG_OK;
     }
+    if (view->samples == NULL || NgSampleBytes(view->format) == 0) {
+        return NG_ERROR;
+    }
     if (NgMutexTryLock(&analysis->mutex) == 0) {
         int count = NgAtomicGet(&analysis->contention);
         if (count < INT_MAX) {
@@ -741,6 +800,7 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
         }
         return NG_FULL;
     }
+    analysis->offered = 1;
     now = NgMonotonicSeconds();
     for (kind = 0; kind < 2; ++kind) {
         TNgBurst *b;
@@ -759,7 +819,7 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
         if (analysis->filling[kind] >= 0) {
             b = &analysis->buffers[analysis->filling[kind]];
             if (((view->meta.flags) & (NG_BLOCK_GAP)) != 0 || b->epoch != view->meta.epoch ||
-                b->first + b->count != view->meta.firstSample) {
+                b->first + b->count != view->meta.firstSample || b->format != view->format) {
                 b->state = 0;
                 analysis->filling[kind] = -1;
                 ++analysis->continuity[kind];
@@ -787,6 +847,7 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
             b = &analysis->buffers[analysis->filling[kind]];
             b->state = 1;
             b->kind = kind;
+            b->format = view->format;
             b->count = 0;
             b->required = Required(&analysis->config, kind);
             b->config = analysis->config;
@@ -801,7 +862,8 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
         if (copy > view->meta.count) {
             copy = view->meta.count;
         }
-        memcpy(b->data + b->count, view->samples, copy * sizeof(TNgIq8));
+        memcpy(b->data.native + b->count * NgSampleBytes(view->format), view->samples,
+               copy * NgSampleBytes(view->format));
         b->count += copy;
         if (b->count == b->required) {
             b->state = 2;
@@ -845,4 +907,27 @@ void NgAnalysisRead(TNgAnalysis *analysis, TNgAnalysisSnapshot *out)
     out->skippedBursts = analysis->skipped;
     out->contentionBlocks = (unsigned)NgAtomicGet(&analysis->contention);
     NgMutexUnlock(&analysis->mutex);
+}
+
+/** @brief Set the device-applied nominal sample rate before the first IQ submission.
+ * @details Configuration-time operation only; refuses changes after any burst was offered.
+ * This is a library-reported nominal rate, not a measured oscillator frequency.
+ * Parameter analysis Live newly created diagnostic worker.
+ * Parameter sampleRateHz Applied complex pairs/s, positive.
+ * Result: NG_OK on update or NG_ERROR if capture has already started.
+ */
+int NgAnalysisSetSampleRate(TNgAnalysis *analysis, uint32_t sampleRateHz)
+{
+    int result = NG_OK;
+    if (analysis == NULL || sampleRateHz == 0) {
+        return NG_ERROR;
+    }
+    NgMutexLock(&analysis->mutex);
+    if (analysis->offered != 0) {
+        result = NG_ERROR;
+    } else {
+        analysis->sampleRate = sampleRateHz;
+    }
+    NgMutexUnlock(&analysis->mutex);
+    return result;
 }

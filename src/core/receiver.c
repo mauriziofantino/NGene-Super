@@ -161,9 +161,12 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
     if (NgConfigValidate(config, error) != NG_OK) {
         return NG_ERROR;
     }
-    if (frontend->info.format != NG_FORMAT_CI8 ||
-        frontend->info.sampleRateHz != config->sampleRateHz) {
+    if (NgSampleBytes(frontend->info.format) == 0 || frontend->info.sampleRateHz == 0) {
         return NgFail(error, "Frontend format/rate does not match increment-1 contract");
+    }
+    if (channelCount != 0 && frontend->info.format != NG_FORMAT_CI8) {
+        return NgFail(error, "Current channel API expects CI8; native multibit channel kernels are "
+                             "a later increment");
     }
     for (k = 0; k < channelCount; ++k) {
         size_t j;
@@ -177,15 +180,17 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
             }
         }
     }
-    if (NgRingCreate(config->ringBlocks, config->windowSamples, &ring, error) != NG_OK) {
+    if (NgRingCreateFormat(config->ringBlocks, config->windowSamples, frontend->info.format, &ring,
+                           error) != NG_OK) {
         return NG_ERROR;
     }
-    assembly = malloc(config->windowSamples * sizeof(*assembly));
+    assembly = malloc(config->windowSamples * NgSampleBytes(frontend->info.format));
     if (assembly == NULL) {
         result = NgFail(error, "Cannot allocate frame assembly");
         goto cleanup;
     }
     pending.samples = assembly;
+    pending.format = frontend->info.format;
     if (config->recordingEnabled != 0 && (hooks == NULL || hooks->externalRecording == 0) &&
         NgRecorderOpen(config, &frontend->info, conditioner->name, &recorder, error) != NG_OK) {
         result = NG_ERROR;
@@ -202,7 +207,7 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
         hooks->started(hooks->context, &frontend->info);
     }
     for (;;) {
-        TNgIqView input;
+        TNgIqView input = {0};
         TNgIqView conditioned;
         size_t offset = 0;
         int gap;
@@ -241,7 +246,10 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
         }
         if (input.samples == NULL || input.meta.count == 0 ||
             input.meta.count > config->windowSamples ||
-            input.meta.firstSample > UINT64_MAX - input.meta.count) {
+            input.meta.firstSample > UINT64_MAX - input.meta.count ||
+            (input.format == 0 ? NG_FORMAT_CI8 : input.format) != frontend->info.format ||
+            ((input.meta.flags & NG_BLOCK_HARDWARE_TIME) != 0 &&
+             input.meta.hardwareTimestamp > UINT64_MAX - input.meta.count)) {
             frontend->ops->release(frontend->context);
             result = NgFail(error, "Invalid source block");
             break;
@@ -278,7 +286,9 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
             conditioned.meta.epoch != input.meta.epoch ||
             conditioned.meta.flags != input.meta.flags ||
             conditioned.meta.missingKnown != input.meta.missingKnown ||
-            conditioned.meta.missingBefore != input.meta.missingBefore) {
+            conditioned.meta.missingBefore != input.meta.missingBefore ||
+            conditioned.format != input.format ||
+            conditioned.meta.hardwareTimestamp != input.meta.hardwareTimestamp) {
             frontend->ops->release(frontend->context);
             result = NgFail(error, "Conditioner violated the rate-preserving stream contract");
             break;
@@ -326,8 +336,12 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
                 memset(&pending.meta, 0, sizeof(pending.meta));
                 pending.meta.epoch = epoch;
                 pending.meta.firstSample = conditioned.meta.firstSample + offset;
+                if ((conditioned.meta.flags & NG_BLOCK_HARDWARE_TIME) != 0) {
+                    pending.meta.flags |= NG_BLOCK_HARDWARE_TIME;
+                    pending.meta.hardwareTimestamp = conditioned.meta.hardwareTimestamp + offset;
+                }
                 if (gap != 0 && offset == 0) {
-                    pending.meta.flags = NG_BLOCK_GAP;
+                    pending.meta.flags |= NG_BLOCK_GAP;
                     pending.meta.missingBefore = missing;
                     pending.meta.missingKnown = missingKnown;
                 }
@@ -335,8 +349,11 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
             if (count > config->windowSamples - pending.meta.count) {
                 count = config->windowSamples - pending.meta.count;
             }
-            memcpy(assembly + pending.meta.count, conditioned.samples + offset,
-                   count * sizeof(TNgIq8));
+            memcpy((unsigned char *)(void *)assembly +
+                       pending.meta.count * NgSampleBytes(pending.format),
+                   (const unsigned char *)(const void *)conditioned.samples +
+                       offset * NgSampleBytes(pending.format),
+                   count * NgSampleBytes(pending.format));
             pending.meta.count += count;
             offset += count;
             if (pending.meta.count == config->windowSamples) {

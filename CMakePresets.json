@@ -102,6 +102,48 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "windows-msvc-x64-multisdr",
+      "inherits": "windows-msvc-x64-hackrf",
+      "binaryDir": "${sourceDir}/build/msvc-x64-multisdr",
+      "cacheVariables": {
+        "NGENE_WITH_RTLSDR": "ON",
+        "NGENE_WITH_BLADERF": "ON",
+        "NGENE_RTLSDR_PROVIDER": "AUTO",
+        "NGENE_BLADERF_PROVIDER": "AUTO"
+      }
+    },
+    {
+      "name": "windows-msvc-arm64-multisdr",
+      "inherits": "windows-msvc-arm64-hackrf",
+      "binaryDir": "${sourceDir}/build/msvc-arm64-multisdr",
+      "cacheVariables": {
+        "NGENE_WITH_RTLSDR": "ON",
+        "NGENE_WITH_BLADERF": "ON",
+        "NGENE_RTLSDR_PROVIDER": "AUTO",
+        "NGENE_BLADERF_PROVIDER": "AUTO"
+      }
+    },
+    {
+      "name": "linux-multisdr",
+      "inherits": "linux-release",
+      "binaryDir": "${sourceDir}/build/linux-multisdr",
+      "cacheVariables": {
+        "NGENE_WITH_HACKRF": "ON",
+        "NGENE_WITH_RTLSDR": "ON",
+        "NGENE_WITH_BLADERF": "ON"
+      }
+    },
+    {
+      "name": "macos-multisdr",
+      "inherits": "macos-release",
+      "binaryDir": "${sourceDir}/build/macos-multisdr",
+      "cacheVariables": {
+        "NGENE_WITH_HACKRF": "ON",
+        "NGENE_WITH_RTLSDR": "ON",
+        "NGENE_WITH_BLADERF": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -156,6 +198,34 @@
       "name": "windows-msvc-arm64-hackrf-debug",
       "configurePreset": "windows-msvc-arm64-hackrf",
       "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-x64-multisdr",
+      "configurePreset": "windows-msvc-x64-multisdr",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-x64-multisdr-debug",
+      "configurePreset": "windows-msvc-x64-multisdr",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-arm64-multisdr",
+      "configurePreset": "windows-msvc-arm64-multisdr",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-arm64-multisdr-debug",
+      "configurePreset": "windows-msvc-arm64-multisdr",
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-multisdr",
+      "configurePreset": "linux-multisdr"
+    },
+    {
+      "name": "macos-multisdr",
+      "configurePreset": "macos-multisdr"
     }
   ],
   "testPresets": [
@@ -226,6 +296,52 @@
       "name": "windows-msvc-arm64-hackrf-debug",
       "configurePreset": "windows-msvc-arm64-hackrf",
       "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-x64-multisdr",
+      "configurePreset": "windows-msvc-x64-multisdr",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-x64-multisdr-debug",
+      "configurePreset": "windows-msvc-x64-multisdr",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-arm64-multisdr",
+      "configurePreset": "windows-msvc-arm64-multisdr",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-arm64-multisdr-debug",
+      "configurePreset": "windows-msvc-arm64-multisdr",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-multisdr",
+      "configurePreset": "linux-multisdr",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-multisdr",
+      "configurePreset": "macos-multisdr",
       "output": {
         "outputOnFailure": true
       }

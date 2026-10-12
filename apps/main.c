@@ -85,10 +85,20 @@ int main(int argc, char **argv)
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
         printf("NGene %s %s/%s native-HackRF=%s; FFT=%s\n", NGENE_VERSION, NGENE_OS, NGENE_ARCH,
                (NgHackrfAvailable()) != 0 ? "yes" : "no", NgFftBackend());
+        printf("native-RTL-SDR=%s; native-bladeRF=%s\n",
+               NgFrontendAvailable(NG_FRONTEND_RTLSDR) ? "yes" : "no",
+               NgFrontendAvailable(NG_FRONTEND_BLADERF) ? "yes" : "no");
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--list-devices") == 0) {
-        result = NgFrontendListHackrf(stdout, &error);
+        TNgFrontendKind kind;
+        result = NG_OK;
+        for (kind = NG_FRONTEND_HACKRF; kind <= NG_FRONTEND_BLADERF;
+             kind = (TNgFrontendKind)(kind + 1)) {
+            if (NgFrontendAvailable(kind) && NgFrontendList(kind, stdout, &error) != NG_OK) {
+                result = NG_ERROR;
+            }
+        }
         if (result != NG_OK) {
             fprintf(stderr, "%s\n", error.message);
         }
@@ -200,14 +210,15 @@ int main(int argc, char **argv)
     }
     (void)signal(SIGINT, OnSignal);
     (void)signal(SIGTERM, OnSignal);
-    printf("NGene %s %s/%s\nsource=%s format=CI8 fs=%u pairs/s tune=%" PRIu64
+    printf("NGene %s %s/%s\nsource=%s format=%s fs=%u pairs/s tune=%" PRIu64
            " Hz filter=%u Hz window=%zu pairs\n",
            NGENE_VERSION, NGENE_OS, NGENE_ARCH, frontend.info.sourceName,
-           frontend.info.sampleRateHz, frontend.info.centerFrequencyHz, frontend.info.bandwidthHz,
-           config.windowSamples);
+           NgSampleFormatName(frontend.info.format), frontend.info.sampleRateHz,
+           frontend.info.centerFrequencyHz, frontend.info.bandwidthHz, config.windowSamples);
     puts("Capture core active; GNSS algorithms are not yet attached.");
-    if (config.dcRemoval != 0 && NgConditionerDcCreate(config.windowSamples, config.dcShift,
-                                                       &conditioner, &error) != NG_OK) {
+    if (config.dcRemoval != 0 &&
+        NgConditionerDcCreateFormat(config.windowSamples, config.dcShift, frontend.info.format,
+                                    &conditioner, &error) != NG_OK) {
         fprintf(stderr, "%s\n", error.message);
         NgFrontendDestroy(&frontend);
         return 1;

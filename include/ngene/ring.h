@@ -4,6 +4,47 @@
 #include "ngene/types.h"
 /** @brief Opaque owned TNgRing handle; release with the matching destroy operation. */
 typedef struct TNgRing TNgRing;
+
+/** @brief Consistent block-level integrity counters; leased storage remains occupied. */
+typedef struct {
+    /** Total preallocated block slots. */
+    size_t capacityBlocks;
+    /** Maximum complex pairs in each slot. */
+    size_t blockSamples;
+    /** Occupied slots, including the outstanding reader lease. */
+    size_t usedBlocks;
+    /** Peak occupied slots since creation; same counter as NgRingHighWater. */
+    size_t highWaterBlocks;
+    /** Successfully copied complex pairs. */
+    uint64_t acceptedSamples;
+    /** Pairs whose reader lease was released. */
+    uint64_t consumedSamples;
+    /** Pending pairs, including the outstanding lease. */
+    uint64_t pendingSamples;
+    /** Push attempts refused because all slots were occupied. */
+    uint64_t overflowEvents;
+    /** Percentage of slots occupied, independent of partial block lengths. */
+    double occupancyPercent;
+    /** Free slots expressed in milliseconds at the specified nominal rate. */
+    double availableMs;
+} TNgRingStats;
+
+/** @brief Create the existing preallocated ring for a native IQ representation.
+ * @param blocks Number of slots, at least two.
+ * @param blockSamples Complex-pair capacity per slot, positive.
+ * @param format CI8, CU8 or little-endian SC16 Q11.
+ * @param out Receives owned ring, NULL on failure.
+ * @param error Optional diagnostic destination.
+ * @return NG_OK on success, NG_ERROR on invalid geometry or allocation failure.
+ */
+int NgRingCreateFormat(size_t blocks, size_t blockSamples, TNgSampleFormat format, TNgRing **out,
+                       TNgError *error);
+/** @brief Copy a consistent snapshot under the existing ring mutex.
+ * @param ring Live ring, or NULL for an all-zero unavailable snapshot.
+ * @param sampleRateHz Nominal complex pairs/s; zero disables availableMs calculation.
+ * @param stats Writable result; no sample pointers are returned.
+ */
+void NgRingSnapshot(TNgRing *ring, uint32_t sampleRateHz, TNgRingStats *stats);
 /**
  * @brief Create a preallocated single-producer/single-reader block ring.
  *
@@ -96,7 +137,7 @@ size_t NgRingHighWater(TNgRing *ring);
  * @brief Count complex pairs still queued in the ring.
  *
  * @details
- * Takes the ring mutex and traverses occupied metadata; includes the current reader lease.
+ * Takes the ring mutex and reads the O(1) pending counter; includes the current reader lease.
  * Intended for status, not per-sample processing.
  *
  * @param ring Live ring.

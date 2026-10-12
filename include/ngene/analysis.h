@@ -119,6 +119,12 @@ typedef struct {
     size_t spectrumBins;
     /** Uniform signed-int8 bins; supports 256 individual ADC levels. */
     unsigned histogramBins;
+    /** Lowest and highest signed ADC levels represented by the histogram bins. */
+    int histogramMin;
+    /** Highest ADC level represented by the histogram bins. */
+    int histogramMax;
+    /** Native representation of the observed samples. */
+    TNgSampleFormat sampleFormat;
     /** Counts for signed in-phase ADC levels grouped into histogramBins. */
     uint32_t histogramI[NG_HISTOGRAM_BINS];
     /** Counts for signed quadrature ADC levels grouped into histogramBins. */
@@ -203,6 +209,14 @@ int NgAnalysisValidate(const TNgAnalysisConfig *config, TNgError *error);
  */
 int NgAnalysisCreate(uint32_t sampleRate, const TNgAnalysisConfig *config, TNgAnalysis **out,
                      TNgError *error);
+/** @brief Set the device-applied nominal sample rate before the first IQ submission.
+ * @details Configuration-time operation only; refuses changes after any burst was offered.
+ * This is a library-reported nominal rate, not a measured oscillator frequency.
+ * @param analysis Live newly created diagnostic worker.
+ * @param sampleRateHz Applied complex pairs/s, positive.
+ * @return NG_OK on update or NG_ERROR if capture has already started.
+ */
+int NgAnalysisSetSampleRate(TNgAnalysis *analysis, uint32_t sampleRateHz);
 /**
  * @brief Stop, join and release the diagnostic worker.
  *

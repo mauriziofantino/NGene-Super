@@ -48,6 +48,18 @@ TNgConditioner NgConditionerBypass(void);
  * @return NG_OK on success; NG_ERROR for invalid bounds or allocation failure.
  */
 int NgConditionerDcCreate(size_t capacity, unsigned shift, TNgConditioner *out, TNgError *error);
+/** @brief Allocate the continuous DC remover for a native integer IQ format.
+ * @details No block-wise mean reset. CU8 is recentered only for arithmetic and stored
+ * as CU8 again; SC16 Q11 retains 12-bit ADC resolution and saturates to [-2048,2047].
+ * @param capacity Maximum complex pairs per call, positive.
+ * @param shift Continuous estimator exponent in 4..24.
+ * @param format Native IQ representation.
+ * @param out Receives owned conditioner.
+ * @param error Optional diagnostic.
+ * @return NG_OK on success, NG_ERROR on invalid format/capacity/allocation.
+ */
+int NgConditionerDcCreateFormat(size_t capacity, unsigned shift, TNgSampleFormat format,
+                                TNgConditioner *out, TNgError *error);
 /**
  * @brief Release storage owned by the continuous DC conditioner.
  *

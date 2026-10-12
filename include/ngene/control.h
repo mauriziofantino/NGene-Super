@@ -45,6 +45,8 @@ typedef struct {
     uint32_t actualBandwidthHz;
     /** Complex sample rate reported by the opened frontend, in pairs per second. */
     uint32_t actualSampleRateHz;
+    /** Native sample representation applied by the active frontend. */
+    TNgSampleFormat sampleFormat;
     /** Applied SDR tuning frequency in hertz. */
     uint64_t hardwareFrequencyHz;
     /** Requested signal centre in hertz; independent of SDR tuning. */
