@@ -1,0 +1,12 @@
+{
+  "version": "0.6.4-multisdr-candidate",
+  "source_baseline": "c32d459f3588e33fce728db9a9f1a866ec113049",
+  "implementation_commit": "34b7ea8",
+  "native_toolchain": {"os":"Linux", "architecture":"x86_64", "compiler":"GCC 13.3.0", "cmake":"4.4.4", "first_party_warnings_as_errors":true},
+  "tests": {"baseline_release_off":10,"release_off":11,"debug_off":11,"release_all_sdr":14,"debug_all_sdr":14,"asan_ubsan_off":11,"clean_checkout_all_sdr":14},
+  "regressions": {"browser":"passed Chromium 134, one source + native gain capability fixtures", "doxygen":"passed 1.18.0 warnings as errors", "arm64_objects":"12 compiled; not executed", "ring_concurrent_blocks":60000, "rfic_patches":"8 files byte-identical to upstream patch result"},
+  "sanitizer_limit":"Leak detection disabled; leak checking not certified in this environment",
+  "runtime_smoke":{"help":"passed","version":"passed, all native libraries linked","list_devices":"attempted; physical libusb initialization unavailable in container"},
+  "not_verified":["native Windows MSVC","macOS","ARM64 execution","physical HackRF","physical RTL-SDR","physical bladeRF","long-duration RF/USB continuity","full 24-channel GNSS throughput"],
+  "limitations":["Hardware-only loss counters unsupported; unavailable telemetry is null","Replay does not reconstruct RF gaps from CSV","Legacy GNSS acquisition/tracking/XOR kernels are not yet attached to the 0.6.3 capture kernel","Non-CI8 GNSS channel callbacks are explicitly rejected pending native multibit kernels"]
+}

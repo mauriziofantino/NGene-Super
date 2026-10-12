@@ -1,0 +1,42 @@
+[
+  {
+    "file": "ad9361.c",
+    "sha256": "a0cdc01d8bc8606696af42af707c08a10b6c4892570f320ee2761c087711bdff",
+    "matches_reference": true
+  },
+  {
+    "file": "ad9361.h",
+    "sha256": "889a6c835249b88088c509ea1a6f3438395c2e3d74cda5eb671ea7f579716772",
+    "matches_reference": true
+  },
+  {
+    "file": "ad9361_api.c",
+    "sha256": "5f5eb561a9e8a6273aeb80088afd3c51109b99d4bd9c9864a6494dc3eb07f40d",
+    "matches_reference": true
+  },
+  {
+    "file": "ad9361_api.h",
+    "sha256": "c5577597754013afcb6ccbc9b9307f35d5d9db6095b6c0a5d58cc21bd3e5a236",
+    "matches_reference": true
+  },
+  {
+    "file": "ad9361_conv.c",
+    "sha256": "78fd1346fb6fac506a4b093c4dfafbff6eb9ef75af65188a521a3a8970a69fcb",
+    "matches_reference": true
+  },
+  {
+    "file": "common.h",
+    "sha256": "ab4ddd5af1ba77658290ea1e51526ae88a044016cb28736883aa1d6a5dc59e62",
+    "matches_reference": true
+  },
+  {
+    "file": "util.c",
+    "sha256": "9dcc360402077ec3f2eaaffaaf38c2ce503e0492c03553d2ed2e72bfb30711b2",
+    "matches_reference": true
+  },
+  {
+    "file": "util.h",
+    "sha256": "fda0c0ebefa710fadf0615244c4276aa6c10de121ee678e68c33bf0bcac233c8",
+    "matches_reference": true
+  }
+]

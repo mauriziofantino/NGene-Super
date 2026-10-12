@@ -1,0 +1,20 @@
+[  9%] Built target ngene_http
+[  9%] Built target ngene_rtlsdr_native
+[ 11%] Built target ngene_hackrf_native
+[ 18%] Built target ngene_ad936x
+[ 58%] Built target ngene_bladerf_native
+[ 76%] Built target ngene_core
+[ 77%] Built target ngene_control
+[ 78%] Building C object CMakeFiles/ngene_sdr_tests.dir/tests/test_sdr.c.o
+[ 79%] Built target ngene_analysis_tests
+[ 80%] Built target ngene_replay_tests
+[ 83%] Built target ngene_fft_tests
+[ 83%] Built target ngene_sample_tests
+[ 86%] Built target ngene_rtlsdr_tests
+[ 88%] Built target ngene_bladerf_tests
+[ 91%] Built target ngene_control_tests
+[ 93%] Built target ngene_tests
+[ 96%] Built target ngene_hackrf_tests
+[ 99%] Built target ngene
+[100%] Linking C executable ngene_sdr_tests
+[100%] Built target ngene_sdr_tests

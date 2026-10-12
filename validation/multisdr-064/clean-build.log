@@ -1,0 +1,40 @@
+[  2%] Built target ngene_hackrf_native
+[ 11%] Built target ngene_rtlsdr_native
+[ 11%] Built target ngene_http
+[ 18%] Built target ngene_ad936x
+[ 58%] Built target ngene_bladerf_native
+[ 58%] Building C object CMakeFiles/ngene_core.dir/src/core/receiver.c.o
+[ 58%] Building C object CMakeFiles/ngene_core.dir/src/recording/metadata.c.o
+[ 59%] Building C object CMakeFiles/ngene_core.dir/src/recording/recording.c.o
+[ 60%] Linking C static library libngene_core.a
+[ 76%] Built target ngene_core
+[ 77%] Building C object CMakeFiles/ngene_control.dir/src/control/control.c.o
+[ 77%] Linking C executable ngene_analysis_tests
+[ 78%] Building C object CMakeFiles/ngene_sdr_tests.dir/tests/test_sdr.c.o
+[ 78%] Linking C executable ngene_fft_tests
+[ 79%] Linking C executable ngene_replay_tests
+[ 79%] Linking C executable ngene_sample_tests
+[ 80%] Built target ngene_fft_tests
+[ 81%] Built target ngene_analysis_tests
+[ 82%] Built target ngene_replay_tests
+[ 83%] Built target ngene_sample_tests
+[ 84%] Building C object CMakeFiles/ngene_tests.dir/tests/test_core.c.o
+[ 85%] Linking C executable ngene_hackrf_tests
+[ 86%] Linking C executable ngene_rtlsdr_tests
+[ 87%] Linking C executable ngene_bladerf_tests
+[ 89%] Built target ngene_hackrf_tests
+[ 91%] Built target ngene_bladerf_tests
+[ 92%] Built target ngene_rtlsdr_tests
+[ 92%] Linking C static library libngene_control.a
+[ 92%] Built target ngene_control
+[ 92%] Building C object CMakeFiles/ngene.dir/apps/main.c.o
+[ 93%] Building C object CMakeFiles/ngene_control_tests.dir/tests/test_control.c.o
+[ 95%] Building C object CMakeFiles/ngene.dir/src/web/server.c.o
+[ 95%] Linking C executable ngene_sdr_tests
+[ 95%] Built target ngene_sdr_tests
+[ 96%] Linking C executable ngene_control_tests
+[ 97%] Built target ngene_control_tests
+[ 98%] Linking C executable ngene_tests
+[ 98%] Built target ngene_tests
+[ 99%] Linking C executable ngene
+[100%] Built target ngene

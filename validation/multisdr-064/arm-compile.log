@@ -1,0 +1,12 @@
+src/stream/format.c exit=0
+src/stream/ring.c exit=0
+src/frontend/ingress.c exit=0
+src/frontend/frontend.c exit=0
+src/frontend/file.c exit=0
+src/frontend/hackrf.c exit=0
+src/frontend/rtlsdr.c exit=0
+src/frontend/bladerf.c exit=0
+src/core/receiver.c exit=0
+src/conditioning/dc.c exit=0
+src/analysis/analysis.c exit=0
+tests/test_sdr.c exit=0

@@ -1,0 +1,5 @@
+-- NGene target Linux/x86_64; native HackRF=OFF
+-- Found Doxygen: /workspace/scratch/4b1b6222cc2b/tools/doxygen-1.18.0/bin/doxygen (found version "1.18.0") found components: doxygen missing components: dot
+-- Configuring done (0.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /workspace/scratch/4b1b6222cc2b/ngene/build/docs

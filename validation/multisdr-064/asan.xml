@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="11"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="3"
+	timestamp="2026-10-12T18:00:25"
+	>
+	<testcase name="native_iq_ingress_and_pipeline" classname="native_iq_ingress_and_pipeline" time="0.808829" status="run">
+		<properties/>
+		<system-out>PASS native CI8/CU8/SC16 Q11 ingress, 60,000 concurrent blocks, exact recording/replay and integer diagnostics
+</system-out>
+	</testcase>
+	<testcase name="build_dependency_contract" classname="build_dependency_contract" time="0.257473" status="run">
+		<properties/>
+		<system-out>-- PASS: manifest pin, source hash and immutable DLL import header
+-- PASS: pre-project Windows target selection, discovery and manifest cache repair
+-- Compiler fixtures: /tmp/ngt-f243aa2212e3 (retained on failure)
+-- PASS: installed SDK consumer import header, without changing SDK or target
+-- PASS: PRIVATE MSVC /W0 for vendors; receiver /W4 /WX preserved (configure only)
+</system-out>
+	</testcase>
+	<testcase name="runtime_staging_mock_contract" classname="runtime_staging_mock_contract" time="0.0240239" status="run">
+		<properties/>
+		<system-out>-- PASS: standalone runtime policy, spaces, transitive DLL closure, CRT staging, OS exclusions and unresolved-DLL failure (mock dumpbin)
+</system-out>
+	</testcase>
+	<testcase name="file_replay_contract" classname="file_replay_contract" time="0.00598682" status="run">
+		<properties/>
+		<system-out>PASS: independent replay buffers/ranges, leases, EOF, loop gaps and signed CI8
+</system-out>
+	</testcase>
+	<testcase name="sample_math_and_dc" classname="sample_math_and_dc" time="0.128103" status="run">
+		<properties/>
+		<system-out>PASS: signed CI8 moments, full-range CI16 power, DC chunk invariance/gap, tuning metadata
+</system-out>
+	</testcase>
+	<testcase name="analysis_worker_contract" classname="analysis_worker_contract" time="0.156577" status="run">
+		<properties/>
+		<system-out>PASS: tone frequency/level, histogram totals/rails, gap reset and runtime reconfiguration
+</system-out>
+	</testcase>
+	<testcase name="fft_integer_contract" classname="fft_integer_contract" time="0.0586638" status="run">
+		<properties/>
+		<system-out>PASS: SSE2-assembly, every size 8..16384, bit-exact scalar and DFT checks
+</system-out>
+	</testcase>
+	<testcase name="core_contracts" classname="core_contracts" time="1.58216" status="run">
+		<properties/>
+		<system-out>PASS: config, ring lease/wrap/full/EOF, 5000 concurrent blocks, synchronized channels/gap, segmented byte-exact recording/no-overwrite
+</system-out>
+	</testcase>
+	<testcase name="cli_help" classname="cli_help" time="0.00434487" status="run">
+		<properties/>
+		<system-out>NGene: [--web] [--config FILE] [--replay FILE] [--port 8080] [--output-dir captures]
+       --list-devices | --version
+C receiver and local web console; no acquisition, tracking or PVT yet.
+</system-out>
+	</testcase>
+	<testcase name="cli_version" classname="cli_version" time="0.00485592" status="run">
+		<properties/>
+		<system-out>NGene 0.6.4 Linux/x86_64 native-HackRF=no; FFT=SSE2-assembly
+native-RTL-SDR=no; native-bladeRF=no
+</system-out>
+	</testcase>
+	<testcase name="controller_lifecycle" classname="controller_lifecycle" time="0.316368" status="run">
+		<properties/>
+		<system-out>Controller lifecycle, revision guard, recording and EOF: PASS
+</system-out>
+	</testcase>
+</testsuite>

@@ -1,0 +1,3 @@
+[ERROR] Could not initialize libusb: LIBUSB_ERROR_OTHER
+bladeRF enumerate: Unknown error code
+RTL-SDR devices=0

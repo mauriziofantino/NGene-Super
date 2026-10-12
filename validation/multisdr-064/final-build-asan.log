@@ -1,0 +1,30 @@
+[  6%] Built target ngene_http
+[  8%] Building C object CMakeFiles/ngene_core.dir/src/core/receiver.c.o
+[ 11%] Building C object CMakeFiles/ngene_core.dir/src/recording/recording.c.o
+[ 13%] Building C object CMakeFiles/ngene_core.dir/src/recording/metadata.c.o
+[ 15%] Linking C static library libngene_core.a
+[ 51%] Built target ngene_core
+[ 53%] Building C object CMakeFiles/ngene_control.dir/src/control/control.c.o
+[ 55%] Linking C executable ngene_replay_tests
+[ 57%] Linking C executable ngene_sample_tests
+[ 60%] Building C object CMakeFiles/ngene_sdr_tests.dir/tests/test_sdr.c.o
+[ 64%] Built target ngene_sample_tests
+[ 66%] Built target ngene_replay_tests
+[ 68%] Linking C executable ngene_fft_tests
+[ 71%] Linking C executable ngene_analysis_tests
+[ 73%] Linking C executable ngene_sdr_tests
+[ 75%] Built target ngene_analysis_tests
+[ 77%] Built target ngene_fft_tests
+[ 80%] Building C object CMakeFiles/ngene_tests.dir/tests/test_core.c.o
+[ 82%] Linking C static library libngene_control.a
+[ 82%] Built target ngene_sdr_tests
+[ 82%] Built target ngene_control
+[ 84%] Building C object CMakeFiles/ngene_control_tests.dir/tests/test_control.c.o
+[ 86%] Building C object CMakeFiles/ngene.dir/apps/main.c.o
+[ 88%] Building C object CMakeFiles/ngene.dir/src/web/server.c.o
+[ 91%] Linking C executable ngene_control_tests
+[ 93%] Linking C executable ngene_tests
+[ 95%] Built target ngene_control_tests
+[ 95%] Built target ngene_tests
+[ 97%] Linking C executable ngene
+[100%] Built target ngene

@@ -1,0 +1,3 @@
+CI8: 16000 pairs/block, 20000 iterations, 0.946 us/block, 16912.3 M complex pairs/s
+CU8: 16000 pairs/block, 20000 iterations, 0.891 us/block, 17957.3 M complex pairs/s
+SC16_Q11: 16000 pairs/block, 20000 iterations, 1.741 us/block, 9191.1 M complex pairs/s
