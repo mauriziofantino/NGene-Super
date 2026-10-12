@@ -136,7 +136,9 @@ static void Receive(void *context)
         uint64_t missing = 0;
         int result;
         memset(&metadata, 0, sizeof(metadata));
-        metadata.flags = (uint32_t)BLADERF_META_FLAG_RX_NOW;
+        /* BLADERF_META_FLAG_RX_NOW is bit 31; use unsigned storage without
+         * expanding upstream's signed (1 << 31) expression. */
+        metadata.flags = UINT32_C(0x80000000);
         result = bladerf_sync_rx(source->device, source->buffer, source->transferSamples, &metadata,
                                  100);
         if (NgAtomicGet(&source->stopping) != 0) {

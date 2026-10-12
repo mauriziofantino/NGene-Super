@@ -220,6 +220,7 @@ int CALL_CONV bladerf_sync_rx(struct bladerf *device, void *samples, unsigned co
     unsigned index;
     TNgIqView view = {0};
     (void)timeout;
+    CHECK(metadata->flags == UINT32_C(0x80000000));
     if (device->calls >= 2) {
         NgSleepMs(1);
         return BLADERF_ERR_TIMEOUT;
