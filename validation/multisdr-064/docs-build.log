@@ -14,22 +14,22 @@ Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/include
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/include/ngene
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/include/ngene/dsp
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src
-Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/platform
-Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/config
-Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/conditioning
-Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/recording
-Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/control
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/frontend
-Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/stream
-Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/analysis
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/dsp
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/dsp/fft
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/dsp/x86
+Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/dsp/dispatch
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/dsp/arm
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/dsp/reference
-Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/dsp/dispatch
+Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/platform
+Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/stream
+Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/conditioning
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/core
+Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/config
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/web
+Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/recording
+Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/analysis
+Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/src/control
 Searching for files in directory /workspace/scratch/4b1b6222cc2b/ngene/apps
 Reading and parsing tag files
 Parsing files
@@ -336,7 +336,7 @@ Generating file member index...
 Generating example index...
 finalizing index lists...
 writing tag file...
-type lookup cache used 895/65536 hits=2858 misses=981
-symbol lookup cache used 2036/65536 hits=4300 misses=2036
+type lookup cache used 897/65536 hits=2870 misses=983
+symbol lookup cache used 2041/65536 hits=4310 misses=2041
 finished...
 [100%] Built target ngene_docs

@@ -13,3 +13,7 @@ tests/test_sdr.c exit=0
 Final revision: src/recording/metadata.c exit=0
 Final revision: src/recording/recording.c exit=0
 Final revision: tests/test_sdr.c exit=0
+PASS final ARM64 compile src/frontend/ingress.c
+PASS final ARM64 compile src/frontend/bladerf.c
+PASS final ARM64 compile src/frontend/hackrf.c
+PASS final ARM64 compile src/frontend/rtlsdr.c

@@ -11,10 +11,10 @@
 -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
 -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
 -- Found Threads: TRUE
--- NGene HackRF provider: upstream source /workspace/scratch/4b1b6222cc2b/clean checkout/build fresh/_deps/ngene_hackrf_source-src; library 0.9.2
+-- NGene HackRF provider: upstream source /workspace/scratch/4b1b6222cc2b/verified final/build native/_deps/ngene_hackrf_source-src; library 0.9.2
 -- The ASM compiler identification is GNU
 -- Found assembler: /usr/bin/cc
 -- NGene target Linux/x86_64; native HackRF=ON
--- Configuring done (35.9s)
+-- Configuring done (36.8s)
 -- Generating done (0.0s)
--- Build files have been written to: /workspace/scratch/4b1b6222cc2b/clean checkout/build fresh
+-- Build files have been written to: /workspace/scratch/4b1b6222cc2b/verified final/build native
