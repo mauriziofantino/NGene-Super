@@ -127,6 +127,14 @@ static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError 
                       failure == 2 ? "ingress overflow" : "invalid transfer/index");
     }
     result = NgRingAcquire(s->ingress.ring, view, timeoutMs);
+    /* A failing producer can close the ring while this reader is asleep.
+     * Never interpret that wakeup as clean EOF. A successful lease stays valid
+     * and is processed normally; the next acquire surfaces the terminal error. */
+    failure = NgAtomicGet(&s->ingress.failure);
+    if (result != NG_OK && failure != 0) {
+        return NgFail(error, "HackRF callback stopped: %s",
+                      failure == 2 ? "ingress overflow" : "invalid transfer/index");
+    }
     if (result == NG_TIMEOUT && hackrf_is_streaming(s->device) != HACKRF_TRUE) {
         NgIngressTransportError(&s->ingress);
         return NgFail(error,

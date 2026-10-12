@@ -224,6 +224,9 @@ int CALL_CONV bladerf_sync_rx(struct bladerf *device, void *samples, unsigned co
         NgSleepMs(1);
         return BLADERF_ERR_TIMEOUT;
     }
+    if (malformed) {
+        NgSleepMs(5);
+    }
     metadata->timestamp = device->calls == 0 ? 1000u : 1037u;
     metadata->status = device->calls == 0 ? 0u : (uint32_t)BLADERF_META_STATUS_OVERRUN;
     metadata->actual_count = malformed ? count + 1u : device->calls == 0 ? 32u : 8u;
@@ -276,6 +279,8 @@ int main(void)
                 }
                 source.ops->release(source.context);
             }
+        } else if (scenario == 2) {
+            CHECK(source.ops->acquire(source.context, &view, 1000, &error) == NG_ERROR);
         } else {
             for (index = 0; index < 100; ++index) {
                 source.ops->stats(source.context, &stats);

@@ -132,12 +132,20 @@ static int Start(void *context, TNgError *error)
 static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError *error)
 {
     TNgRtlsdrSource *source = context;
+    int result;
     int failure = NgAtomicGet(&source->ingress.failure);
     if (failure != 0) {
         return NgFail(error, "RTL-SDR stopped: %s",
                       failure == 2 ? "software ingress overflow" : "transport/invalid transfer");
     }
-    return NgRingAcquire(source->ingress.ring, view, timeoutMs);
+    result = NgRingAcquire(source->ingress.ring, view, timeoutMs);
+    /* Error-triggered close during a wait must not become successful EOF. */
+    failure = NgAtomicGet(&source->ingress.failure);
+    if (result != NG_OK && failure != 0) {
+        return NgFail(error, "RTL-SDR stopped: %s",
+                      failure == 2 ? "software ingress overflow" : "transport/invalid transfer");
+    }
+    return result;
 }
 
 /** @brief End one borrowed IQ block.

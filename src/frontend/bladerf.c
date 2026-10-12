@@ -216,12 +216,20 @@ static int Start(void *context, TNgError *error)
 static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError *error)
 {
     TNgBladerfSource *source = context;
+    int result;
     int failure = NgAtomicGet(&source->ingress.failure);
     if (failure != 0) {
         return NgFail(error, "bladeRF stopped: %s",
                       failure == 2 ? "software ingress overflow" : "transport/metadata error");
     }
-    return NgRingAcquire(source->ingress.ring, view, timeoutMs);
+    result = NgRingAcquire(source->ingress.ring, view, timeoutMs);
+    /* Error-triggered close during a wait must not become successful EOF. */
+    failure = NgAtomicGet(&source->ingress.failure);
+    if (result != NG_OK && failure != 0) {
+        return NgFail(error, "bladeRF stopped: %s",
+                      failure == 2 ? "software ingress overflow" : "transport/metadata error");
+    }
+    return result;
 }
 
 /** @brief Relinquish the current native IQ block.

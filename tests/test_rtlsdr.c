@@ -229,6 +229,9 @@ int main(void)
             NgSleepMs(10);
             CHECK(NgIqComponent(&view, 3, 0) == -125);
             source.ops->release(source.context);
+        } else if (scenario == 2) {
+            /* Callback error arrives while the reader is waiting on an empty ring. */
+            CHECK(source.ops->acquire(source.context, &view, 1000, &error) == NG_ERROR);
         } else {
             for (index = 0; index < 100; ++index) {
                 source.ops->stats(source.context, &stats);
