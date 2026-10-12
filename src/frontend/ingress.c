@@ -56,6 +56,19 @@ void NgIngressDeviceGap(TNgIngress *ingress, uint64_t missing)
     NgMutexUnlock(&ingress->mutex);
 }
 
+/** @brief Add a timestamp-derived duration to an already reported device gap.
+ * Parameter ingress Live initialized source.
+ * Parameter missing Missing complex pairs; zero leaves the duration unknown.
+ */
+void NgIngressDeviceMissing(TNgIngress *ingress, uint64_t missing)
+{
+    NgMutexLock(&ingress->mutex);
+    if (UINT64_MAX - ingress->published.deviceMissingSamples >= missing) {
+        ingress->published.deviceMissingSamples += missing;
+    }
+    NgMutexUnlock(&ingress->mutex);
+}
+
 /** @brief Copy a whole vendor transfer in bounded chunks, before its pointer expires.
  * @details Single producer only; assigns GAP metadata for known software drops. No
  * allocation or I/O. Publishes counters once per transfer. Returns NG_FULL only after a

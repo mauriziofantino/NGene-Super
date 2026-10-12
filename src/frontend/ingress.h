@@ -65,6 +65,11 @@ void NgIngressTransportError(TNgIngress *ingress);
  * @param missing Exact timestamp-derived missing pairs, or zero if unknown.
  */
 void NgIngressDeviceGap(TNgIngress *ingress, uint64_t missing);
+/** @brief Add an exact duration for a device-gap event already reported.
+ * @param ingress Live initialized source.
+ * @param missing Missing complex pairs; zero leaves the duration unknown.
+ */
+void NgIngressDeviceMissing(TNgIngress *ingress, uint64_t missing);
 /** @brief Free initialized state after both endpoints stop and all leases end.
  * @param ingress Initialized state; ring NULL means initialization failed.
  */

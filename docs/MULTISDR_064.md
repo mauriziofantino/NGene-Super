@@ -19,6 +19,16 @@ The continuous DC remover supports the three native formats. Its Q32 state persi
 
 The current 0.6.3 repository is a capture/diagnostics kernel with channel interfaces; the legacy GPS/Galileo acquisition, tracking, navigation and XOR kernels are not yet migrated into it. No claim of a working 24-channel GNSS receiver is made. Existing CI8 channel callbacks remain supported; non-CI8 channel registration fails explicitly until native multibit channel kernels are implemented.
 
+### Quantization and future processing cost
+
+Storage precision and algorithm precision are separate choices. HackRF CI8 and RTL-SDR CU8 remain two bytes per complex pair; bladeRF SC16 Q11 uses four bytes and retains its twelve significant ADC bits. No common conversion widens the entire eight-bit stream to sixteen bits. Existing CI8 SIMD moment kernels and the CI8 diagnostic fast path are retained. The diagnostic FFT already used sixteen-bit integer input in 0.6.3; scaling a selected diagnostic burst to that range does not widen the receiver's common stream.
+
+SC16 costs twice the memory traffic in native transport/recording. A sixteen-bit SIMD lane also packs fewer values than an eight-bit lane of equal vector width, but the end-to-end cost depends on instruction selection, accumulation, memory pressure and workload. Twelve ADC bits do not imply that every algorithm must be much slower. The ring benchmark measures the native copy cost only; it cannot establish correlation throughput.
+
+The intended future correlation dispatch preserves per-format kernels. PRECISE should use validated CI8/CU8 kernels and separate SC16 Q11 kernels with safely bounded wider accumulators. FAST should perform a shared, explicit one-bit quantization/packing once per processing block before channel fan-out, then use the same packed XOR/POPCNT representation regardless of ADC width. BALANCED should similarly prepare shared two-bit planes with specified thresholds and weighted correlations. Thus an eight-bit source need not pay for twelve-bit arithmetic, and retaining a twelve-bit recording need not force PRECISE processing in every channel. Quantization policy must remain selectable and tested against the GNSS correlation semantics; bladeRF must never be silently truncated just to fit an eight-bit kernel.
+
+These correlation modes and CPU-dispatched multibit SIMD kernels are not implemented by this increment. New CU8/SC16 diagnostic and DC operations currently use scalar reference paths. Their vectorization and complete receiver benchmarks remain subsequent work; this increment establishes native formats and preserves the existing eight-bit path.
+
 ## Integrity and ownership
 
 All native adapters use `TNgIngress`, a bookkeeping wrapper around the existing `TNgRing`. HackRF's former callback-local splitting/counters move into that common helper with the same stop/drop-newest policy. RTL-SDR uses a private native asynchronous dispatcher; bladeRF uses a private bounded-timeout synchronous RX worker with metadata. Copies finish before vendor storage expires. No allocation, recording or networking occurs in sample callbacks. One reader may hold one immutable lease; a leased slot remains occupied until release, and a full ring never overwrites it.
@@ -29,7 +39,7 @@ Three different loss classes remain distinct:
 
 - **Software overflow:** exact delivered pairs refused by NGene ingress; `droppedSamples` and `ingress.overflowEvents`. Stop rejects the remainder of that transfer and stops RX. Drop-newest continues, advances indices and annotates the next accepted block with the known gap.
 - **Transport error:** malformed transfers, invalid metadata, native RX failure or unexpected stopped streaming. It does not increase software-overflow counters.
-- **Device/library continuity:** bladeRF metadata overrun flags and positive hardware timestamp deltas. Overrun alone does not identify hardware-only loss. A positive delta gives exact missing pairs; an overrun with no measurable delta retains an unknown duration. An unknown vendor gap remains unknown even if its first frame also overflows NGene ingress.
+- **Device/library continuity:** bladeRF metadata overrun flags and positive hardware timestamp deltas. In the pinned libbladeRF 2.6.0 `src/streaming/sync.c`, an overrun returns the valid contiguous prefix before the gap. NGene preserves that prefix, reports the event immediately and attaches GAP to the following interval. The following timestamp delta completes the missing-pair count without reporting the same event twice. Overrun alone does not identify hardware-only loss; without a measurable delta its duration remains unknown. An unknown vendor gap remains unknown even if its first frame also overflows NGene ingress.
 
 A producer-error close can race with a waiting consumer. Every native adapter rechecks its asynchronous error after a non-successful acquire, so a closed-ring wakeup cannot be mistaken for clean EOF and mark an interrupted recording complete. Deterministic RTL-SDR/bladeRF fixtures cover this race. Successfully acquired storage remains valid until release; a subsequent acquire surfaces the terminal error.
 

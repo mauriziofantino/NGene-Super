@@ -229,7 +229,7 @@ int CALL_CONV bladerf_sync_rx(struct bladerf *device, void *samples, unsigned co
         NgSleepMs(5);
     }
     metadata->timestamp = device->calls == 0 ? 1000u : 1037u;
-    metadata->status = device->calls == 0 ? 0u : (uint32_t)BLADERF_META_STATUS_OVERRUN;
+    metadata->status = device->calls == 0 ? (uint32_t)BLADERF_META_STATUS_OVERRUN : 0u;
     metadata->actual_count = malformed ? count + 1u : device->calls == 0 ? 32u : 8u;
     view.samples = samples;
     view.format = NG_FORMAT_SC16_Q11;
@@ -274,6 +274,9 @@ int main(void)
                 CHECK(NgIqComponent(&view, 0, 0) == 1235 && NgIqComponent(&view, 0, 1) == -1901);
                 CHECK((view.meta.flags & NG_BLOCK_HARDWARE_TIME) != 0);
                 CHECK(view.meta.hardwareTimestamp == 1000u + view.meta.firstSample);
+                if (index < 8) {
+                    CHECK((view.meta.flags & NG_BLOCK_GAP) == 0);
+                }
                 if (index == 8) {
                     CHECK(view.meta.firstSample == 37 && view.meta.missingKnown &&
                           view.meta.missingBefore == 5 && (view.meta.flags & NG_BLOCK_GAP));

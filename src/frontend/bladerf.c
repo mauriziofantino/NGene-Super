@@ -32,6 +32,8 @@ typedef struct {
     uint64_t origin;
     /** Expected next native sample-clock tick. */
     uint64_t expectedTimestamp;
+    /** Overrun reported after the previous valid prefix; annotate the next interval. */
+    int pendingOverrun;
     /** Copied native serial string; stable for the source lifetime. */
     char serial[128];
 } TNgBladerfSource;
@@ -169,11 +171,21 @@ static void Receive(void *context)
         view.meta.firstSample = metadata.timestamp - source->origin;
         view.meta.hardwareTimestamp = metadata.timestamp;
         view.meta.flags = NG_BLOCK_HARDWARE_TIME;
-        if (missing != 0 || (metadata.status & BLADERF_META_STATUS_OVERRUN) != 0) {
+        if (missing != 0 || source->pendingOverrun != 0) {
             view.meta.flags |= NG_BLOCK_GAP;
             view.meta.missingBefore = missing;
             view.meta.missingKnown = missing != 0;
-            NgIngressDeviceGap(&source->ingress, missing);
+            if (source->pendingOverrun != 0) {
+                NgIngressDeviceMissing(&source->ingress, missing);
+            } else {
+                NgIngressDeviceGap(&source->ingress, missing);
+            }
+        }
+        /* libbladeRF returns the contiguous prefix BEFORE the reported overrun.
+         * Report that event now, but put its GAP on the following interval. */
+        source->pendingOverrun = (metadata.status & BLADERF_META_STATUS_OVERRUN) != 0;
+        if (source->pendingOverrun != 0) {
+            NgIngressDeviceGap(&source->ingress, 0);
         }
         source->expectedTimestamp = metadata.timestamp + metadata.actual_count;
         if (NgIngressSubmit(&source->ingress, &view) != NG_OK) {
