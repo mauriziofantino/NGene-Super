@@ -14,9 +14,12 @@ Validation evidence is under `validation/multisdr-064/`. This increment uses sou
 | Headless Chromium 134 / Playwright 1.51 GUI regression | Passed |
 | Doxygen 1.18.0 API/implementation reference | Passed with warnings as errors |
 | CMake-only RFIC patch application | All 8 files match GNU-patch reference byte-for-byte |
+| Fresh Linux checkout and build paths containing spaces, all three source providers downloaded automatically | 14/14 tests passed |
 | Native Windows/MSVC Debug/Release | Not executed |
 | macOS builds | Not executed |
 | Hardware reception / long-run RF continuity | Not executed |
+
+Ring microbenchmark on this host: CI8 0.946 us/block, CU8 0.891 us/block, SC16 Q11 1.741 us/block. These are one-run isolated measurements; no cross-machine performance comparison is implied.
 
 The source providers were compiled from official hash-pinned HackRF v2026.01.3, RTL-SDR v2.0.2, bladeRF libbladeRF_v2.6.0 and no-OS commit 0bba46e6f6f75785a65d425ece37d0a04daf6157. Linux uses matching libusb 1.0.27 header/runtime; Windows retains the manifest's pinned libusb 1.0.30. Local source overrides in some validation builds avoid repeated downloads; a separate fresh-checkout/source-fetch check is documented with its own log.
 

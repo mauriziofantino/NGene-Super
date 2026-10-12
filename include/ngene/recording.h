@@ -10,9 +10,9 @@ typedef struct TNgRecorder TNgRecorder;
 typedef struct {
     /** Number of complete windows processed or written, according to the object. */
     uint64_t windows;
-    /** Borrowed complex-pair array; lifetime follows the enclosing view contract. */
+    /** Complex pairs successfully written to raw files. */
     uint64_t samples;
-    /** Number of raw CI8 segment files opened by the writer. */
+    /** Number of native IQ segment files opened by the writer. */
     uint64_t segments;
     /** Complex pairs currently awaiting consumption or disk writing. */
     uint64_t queuedSamples;
@@ -22,7 +22,7 @@ typedef struct {
  * @brief Create exclusive capture files and start the asynchronous writer.
  *
  * @details
- * Creates raw CI8, sample index and metadata files without replacing existing files. Copies
+ * Creates native IQ, sample index and metadata files without replacing existing files. Copies
  * stream metadata as needed; the recorder owns a bounded queue. Finish is mandatory to flush
  * and release resources.
  *
@@ -44,7 +44,7 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
  * Full or failed recorder queues must stop capture; silent recording loss is not permitted.
  *
  * @param recorder Live recorder; protect lifetime against concurrent finish.
- * @param window Borrowed read-only CI8 window copied during this call.
+ * @param window Borrowed read-only native IQ window copied during this call.
  *
  * @return NG_OK if copied; NG_FULL if the queue is full; NG_ERROR if writer failed or input is
  * invalid.

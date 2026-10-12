@@ -286,6 +286,36 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     const sourceHeight = await page.locator('.configuration-shell').evaluate(el=>el.getBoundingClientRect().height);
     assert(sourceHeight<1100,'Source settings still form an excessively long page');
     if(process.env.NGENE_SCREENSHOTS) await page.screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'webgui-configuration.png'),fullPage:true});
+    // Native gain widgets use returned device capabilities. This HTTP response is a
+    // deterministic GUI fixture, not a physical hardware validation.
+    const supports = await (await fetch(`${base}/api/v1/bootstrap`)).json();
+    if (supports.rtlsdr && supports.bladerf) {
+      await page.route('**/api/v1/frontend/capabilities', async route => {
+        const draft = JSON.parse(route.request().postData()).ini;
+        const rtl = draft.includes('type=rtlsdr');
+        await route.fulfill({contentType:'application/json',body:JSON.stringify({
+          format:rtl?'CU8':'SC16_Q11',sample_rate_min_hz:rtl?225001:80000,
+          sample_rate_max_hz:rtl?3200000:61440000,frequency_min_hz:47000000,
+          frequency_max_hz:rtl?1766000000:6000000000,
+          tuner_gains_tenths_db:rtl?[0,77,144]:[],gain_min_db:-12,gain_max_db:60,gain_step_db:1
+        })});
+      });
+      await page.locator('#rtlPreset').click();
+      await page.locator('#deviceLimits').click();
+      await page.waitForFunction(()=>document.getElementById('notice').textContent.includes('limits loaded'));
+      assert.deepEqual(await page.locator('[name="rtlsdr.gain_tenths_db"] option').evaluateAll(opts=>opts.map(o=>o.value)),['0','77','144']);
+      await page.locator('[name="rtlsdr.auto_gain"]').selectOption('false');
+      assert(await page.locator('[name="rtlsdr.gain_tenths_db"]').isEnabled());
+      assert.equal(await page.locator('[name="frontend.sample_rate_hz"]').getAttribute('max'),'3200000');
+      await page.locator('#bladePreset').click();
+      await page.locator('#deviceLimits').click();
+      await page.waitForFunction(()=>document.getElementById('notice').textContent.includes('SC16_Q11'));
+      const gain = page.locator('[name="bladerf.gain_db"]');
+      assert.equal(await gain.getAttribute('min'),'-12');assert.equal(await gain.getAttribute('max'),'60');
+      assert.equal(await gain.getAttribute('step'),'1');assert(await gain.isEnabled());
+      await page.unroute('**/api/v1/frontend/capabilities');
+      await page.locator('#filePreset').click();
+    }
     await page.setViewportSize({width:390,height:844});
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),'Mobile layout overflows');
     if (process.env.NGENE_SCREENSHOTS) await page.screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'webgui-mobile.png'),fullPage:true});

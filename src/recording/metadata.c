@@ -362,7 +362,23 @@ int NgReplayConfigure(const char *path, TNgConfig *config, TNgCaptureMetadata *m
     }
     draft = *config;
     draft.frontend = NG_FRONTEND_FILE;
-    draft.replayFormat = found.format;
+    {
+        size_t length = strlen(path);
+        int namedFormat = (length >= 4 && (strcmp(path + length - 4, ".cs8") == 0 ||
+                                           strcmp(path + length - 4, ".cu8") == 0)) ||
+                          (length >= 8 && strcmp(path + length - 8, ".sc16q11") == 0);
+        if (found.available != 0 || namedFormat) {
+            draft.replayFormat = found.format;
+        } else {
+            found.format = draft.replayFormat;
+            if (draft.replayFormat == NG_FORMAT_SC16_Q11) {
+                if (found.samples % 2u != 0) {
+                    return NgFail(error, "Incomplete declared SC16 Q11 IQ pair");
+                }
+                found.samples /= 2u;
+            }
+        }
+    }
     (void)snprintf(draft.replayPath, sizeof(draft.replayPath), "%s", path);
     draft.replayStartSample = 0;
     draft.replaySampleLimit = 0;

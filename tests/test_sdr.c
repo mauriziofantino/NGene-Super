@@ -279,6 +279,18 @@ static void TestPipeline(TNgSampleFormat format)
     source.ops->release(source.context);
     CHECK(source.ops->stop(source.context, &error) == NG_OK);
     NgFrontendDestroy(&source);
+    if (format == NG_FORMAT_SC16_Q11) {
+        const char *unnamed = "ngene_explicit_native_format.bin";
+        file = NgFopenExclusive(unnamed);
+        CHECK(file != NULL);
+        CHECK(fwrite(expected, 4u, 11, file) == 11 && fclose(file) == 0);
+        NgConfigDefaults(&replay);
+        replay.replayFormat = NG_FORMAT_SC16_Q11;
+        CHECK(NgReplayConfigure(unnamed, &replay, &metadata, &error) == NG_OK);
+        CHECK(!metadata.available && metadata.samples == 11 &&
+              replay.replayFormat == NG_FORMAT_SC16_Q11);
+        CHECK(remove(unnamed) == 0);
+    }
     snprintf(sidecar, sizeof(sidecar), "%s.meta.ini", path);
     CHECK(remove(sidecar) == 0);
     CHECK(remove(path) == 0 && remove(inputPath) == 0);

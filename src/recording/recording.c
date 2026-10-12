@@ -252,7 +252,7 @@ static void WriterThread(void *context)
  * @brief Create exclusive capture files and start the asynchronous writer.
  *
  * @details
- * Creates raw CI8, sample index and metadata files without replacing existing files. Copies
+ * Creates native IQ, sample index and metadata files without replacing existing files. Copies
  * stream metadata as needed; the recorder owns a bounded queue. Finish is mandatory to flush
  * and release resources.
  *
@@ -387,7 +387,7 @@ failed:
  * Full or failed recorder queues must stop capture; silent recording loss is not permitted.
  *
  * Parameter recorder: Live recorder; protect lifetime against concurrent finish.
- * Parameter window: Borrowed read-only CI8 window copied during this call.
+ * Parameter window: Borrowed read-only native IQ window copied during this call.
  *
  * Result: NG_OK if copied; NG_FULL if the queue is full; NG_ERROR if writer failed or input is
  * invalid.
