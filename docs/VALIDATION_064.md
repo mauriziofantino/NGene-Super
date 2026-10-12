@@ -10,7 +10,7 @@ Validation evidence is under `validation/multisdr-064/`. This increment uses sou
 | 0.6.4 Release, HackRF + RTL-SDR + bladeRF | 14/14 tests passed |
 | 0.6.4 Debug, HackRF + RTL-SDR + bladeRF | 14/14 tests passed |
 | AddressSanitizer + UBSan, Debug, native drivers disabled | 11/11 tests passed; leak detection disabled due to sandbox limitations |
-| ARM64 cross-compilation of 12 changed module/test objects | Passed with warnings as errors; compile only |
+| ARM64 cross-compilation of 14 changed module/test objects | Passed with warnings as errors; compile only |
 | Headless Chromium 134 / Playwright 1.51 GUI regression | Passed |
 | Doxygen 1.18.0 API/implementation reference | Passed with warnings as errors |
 | CMake-only RFIC patch application | All 8 files match GNU-patch reference byte-for-byte |

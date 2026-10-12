@@ -10,3 +10,6 @@ src/core/receiver.c exit=0
 src/conditioning/dc.c exit=0
 src/analysis/analysis.c exit=0
 tests/test_sdr.c exit=0
+Final revision: src/recording/metadata.c exit=0
+Final revision: src/recording/recording.c exit=0
+Final revision: tests/test_sdr.c exit=0
