@@ -10,7 +10,7 @@
 
 /** @brief One copied diagnostic input slot; lifecycle serializes producer and worker ownership. */
 typedef struct {
-    /** Owned copied CI8 observation; immutable while the worker owns the slot. */
+    /** Owned copied native IQ observation; immutable while the worker owns the slot. */
     union {
         /** Unchanged signed CI8 fast path. */
         TNgIq8 ci8[NG_ANALYSIS_PAIRS];
@@ -769,7 +769,7 @@ void NgAnalysisInterest(TNgAnalysis *analysis, unsigned mask, double expiresSeco
 }
 
 /**
- * @brief Offer preConditioning- or post-conditioning samples without waiting for diagnostics.
+ * @brief Offer pre- or post-conditioning samples without waiting for diagnostics.
  *
  * @details
  * Single producer only. A try-lock protects bounded copies into private bursts; analysis busy
@@ -777,8 +777,8 @@ void NgAnalysisInterest(TNgAnalysis *analysis, unsigned mask, double expiresSeco
  * Never retain the sample pointer.
  *
  * Parameter analysis: Live diagnostic worker; NULL disables the tap.
- * Parameter view: Borrowed nonempty CI8 view valid for the duration of this call.
- * Parameter preConditioning: 1 for preConditioning-conditioning, 0 for post-conditioning.
+ * Parameter view: Borrowed nonempty native integer IQ view valid for the duration of this call.
+ * Parameter preConditioning: 1 for pre-conditioning, 0 for post-conditioning.
  *
  * Result: NG_OK for an offered/inactive/null/empty tap; NG_FULL when the try-lock is
  * contended. Valid nonempty views must provide sample storage.
@@ -883,7 +883,7 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
  * returning entry point when contention needs to be observed.
  *
  * Parameter analysis: Live diagnostic worker, or NULL for analysis disabled tap.
- * Parameter view: Borrowed CI8 input view.
+ * Parameter view: Borrowed native integer IQ input view.
  */
 void NgAnalysisSubmit(TNgAnalysis *analysis, const TNgIqView *view)
 {

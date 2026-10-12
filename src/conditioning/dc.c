@@ -69,7 +69,7 @@ static int8_t RemoveDc(int8_t x, int64_t *mean, unsigned shift)
  * Single receiver-thread use.
  *
  * @param context Owned DC state.
- * @param input Borrowed nonempty CI8 input view.
+ * @param input Borrowed nonempty IQ view matching the configured native format.
  * @param output Receives a borrowed view of the conditioner output.
  * @param error Optional error destination.
  *
@@ -119,11 +119,12 @@ static int Process(void *context, const TNgIqView *input, TNgIqView *output, TNg
  *
  * @details
  * Creates private output storage. Its process callback preserves count/rate/indices and
- * saturates corrected components to CI8; state persists across blocks and resets on gaps,
+ * saturates corrected components to their native ADC rails; state persists across blocks and resets on gaps,
  * index discontinuities or a new epoch. Use NgConditionerDcDestroy after the engine stops.
  *
  * Parameter capacity: Maximum complex pairs accepted per process call; positive.
  * Parameter shift: Estimator exponent 4..24: alpha = 2^-shift per sample.
+ * Parameter format: Native CI8, CU8 or SC16 Q11 representation.
  * Parameter out: Receives the owned conditioner instance on success.
  * Parameter error: Optional error destination.
  *

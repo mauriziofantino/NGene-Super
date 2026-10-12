@@ -251,7 +251,7 @@ int NgAnalysisConfigure(TNgAnalysis *analysis, const TNgAnalysisConfig *config, 
  * Never retain the sample pointer.
  *
  * @param analysis Live diagnostic worker; NULL disables the tap.
- * @param view Borrowed nonempty CI8 view valid for the duration of this call.
+ * @param view Borrowed nonempty native integer IQ view valid for the duration of this call.
  * @param preConditioning 1 for pre-conditioning, 0 for post-conditioning.
  *
  * @return NG_OK for an offered/inactive/null/empty tap; NG_FULL when the try-lock is
@@ -266,7 +266,7 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
  * returning entry point when contention needs to be observed.
  *
  * @param analysis Live diagnostic worker, or NULL for a disabled tap.
- * @param view Borrowed CI8 input view.
+ * @param view Borrowed native integer IQ input view.
  */
 void NgAnalysisSubmit(TNgAnalysis *analysis, const TNgIqView *view);
 /**

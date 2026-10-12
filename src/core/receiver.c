@@ -118,7 +118,7 @@ static int Dispatch(TNgRing *ring, const TNgIqView *input, TNgChannel *channels,
  *
  * Parameter config: Validated core configuration matching the frontend descriptor.
  * Parameter frontend: Opened frontend; caller retains ownership and destroys after the run.
- * Parameter conditioner: Rate-preserving CI8 conditioner with valid context for this run.
+ * Parameter conditioner: Rate- and native-format-preserving conditioner with valid context for this run.
  * Parameter channels: Caller-owned channel array; NULL permitted when count is zero.
  * Parameter channelCount: Number of channels; each sees the same borrowed window.
  * Parameter stop: Optional stop predicate called by the engine.
@@ -419,7 +419,7 @@ cleanup:
  *
  * Parameter config: Validated core configuration matching the frontend descriptor.
  * Parameter frontend: Opened frontend; caller retains ownership and destroys after the run.
- * Parameter conditioner: Rate-preserving CI8 conditioner with valid context for this run.
+ * Parameter conditioner: Rate- and native-format-preserving conditioner with valid context for this run.
  * Parameter channels: Caller-owned channel array; NULL permitted when channelCount is zero.
  * Parameter channelCount: Number of channels; each sees the same borrowed window.
  * Parameter stop: Optional stop predicate called by the engine.

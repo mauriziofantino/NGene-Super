@@ -79,7 +79,7 @@ typedef struct {
  *
  * @param config Validated core configuration matching the frontend descriptor.
  * @param frontend Opened frontend; caller retains ownership and destroys after the run.
- * @param conditioner Rate-preserving CI8 conditioner with valid context for this run.
+ * @param conditioner Rate- and native-format-preserving conditioner with valid context for this run.
  * @param channels Caller-owned channel array; NULL permitted when count is zero.
  * @param channelCount Number of channels; each sees the same borrowed window.
  * @param stop Optional stop predicate called by the engine.
@@ -107,7 +107,7 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
  *
  * @param config Validated core configuration matching the frontend descriptor.
  * @param frontend Opened frontend; caller retains ownership and destroys after the run.
- * @param conditioner Rate-preserving CI8 conditioner with valid context for this run.
+ * @param conditioner Rate- and native-format-preserving conditioner with valid context for this run.
  * @param channels Caller-owned channel array; NULL permitted when count is zero.
  * @param channelCount Number of channels; each sees the same borrowed window.
  * @param stop Optional stop predicate called by the engine.

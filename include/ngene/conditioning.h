@@ -9,7 +9,7 @@ typedef struct {
     void *context;
     /** Borrowed immutable conditioning module name. */
     const char *name;
-    /** @brief Apply one synchronous CI8 conditioning stage before the shared ring.
+    /** @brief Apply one synchronous native-format-preserving conditioning stage before the shared ring.
      * @details Output may alias input and is borrowed until the next call. Never retain
      * input. Preserve count, sample rate, indices and epoch; rate-changing stages require a
      * future explicit grid/delay contract. One receiver thread owns the conditioner state.
@@ -29,7 +29,7 @@ typedef struct {
  * No allocation or destroy is necessary. The process callback aliases the input samples and
  * metadata; their original lifetime still applies.
  *
- * @return A rate-preserving CI8 conditioner value.
+ * @return A rate- and native-format-preserving conditioner value.
  */
 TNgConditioner NgConditionerBypass(void);
 /**
@@ -67,7 +67,7 @@ int NgConditionerDcCreateFormat(size_t capacity, unsigned shift, TNgSampleFormat
  * Stop processing first. A NULL pointer or a conditioner of another implementation is ignored;
  * a destroyed DC instance is replaced with a bypass value.
  *
- * @param conditioner Conditioner created by NgConditionerDcCreate.
+ * @param conditioner Conditioner created by either NgConditionerDcCreate or NgConditionerDcCreateFormat.
  */
 void NgConditionerDcDestroy(TNgConditioner *conditioner);
 #endif
