@@ -67,19 +67,36 @@ static void TestConfig(void)
                 &c) == NG_OK);
     CHECK(Parse("[frontend]\nsample_rate_hz=\n", &c) == NG_ERROR);
     CHECK(Parse("[replay]\nloop=\n", &c) == NG_ERROR);
+    CHECK(Parse("[frontend]\ntype=bladerf\n", &c) == NG_OK);
+    CHECK(c.bladeFormat == NG_FORMAT_SC16_Q11);
+    CHECK(Parse("[frontend]\ntype=bladerf\n[bladerf]\nformat=CI8\n", &c) == NG_OK);
+    CHECK(c.bladeFormat == NG_FORMAT_CI8);
+    CHECK(Parse("[bladerf]\nformat=CU8\n", &c) == NG_ERROR);
+    CHECK(Parse("[bladerf]\nformat=SC8_Q7\n", &c) == NG_ERROR);
+    CHECK(Parse("[bladerf]\nformat=\n", &c) == NG_ERROR);
+    CHECK(Parse("[bladerf]\nformat=CI8\nformat=SC16_Q11\n", &c) == NG_ERROR);
     {
         FILE *profile = tmpfile();
         TNgConfig loaded;
         TNgError error = {{0}};
         NgConfigDefaults(&c);
         c.frontend = NG_FRONTEND_HACKRF;
+        c.bladeFormat = NG_FORMAT_CI8;
         CHECK(profile != NULL && NgConfigWrite(profile, &c, &error) == NG_OK);
         rewind(profile);
         CHECK(NgConfigRead(profile, &loaded, &error) == NG_OK);
         CHECK(loaded.frontend == NG_FRONTEND_HACKRF && loaded.replayPath[0] == '\0');
+        CHECK(loaded.bladeFormat == NG_FORMAT_CI8);
         CHECK(fclose(profile) == 0);
     }
     CHECK(Parse("[buffer]\nwindow_samples=1048576\ningress_blocks=4096\n", &c) == NG_ERROR);
+    /* The same queue geometry fits the sample-storage guard only at two bytes per pair. */
+    CHECK(Parse("[frontend]\ntype=bladerf\n[bladerf]\nformat=CI8\n"
+                "[buffer]\nwindow_samples=65536\ningress_blocks=2048\n",
+                &c) == NG_OK);
+    CHECK(Parse("[frontend]\ntype=bladerf\n[bladerf]\nformat=SC16_Q11\n"
+                "[buffer]\nwindow_samples=65536\ningress_blocks=2048\n",
+                &c) == NG_ERROR);
 }
 
 /**

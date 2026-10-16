@@ -20,6 +20,7 @@ const fields = [
   ['RTL-SDR', 'rtlsdr.bias_tee', 'Bias tee', 'select', ['false','true']],
   ['bladeRF', 'bladerf.gain_db', 'RX gain', 'number', null, 'dB', 'Query device limits for frequency-dependent min, max and step'],
   ['bladeRF', 'bladerf.bias_tee', 'Bias tee', 'select', ['false','true']],
+  ['bladeRF', 'bladerf.format', 'Sample precision', 'select', ['SC16_Q11','CI8'], '', 'SC16_Q11: 12-bit ADC in 16-bit I/Q; CI8: native 8-bit I/Q (requires device/FPGA support)'],
   ['File replay', 'replay.format', 'Native IQ format', 'select', ['CI8','CU8','SC16_Q11']],
   ['File replay', 'replay.path', 'Input file on receiver computer', 'text', null, '', 'Native I/Q (.cs8, .cu8, .sc16q11); sidecar loads format, rate and tuning'],
   ['File replay', 'replay.start_sample', 'Start sample pair', 'number', null, 'pairs'],
@@ -139,7 +140,7 @@ function buildForm() {
 }
 function updateSourceFields() {
   const source = values['frontend.type'];
-  const caps = deviceCaps && deviceCaps.source === source && deviceCaps.serial === (values['frontend.serial'] || '') && deviceCaps.tuning === values['frontend.center_frequency_hz'] ? deviceCaps : null;
+  const caps = deviceCaps && deviceCaps.source === source && deviceCaps.serial === (values['frontend.serial'] || '') && deviceCaps.tuning === values['frontend.center_frequency_hz'] && (source !== 'bladerf' || deviceCaps.precision === values['bladerf.format']) ? deviceCaps : null;
   if (!caps) deviceCaps = null;
   const rate=document.querySelector('[name="frontend.sample_rate_hz"]');
   if(rate) { rate.min=caps?.sample_rate_min_hz || (source==='hackrf'?2000000:source==='rtlsdr'?225001:1); rate.max=caps?.sample_rate_max_hz || (source==='hackrf'?20000000:source==='rtlsdr'?3200000:61440000); }
@@ -214,7 +215,8 @@ function renderStatus(next) {
   $('revision').textContent = next.active_revision === '0' ? 'Not started yet' : `Active profile r${next.active_revision}`;
   const source = savedValues['frontend.type'] || '—', fs = Number(savedValues['frontend.sample_rate_hz'] || 0), rf = Number(savedValues['frontend.center_frequency_hz'] || 0);
   const hardware=next.hardware_frequency_hz||rf, signal=next.signal_frequency_hz||Number(savedValues['frontend.signal_frequency_hz'])||hardware, actual=next.actual_sample_rate_hz||fs;
-  $('streamDescription').textContent = `${source==='hackrf'?'HackRF':'Recorded I/Q'} · Signal ${(signal/1e6).toFixed(6)} MHz · SDR ${(hardware/1e6).toFixed(6)} MHz · Digital IF ${((signal-hardware)/1e6).toFixed(6)} MHz · Fs ${(actual/1e6).toFixed(6)} Msps (configured nominal) · CI8`;
+  const sourceName={hackrf:'HackRF',rtlsdr:'RTL-SDR',bladerf:'bladeRF',file:'Recorded I/Q'}[source]||source;
+  $('streamDescription').textContent = `${sourceName} · Signal ${(signal/1e6).toFixed(6)} MHz · SDR ${(hardware/1e6).toFixed(6)} MHz · Digital IF ${((signal-hardware)/1e6).toFixed(6)} MHz · Fs ${(actual/1e6).toFixed(6)} Msps (configured nominal) · ${next.sample_format||'Unknown format'}`;
   $('processed').textContent = pairs(next.processed_samples); $('windows').textContent = `${pairs(next.windows)} common windows`;
   let rate = null;
   if (lastSample && next.wall_seconds > lastSample.time) rate = Number(BigInt(next.received_samples) - lastSample.samples) / (next.wall_seconds - lastSample.time);
@@ -416,11 +418,10 @@ function renderAnalysis(a){
   $('dcMagnitude').textContent=`DC magnitude √(mean I² + mean Q²): ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
   $('histogramRails').textContent=`Clipping indicator (${a.histogram_min ?? -128} / ${a.histogram_max ?? 127}): I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
   $('analysisCost').textContent=`Worker ${a.compute_ms.toFixed(2)} ms · ${a.sample_backend} · skipped bursts ${a.skipped_bursts} · contended blocks ${a.contention_blocks}`;
-  $('waterfallInfo').textContent=`Newest at top · ${waterfallHistory.length} snapshots · display skips ${skippedDisplay} · sample ${a.first_sample}`;
   $('frameIntegrity').textContent=`PSD #${incoming} · produced ${a.produced_seconds.toFixed(3)} s · min/max/mean ${a.min.toFixed(2)} / ${a.max.toFixed(2)} / ${a.mean.toFixed(2)} · NaN/Inf ${a.nan_count}/${a.inf_count} · hash ${a.checksum.toString(16)} · rejected ${rejectedFrames}`;
   drawAnalysis();
 }
-function historyRows(){return Math.max(32,Math.min(2048,Number($('waterfallRows').value)||128));}
+function historyRows(){return Math.max(32,Math.min(2048,Math.floor(Number($('waterfallRows').value)||128)));}
 function frequencyUnit(){return $('frequencyReference').value==='rf'?'MHz':'kHz';}
 function displayFrequency(bin){const ref=$('frequencyReference').value,hardware=status?.hardware_frequency_hz||Number(savedValues['frontend.center_frequency_hz'])||0,di=status?.digital_if_hz||0;return ref==='rf'?(hardware+bin)/1e6:ref==='signal'?(bin-di)/1000:bin/1000;}
 function frequencyRange(){
@@ -452,8 +453,18 @@ const waterfallPalette=Array.from({length:256},(_,n)=>{
   const x=n/255*(stops.length-1),i=Math.min(stops.length-2,Math.floor(x)),f=x-i;
   return stops[i].map((c,k)=>Math.round(c+(stops[i+1][k]-c)*f));
 });
+const waterfallCssPalette=waterfallPalette.map(colour=>`rgb(${colour.join(',')})`);
+let waterfallRender={mode:'2d',rows:0,columns:0};
 function drawWaterfall(){
-  const s=surface('waterfall');if(!s)return;const {ctx,w,h,left,right,top,bottom}=s,[lo,hi]=range(true);
+  const mode=$('waterfallMode').value,threeD=mode==='3d';
+  $('waterfall').setAttribute('aria-label',threeD?'3D spectrum waterfall: frequency, observation age and power; newest observation at front':'Spectrum waterfall, newest observation at top');
+  $('waterfallInfo').textContent=`${threeD?'3D · Newest at front':'Newest at top'} · ${waterfallHistory.length} snapshots · display skips ${skippedDisplay}${analysisSnapshot?` · sample ${analysisSnapshot.first_sample}`:''}`;
+  const [lo,hi]=range(true);
+  $('colourLegend').textContent=`Global colours ${lo} … ${hi} ${analysisSnapshot?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin'}`;
+  const s=surface('waterfall');if(!s)return;
+  waterfallRender={mode,rows:0,columns:0};
+  if(threeD){drawWaterfall3D(s);return;}
+  const {ctx,left,right,top,bottom}=s;
   const rows=historyRows(),columns=analysisSnapshot?.dbfs.length||1024;
   waterfallBitmap.width=columns;waterfallBitmap.height=rows;
   const bitmap=waterfallBitmap.getContext('2d'),pixels=bitmap.createImageData(columns,rows);
@@ -466,7 +477,61 @@ function drawWaterfall(){
   });
   bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2),[flo,fhi]=frequencyRange();
   ctx.drawImage(waterfallBitmap,(flo-fullLo)/(fullHi-fullLo)*columns,0,(fhi-flo)/(fullHi-fullLo)*columns,rows,left,top,right-left,bottom-top);
-  ctx.fillStyle='#8fa6ba';ctx.fillText('New',6,top+9);ctx.fillText('Older',6,bottom);frequencyAxes(s);$('colourLegend').textContent=`Global colours ${lo} … ${hi} ${analysisSnapshot?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin'}`;
+  ctx.fillStyle='#8fa6ba';ctx.fillText('New',6,top+9);ctx.fillText('Older',6,bottom);frequencyAxes(s);
+  waterfallRender={mode,rows:Math.min(rows,waterfallHistory.length),columns};
+}
+/** Project the existing PSD history; bounded peak buckets keep browser work independent of history capacity. */
+function drawWaterfall3D(s){
+  const {ctx,w,h,left,right,top,bottom}=s,[lo,hi]=range(),[colourLo,colourHi]=range(true),[flo,fhi]=frequencyRange();
+  const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2);
+  const depthX=(right-left)*0.16,depthY=(bottom-top)*0.34,width=right-left-depthX,height=(bottom-top)*0.60;
+  const project=(frequency,depth,power)=>[left+frequency*width+depth*depthX,bottom-depth*depthY-power*height];
+  const line=(a,b)=>{ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();};
+  const unit=analysisSnapshot?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin';
+  ctx.fillStyle='#8fa6ba';ctx.fillText(unit,6,11);ctx.strokeStyle='#293e52';
+  for(let j=0;j<=4;j++){
+    const x=j/4;line(project(x,0,0),project(x,1,0));
+    ctx.fillText((flo+x*(fhi-flo)).toFixed($('frequencyReference').value==='rf'?3:1),Math.max(4,left+x*width-20),h-10);
+  }
+  for(let j=0;j<=2;j++){
+    const level=j/2;line(project(0,0,level),project(0,1,level));
+    line(project(0,1,level),project(1,1,level));
+    ctx.fillText((lo+level*(hi-lo)).toFixed(0),6,bottom-level*height+4);
+  }
+  line(project(0,0,0),project(1,0,0));line(project(1,0,0),project(1,1,0));
+  ctx.fillText(frequencyUnit(),Math.min(w-30,left+width+12),h-10);
+  ctx.fillText('New',left+width+6,bottom-3);
+  if(!waterfallHistory.length){ctx.fillText('Waiting for waterfall history',left+20,top+35);return;}
+  const oldest=waterfallHistory[waterfallHistory.length-1],newest=waterfallHistory[0];
+  const span=Math.max(0,newest.produced-oldest.produced);
+  ctx.textAlign='right';ctx.fillText(`Older · ${span.toFixed(1)} s`,right,top+9);ctx.textAlign='left';
+  // Each bucket retains its peak, including narrow carriers, across the selected frequency interval.
+  const bins=newest.values.length,start=Math.max(0,Math.min(bins-1,Math.floor((flo-fullLo)/(fullHi-fullLo)*bins)));
+  const end=Math.max(start+1,Math.min(bins,Math.ceil((fhi-fullLo)/(fullHi-fullLo)*bins)));
+  const columns=Math.min(end-start,192,Math.max(16,Math.floor(width/5)));
+  const rows=Math.min(48,waterfallHistory.length),mesh=[];
+  for(let j=0;j<rows;j++){
+    const index=rows===1?0:Math.round(j*(waterfallHistory.length-1)/(rows-1)),row=waterfallHistory[index];
+    const depth=span>0?Math.max(0,Math.min(1,(newest.produced-row.produced)/span)):0,points=[];
+    for(let k=0;k<columns;k++){
+      const first=start+Math.floor(k*(end-start)/columns),last=start+Math.floor((k+1)*(end-start)/columns);
+      let peak=-Infinity;for(let bin=first;bin<last;bin++)peak=Math.max(peak,row.values[bin]);
+      const colour=waterfallCssPalette[Math.max(0,Math.min(255,Math.round(255*(peak-colourLo)/(colourHi-colourLo))))];
+      points.push({xy:project(columns===1?0.5:k/(columns-1),depth,Math.max(0,Math.min(1,(peak-lo)/(hi-lo)))),colour});
+    }
+    mesh.push(points);
+  }
+  ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top+1);ctx.clip();ctx.lineWidth=1;
+  for(let j=rows-1;j>=0;j--){
+    const row=mesh[j];
+    for(let k=0;k<columns-1;k++){
+      const a=row[k],b=row[k+1];
+      if(j>0){const near=mesh[j-1];ctx.fillStyle=a.colour;ctx.beginPath();ctx.moveTo(...a.xy);ctx.lineTo(...b.xy);ctx.lineTo(...near[k+1].xy);ctx.lineTo(...near[k].xy);ctx.closePath();ctx.fill();}
+      ctx.strokeStyle=a.colour;line(a.xy,b.xy);
+    }
+    if(columns===1){ctx.fillStyle=row[0].colour;ctx.fillRect(row[0].xy[0]-2,row[0].xy[1]-2,4,4);}
+  }
+  ctx.restore();waterfallRender={mode:'3d',rows,columns};
 }
 function drawHistogram(id,data,color){
   const s=surface(id);if(!s)return;const {ctx,w,h,left,right,top,bottom}=s;const percent=$('histScale').value==='percent',count=analysisSnapshot?.histogram_count||1;
@@ -479,7 +544,9 @@ function drawHistogram(id,data,color){
 }
 function drawAnalysis(){drawSpectrum();drawWaterfall();drawHistogram('histogramI',analysisSnapshot?.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot?.histogram_q,'#62a6ff');}
 $('clearWaterfall').addEventListener('click',()=>{waterfallHistory=[];drawWaterfall();});
-for(const id of ['dbMin','dbMax','colourMin','colourMax','waterfallRows','waterfallRate','frequencyMin','frequencyMax','histScale','histMax'])$(id).addEventListener('change',drawAnalysis);
+$('waterfallMode').addEventListener('change',drawWaterfall);
+$('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());drawAnalysis();});
+for(const id of ['dbMin','dbMax','colourMin','colourMax','waterfallRate','frequencyMin','frequencyMax','histScale','histMax'])$(id).addEventListener('change',drawAnalysis);
 $('configForm').addEventListener('submit', event => event.preventDefault());
 $('apply').addEventListener('click', () => applyConfig()); $('validate').addEventListener('click', () => applyConfig(true));
 $('start').addEventListener('click', () => command('receiver/start')); $('stop').addEventListener('click', () => command('receiver/stop'));
@@ -496,14 +563,14 @@ $('rtlPreset').addEventListener('click', () => {
 });
 $('bladePreset').addEventListener('click', () => {
   deviceCaps = null;
-  Object.assign(values, {'frontend.type':'bladerf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','bladerf.gain_db':'30','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
+  Object.assign(values, {'frontend.type':'bladerf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','bladerf.gain_db':'30','bladerf.format':'SC16_Q11','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
   buildForm(); dirtyState(true);
 });
 $('deviceLimits').addEventListener('click', async () => {
   if (!editable()) return;
   try {
     const result = await api('frontend/capabilities', {ini: toIni(values)});
-    deviceCaps = { ...result, source: values['frontend.type'], serial: values['frontend.serial'] || '', tuning: values['frontend.center_frequency_hz'] };
+    deviceCaps = { ...result, source: values['frontend.type'], serial: values['frontend.serial'] || '', tuning: values['frontend.center_frequency_hz'], precision: values['bladerf.format'] };
     buildForm(); notice(`Native device limits loaded · ${result.format}`);
   } catch(error) { notice(error.message, true); }
 });
@@ -521,7 +588,7 @@ new ResizeObserver(drawAnalysis).observe($('spectrum'));
 connect();
 
 /* Read-only inspection for frame troubleshooting and browser regression tests. */
-export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:skippedDisplay,rejected:rejectedFrames,history:waterfallHistory.map(row=>({...row,values:[...row.values]}))};}
+export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:skippedDisplay,rejected:rejectedFrames,waterfall:{...waterfallRender},history:waterfallHistory.map(row=>({...row,values:[...row.values]}))};}
 export {psdIntegrity, renderAnalysis, displayFrequency};
 
 document.querySelectorAll('[data-settings]').forEach(button => button.addEventListener('click', () => selectSettings(button.dataset.settings)));

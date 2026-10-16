@@ -91,6 +91,7 @@ The service binds to loopback. For a browser on another computer, use a tunnel, 
 
 ## Documentation
 
+- [Native bladeRF 8/12-bit I/Q, ring buffering and waterfall views](docs/NATIVE_IQ_PERFORMANCE.md)
 - [Architecture and ownership](docs/ARCHITECTURE.md)
 - [Configuration](docs/CONFIGURATION.md), [GUI and API](docs/WEBGUI.md)
 - [Recording and formats](docs/RECORDING.md), [replay](docs/REPLAY.md)

@@ -2,7 +2,7 @@
 #ifndef NGENE_BLADERF_ADAPTER_H
 #define NGENE_BLADERF_ADAPTER_H
 #include "ngene/frontend.h"
-/** @brief Configure one RX channel using native libbladeRF and SC16 Q11 metadata.
+/** @brief Configure one RX channel using native SC16 Q11 or SC8 Q7 metadata.
  * @param config Validated device settings, queue dimensions and overflow policy.
  * @param frontend Receives owned source on success.
  * @param error Optional diagnostic.

@@ -1,5 +1,9 @@
 # Configurazione INI
 
+For native bladeRF precision, `bladerf.format=SC16_Q11` retains twelve ADC bits in
+sixteen-bit components (default), while `bladerf.format=CI8` requests native SC8 Q7
+transfer with one byte per I/Q component. See [native formats and ring buffering](NATIVE_IQ_PERFORMANCE.md).
+
 Parser C senza dipendenze. Chiavi e sezioni sono case-sensitive; numeri interi in base 10 e frequenze in Hz. Sono ammessi spazi attorno a `=` e commenti **su righe proprie**, iniziati da `#` o `;`. Non sono previste virgolette, commenti a fine riga, espansione di variabili, `~` o inclusioni. I percorsi relativi sono risolti dalla directory di esecuzione, non dalla posizione del file INI. Chiavi sconosciute/duplicate e valori non finiti causano errore. Si raccomandano percorsi ASCII per questa prima versione, anche su Windows.
 
 | Chiave | Significato / valori |

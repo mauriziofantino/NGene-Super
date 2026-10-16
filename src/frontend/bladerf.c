@@ -1,4 +1,4 @@
-/** @file bladerf.c @brief Native SC16 Q11 RX; preserves every ADC bit and timestamp. */
+/** @file bladerf.c @brief Native SC16 Q11 or SC8 Q7 RX with sample-clock continuity. */
 #include "frontend/bladerf_adapter.h"
 #include "frontend/ingress.h"
 #include <libbladeRF.h>
@@ -12,8 +12,8 @@ typedef struct {
     struct bladerf *device;
     /** Existing bounded ring and common integrity counters. */
     TNgIngress ingress;
-    /** Worker-owned, preallocated SC16 Q11 transfer storage. */
-    int16_t *buffer;
+    /** Worker-owned, preallocated storage in the selected native sample format. */
+    void *buffer;
     /** Complex pairs requested per native sync call. */
     unsigned transferSamples;
     /** Joined before Destroy frees samples or USB state. */
@@ -81,11 +81,13 @@ static int OpenDevice(const TNgConfig *config, struct bladerf **device, char ser
 
 /** @brief Query native scaled ranges after setting frequency, before configuring gain.
  * @param device Open configured native device.
+ * @param format Selected native sample representation.
  * @param caps Receives copied supported limits.
  * @param error Optional diagnostic.
  * @return NG_OK on success, NG_ERROR on invalid or unrepresentable vendor bounds.
  */
-static int QueryRanges(struct bladerf *device, TNgFrontendCaps *caps, TNgError *error)
+static int QueryRanges(struct bladerf *device, TNgSampleFormat format, TNgFrontendCaps *caps,
+                       TNgError *error)
 {
     const struct bladerf_range *rate = NULL, *frequency = NULL, *gain = NULL;
     double minimum, maximum, step;
@@ -119,11 +121,11 @@ static int QueryRanges(struct bladerf *device, TNgFrontendCaps *caps, TNgError *
     caps->gainMinDb = (int)minimum;
     caps->gainMaxDb = (int)maximum;
     caps->gainStepDb = (int)step;
-    caps->format = NG_FORMAT_SC16_Q11;
+    caps->format = format;
     return NG_OK;
 }
 
-/** @brief Receive contiguous SC16 Q11 blocks with native continuity metadata.
+/** @brief Receive contiguous native IQ blocks with continuity metadata.
  * @details Native metadata overruns mean a device/library stream discontinuity; they
  * do not establish that the loss happened exclusively inside the RF hardware. Positive
  * timestamp deltas count missing complex pairs exactly. No sample narrowing is performed.
@@ -146,10 +148,12 @@ static void Receive(void *context)
         if (NgAtomicGet(&source->stopping) != 0) {
             break;
         }
-        if (result == BLADERF_ERR_TIMEOUT) {
+        if (result == BLADERF_ERR_TIMEOUT && metadata.actual_count == 0) {
             continue;
         }
-        if (result != 0 || metadata.actual_count == 0 ||
+        /* A timed-out sync call can still return a valid contiguous prefix.
+         * libbladeRF reports that prefix in actual_count for both META formats. */
+        if ((result != 0 && result != BLADERF_ERR_TIMEOUT) || metadata.actual_count == 0 ||
             metadata.actual_count > source->transferSamples ||
             metadata.timestamp > UINT64_MAX - metadata.actual_count) {
             NgIngressTransportError(&source->ingress);
@@ -166,7 +170,7 @@ static void Receive(void *context)
         }
         missing = metadata.timestamp - source->expectedTimestamp;
         view.samples = (const TNgIq8 *)(const void *)source->buffer;
-        view.format = NG_FORMAT_SC16_Q11;
+        view.format = source->ingress.format;
         view.meta.count = metadata.actual_count;
         view.meta.firstSample = metadata.timestamp - source->origin;
         view.meta.hardwareTimestamp = metadata.timestamp;
@@ -220,7 +224,7 @@ static int Start(void *context, TNgError *error)
     return NG_OK;
 }
 
-/** @brief Borrow one SC16 Q11 ingress block.
+/** @brief Borrow one block in the selected native IQ representation.
  * @param context Owned source.
  * @param view Receives native borrowed storage until Release.
  * @param timeoutMs Ring wait timeout, zero for polling.
@@ -306,7 +310,7 @@ static void Destroy(void *context)
     free(source);
 }
 
-/** @brief Configure one RX channel using native libbladeRF and SC16 Q11 metadata.
+/** @brief Configure one RX channel using native libbladeRF and IQ metadata.
  * Parameter config Validated device settings, queue dimensions and overflow policy.
  * Parameter frontend Receives owned source on success.
  * Parameter error Optional diagnostic.
@@ -315,20 +319,36 @@ static void Destroy(void *context)
 int NgBladerfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
 {
     static const TNgFrontendOps operations = {Start, Acquire, Release, Stop, Stats, Destroy};
-    TNgBladerfSource *source = calloc(1, sizeof(*source));
+    TNgBladerfSource *source;
     TNgFrontendCaps caps = {0};
+    bladerf_format nativeFormat;
     unsigned actualRate, actualBandwidth;
     uint64_t actualFrequency;
     int result;
+    if (config->bladeFormat != NG_FORMAT_SC16_Q11 && config->bladeFormat != NG_FORMAT_CI8) {
+        return NgFail(error, "bladeRF requires SC16_Q11 (12-bit ADC) or CI8 (native SC8 Q7)");
+    }
+    nativeFormat = config->bladeFormat == NG_FORMAT_CI8 ? BLADERF_FORMAT_SC8_Q7_META
+                                                        : BLADERF_FORMAT_SC16_Q11_META;
+    source = calloc(1, sizeof(*source));
     if (source == NULL) {
         return NgFail(error, "Cannot allocate bladeRF source");
     }
-    if (NgIngressInit(&source->ingress, config, NG_FORMAT_SC16_Q11, error) != NG_OK) {
+    if (NgIngressInit(&source->ingress, config, config->bladeFormat, error) != NG_OK) {
         free(source);
         return NG_ERROR;
     }
     source->transferSamples = 16384u;
-    source->buffer = malloc((size_t)source->transferSamples * 4u);
+    /* sync_rx accepts pair counts independently of the USB-aligned vendor buffers.
+     * Request whole ingress windows when they fit, avoiding a short slot on every
+     * transfer (16000 + 384 pairs with the default window). Larger windows remain
+     * partial because this adapter intentionally has no extra accumulation stage.
+     * Device gaps and partial timeouts may also produce short ingress blocks. */
+    if (config->windowSamples <= source->transferSamples) {
+        source->transferSamples -=
+            (unsigned)((size_t)source->transferSamples % config->windowSamples);
+    }
+    source->buffer = malloc((size_t)source->transferSamples * NgSampleBytes(config->bladeFormat));
     if (source->buffer == NULL) {
         NgFail(error, "Cannot preallocate bladeRF RX workspace");
         goto failed;
@@ -338,7 +358,7 @@ int NgBladerfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *erro
     }
     result =
         bladerf_set_frequency(source->device, BLADERF_CHANNEL_RX(0), config->centerFrequencyHz);
-    if (result != 0 || QueryRanges(source->device, &caps, error) != NG_OK) {
+    if (result != 0 || QueryRanges(source->device, config->bladeFormat, &caps, error) != NG_OK) {
         NgFail(error, "bladeRF tuning/range query failed");
         goto failed;
     }
@@ -366,10 +386,16 @@ int NgBladerfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *erro
         NgFail(error, "bladeRF bias tee: %s", bladerf_strerror(result));
         goto failed;
     }
-    result = bladerf_sync_config(source->device, BLADERF_RX_X1, BLADERF_FORMAT_SC16_Q11_META, 16u,
-                                 16384u, 8u, 100u);
+    result =
+        bladerf_sync_config(source->device, BLADERF_RX_X1, nativeFormat, 16u, 16384u, 8u, 100u);
     if (result != 0) {
-        NgFail(error, "bladeRF native metadata RX configuration: %s", bladerf_strerror(result));
+        if (config->bladeFormat == NG_FORMAT_CI8 && result == BLADERF_ERR_UNSUPPORTED) {
+            NgFail(error, "bladeRF native SC8 Q7 metadata RX unsupported by device/FPGA; "
+                          "install a compatible FPGA with 8-bit support or select SC16_Q11");
+        } else {
+            NgFail(error, "bladeRF native %s metadata RX configuration: %s",
+                   NgSampleFormatName(config->bladeFormat), bladerf_strerror(result));
+        }
         goto failed;
     }
     source->ingress.config.sampleRateHz = actualRate;
@@ -383,7 +409,7 @@ int NgBladerfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *erro
     frontend->info.digitalIfHz =
         (int64_t)frontend->info.signalFrequencyHz - (int64_t)actualFrequency;
     frontend->info.bandwidthHz = actualBandwidth;
-    frontend->info.format = NG_FORMAT_SC16_Q11;
+    frontend->info.format = config->bladeFormat;
     frontend->info.sourceName = "bladerf";
     frontend->info.clockDomain = "device-hardware-sample-timestamp";
     frontend->info.deviceIdentifier = source->serial;
@@ -437,7 +463,7 @@ int NgBladerfCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgErr
     }
     result = bladerf_set_frequency(device, BLADERF_CHANNEL_RX(0), config->centerFrequencyHz);
     if (result == 0) {
-        result = QueryRanges(device, caps, error);
+        result = QueryRanges(device, config->bladeFormat, caps, error);
     } else {
         result = NgFail(error, "bladeRF tuning for gain query failed");
     }

@@ -59,6 +59,7 @@ void NgConfigDefaults(TNgConfig *config)
     NgAnalysisDefaults(&config->analysis);
     config->rtlAutoGain = 1;
     config->bladeGainDb = 30;
+    config->bladeFormat = NG_FORMAT_SC16_Q11;
     config->replayFormat = NG_FORMAT_CI8;
     config->dcShift = NG_DEFAULT_DC_SHIFT;
     config->sampleRateHz = NG_DEFAULT_SAMPLE_RATE_HZ;
@@ -270,6 +271,16 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
             c->bladeGainDb = (int)valueReal;
         } else {
             c->rtlGainTenthsDb = (int)valueReal;
+        }
+        return NG_OK;
+    }
+    if (strcmp(key, "bladerf.format") == 0) {
+        if (strcmp(value, "CI8") == 0) {
+            c->bladeFormat = NG_FORMAT_CI8;
+        } else if (strcmp(value, "SC16_Q11") == 0) {
+            c->bladeFormat = NG_FORMAT_SC16_Q11;
+        } else {
+            return NG_ERROR;
         }
         return NG_OK;
     }
@@ -552,7 +563,8 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
         config->vgaGainDb % 2 != 0) {
         return NgFail(error, "HackRF LNA: 0..40 step 8 dB; VGA: 0..62 step 2 dB");
     }
-    if (NgSampleBytes(config->replayFormat) == 0 || config->rtlAutoGain < 0 ||
+    if ((config->bladeFormat != NG_FORMAT_CI8 && config->bladeFormat != NG_FORMAT_SC16_Q11) ||
+        NgSampleBytes(config->replayFormat) == 0 || config->rtlAutoGain < 0 ||
         config->rtlAutoGain > 1 || config->rtlBiasTee < 0 || config->rtlBiasTee > 1 ||
         config->bladeBiasTee < 0 || config->bladeBiasTee > 1 || config->rtlPpm < -1000 ||
         config->rtlPpm > 1000 || config->rtlGainTenthsDb < -1000 ||
@@ -571,7 +583,7 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
         return NgFail(error, "Window must be 1..1048576 pairs and queues 2..4096 blocks");
     }
     bytes = (uint64_t)config->windowSamples *
-            NgSampleBytes(config->frontend == NG_FRONTEND_BLADERF  ? NG_FORMAT_SC16_Q11
+            NgSampleBytes(config->frontend == NG_FRONTEND_BLADERF  ? config->bladeFormat
                           : config->frontend == NG_FRONTEND_RTLSDR ? NG_FORMAT_CU8
                           : config->frontend == NG_FRONTEND_FILE   ? config->replayFormat
                                                                    : NG_FORMAT_CI8) *
@@ -676,8 +688,8 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     fprintf(output, "\n[rtlsdr]\nauto_gain=%s\ngain_tenths_db=%d\nppm=%d\nbias_tee=%s\n",
             config->rtlAutoGain ? "true" : "false", config->rtlGainTenthsDb, config->rtlPpm,
             config->rtlBiasTee ? "true" : "false");
-    fprintf(output, "\n[bladerf]\ngain_db=%d\nbias_tee=%s\n", config->bladeGainDb,
-            config->bladeBiasTee ? "true" : "false");
+    fprintf(output, "\n[bladerf]\ngain_db=%d\nbias_tee=%s\nformat=%s\n", config->bladeGainDb,
+            config->bladeBiasTee ? "true" : "false", NgSampleFormatName(config->bladeFormat));
     fprintf(
         output,
         "\n[conditioning]\nmodule=%s\ndc_shift=%u\n\n[buffer]\nwindow_samples=%zu\ningress_blocks=%"

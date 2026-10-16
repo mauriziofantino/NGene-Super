@@ -25,7 +25,7 @@ Non viene dichiarata equivalenza bit per bit con tutte le modalità gain del vec
 - API C `NgFftCreate`, `NgFftExecute`, `NgFftReference`, `NgFftDestroy`.
 - FFT complessa forward `exp(-j 2πkn/N)`, ordine naturale, output normalizzato per N, dimensioni 8..16384 power-of-two. La GUI espone 256..16384.
 - Dati signed16 interleaved; componenti di ingresso in [-16384,16384], verificate. Piano condivisibile, ingresso/uscita disgiunti, almeno allineamento naturale C int16. Nessuna allocazione o virgola mobile durante `execute`.
-- Twiddle Q14 come NGene; prodotti complessi signed32 con `pmaddwd` SSE2 oppure `smull`/`addp` NEON, shift di 14. Somme signed32, divisione di ogni butterfly per due, poi narrowing saturante. Le due butterfly complesse di ogni iterazione SIMD sono indipendenti; il caso di una sola butterfly resta assembly.
+- Q14 twiddles follow NGene; complex signed32 products use SSE2 `pmaddwd` or NEON `smull`/`addp`, followed by a 14-bit shift. NEON, the scalar oracle and SSE2 tails divide signed32 sums by two with arithmetic-floor rounding before saturating narrowing. The updated main SSE2 loop computes four independent complex butterflies with equivalent overflow-safe signed16 floor averaging; the first two stages are fused. See the October 2026 update below for the headroom proof and measurements.
 - C gestisce piano, bit-reversal e sequenza degli stadi. Le butterfly di produzione sono assembly. Il riferimento C è un oracolo di verifica e una build esplicitamente selezionabile, non un fallback silenzioso.
 - Il piano ha solo tabelle immutabili; due thread possono eseguire FFT simultanee con array separati. Il worker di osservazione usa un thread solo per limitare l’interferenza con il ricevitore.
 
@@ -43,7 +43,7 @@ L’headroom tiene il modulo iniziale sotto circa 23171 e i prodotti Q14 ampiame
 | Windows ARM64 | `.S` con toolchain Clang/GNU appropriata | Non verificato in questa consegna; MSVC ARMASM non implementato |
 | x86/ARM a 32 bit | Build `NGENE_FFT_REFERENCE=ON` | Nessun kernel assembly 32 bit portato in questo incremento |
 
-CMake riconosce il **target**, non l’host. Nessun `-march=native` o AVX obbligatorio. SSE2 è baseline x86-64; NEON è il backend AArch64. Non c’è dispatch runtime SSE2/AVX in questo incremento. Windows x64 preserva i registri non volatili evitando di usarli: il kernel tocca soltanto GPR volatili e XMM0..2. Il kernel ARM usa x0..3 e v0..4.
+CMake riconosce il **target**, non l’host. Nessun `-march=native` o AVX obbligatorio. SSE2 è baseline x86-64; NEON è il backend AArch64. Non c’è dispatch runtime SSE2/AVX in questo incremento. Windows x64 preserva i registri non volatili evitando di usarli: il kernel tocca soltanto GPR volatili e XMM0..5. Il kernel ARM usa x0..3 e v0..4.
 
 Riferimenti ABI: [Microsoft x64 calling convention](https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention), [Arm AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst). Le verifiche numeriche sono riproducibili con i test C inclusi, non dedotte soltanto dai manuali delle istruzioni.
 
@@ -65,3 +65,35 @@ Misurare prima i costi su hardware reale. Poi valutare fusione/specializzazione 
 
 
 Aggiornamento 0.4: le butterfly qui descritte restano inalterate. È aggiunta la sintassi Microsoft equivalente `src/dsp/arm/fft_neon.asm`, selezionata da CMake ASM_MARMASM per Windows ARM64. La verifica nativa di questo assembler è ancora da eseguire. La correzione waterfall riguarda la history GUI e il trasporto diagnostico, non l’algoritmo FFT.
+
+## Original NGene comparison and SSE2 update — 16 October 2026
+
+The reproducible [benchmark](../benchmarks/fft/README.md) now measures EVO against the untouched
+original NGene FFT supplied separately. It records source hashes, validates the compiled baseline,
+uses the same `/N` gain, alternates backend order and reports repeated batch statistics. The
+original is still faster on the tested Intel i7-1355U; this update makes no claim that EVO is the
+fastest available FFT. EVO latency improves by about 35–38% at 1024, 4096 and 16384 points versus
+the previous EVO implementation. The raw before/after CSV files retain host, compiler and flags.
+
+The x86-64 implementation now fuses its first two stages, executes four butterflies per main
+iteration, validates input headroom with SSE2 and copies complete complex pairs during bit reversal.
+The four-butterfly path uses `S=(U&T)+((U^T)>>1)` and `D=S-T`, which are exactly
+`floor((U+T)/2)` and `floor((U-T)/2)` for signed16 values without saturating the sum before scaling.
+The scalar and NEON paths retain their signed32 sum/scaling implementation; all outputs are unchanged.
+
+Packing Q14 products before averaging is lossless in the public headroom contract. Initially the
+complex norm is at most `16384*sqrt(2) < 23171`. A quantized Q14 rotation has norm at most
+`1+1/16384`; component floor rounding adds norm less than `sqrt(2)`. If `M_s` bounds a complex
+norm after stage `s`, product rounding followed by per-stage floor averaging gives
+`M_s <= (1+1/32768)*M_(s-1) + 3*sqrt(2)/2`. Induction yields
+`M_s < 23171+4*s <= 23227` through all 14 stages. A rotated lower operand consequently has
+norm less than `(1+1/16384)*23227+sqrt(2) < 23230`, safely inside signed16. SSE2 `packssdw`
+therefore does not clip these products, and the average/difference identity is bit-exact against
+the signed32 oracle. This bound depends on plan-generated twiddles and the enforced input range;
+it is not permission to feed arbitrary full-range int16 samples to the FFT.
+
+The updated tests additionally exercise full-scale independent I/Q signs, odd values and rotating
+corners that drive valid intermediate components above 16384. The public API, `/N` gain, rounding,
+immutable-plan concurrency and input/output ownership remain unchanged. Original NGene still has
+different high-level clipping behavior and unsafe shared register backup, so these timing results
+do not establish numerical interchangeability in acquisition or tracking.

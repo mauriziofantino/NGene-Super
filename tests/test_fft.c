@@ -71,13 +71,30 @@ int main(int argc, char **argv)
     CHECK(NgFftCreate(16384, &p, &e) == NG_OK);
     for (n = 8; n <= 16384; n *= 2) {
         unsigned trial;
-        for (trial = 0; trial < 4; ++trial) {
+        for (trial = 0; trial < 7; ++trial) {
             for (i = 0; i < 2 * n; ++i) {
                 random = random * 1664525u + 1013904223u;
-                input[i] = trial == 0   ? 0
-                           : trial == 1 ? ((i % 2) != 0 ? -16384 : 16384)
-                           : trial == 2 ? (i == 0 ? 8192 : 0)
-                                        : (int16_t)((int)(random % 32769) - 16384);
+                if (trial == 0) {
+                    input[i] = 0;
+                } else if (trial == 1) {
+                    input[i] = (i % 2) != 0 ? -16384 : 16384;
+                } else if (trial == 2) {
+                    input[i] = i == 0 ? 8192 : 0;
+                } else if (trial == 3) {
+                    input[i] = (int16_t)((int)(random % 32769) - 16384);
+                } else if (trial == 4) {
+                    /* Independent I/Q rails exercise the maximum allowed complex magnitude. */
+                    input[i] = (random & 0x80000000u) != 0 ? 16384 : -16384;
+                } else if (trial == 5) {
+                    /* Odd positive/negative values catch signed floor-average rounding errors. */
+                    static const int16_t odd[] = {-16383, -1, 1, 16383};
+                    input[i] = odd[(random >> 24) & 3u];
+                } else {
+                    /* Rotating corners drive legal intermediate components beyond 16384. */
+                    double phase = 6.283185307179586 * 3 * (double)(i / 2) / (double)n;
+                    double component = (i % 2) != 0 ? sin(phase) : cos(phase);
+                    input[i] = component >= 0 ? 16384 : -16384;
+                }
             }
             CHECK(NgFftExecute(p, n, input, actual, &e) == NG_OK);
             CHECK(NgFftReference(p, n, input, reference, &e) == NG_OK);
@@ -134,11 +151,28 @@ int main(int argc, char **argv)
         CHECK(guarded[0] == 12345 && guarded[33] == 12345);
         CHECK(NgFftReference(p, 16, input, reference, &e) == NG_OK);
         CHECK(memcmp(guarded + 1, reference, 32 * sizeof(int16_t)) == 0);
+        CHECK(NgFftExecute(p, 16, input + 1, guarded + 1, &e) == NG_OK);
+        CHECK(NgFftReference(p, 16, input + 1, reference, &e) == NG_OK);
+        CHECK(memcmp(guarded + 1, reference, 32 * sizeof(int16_t)) == 0);
+        CHECK(guarded[0] == 12345 && guarded[33] == 12345);
         CHECK(NgFftExecute(p, 16, input, input + 2, &e) == NG_ERROR);
     }
     input[0] = 32767;
     CHECK(NgFftExecute(p, 8, input, actual, &e) == NG_ERROR);
     CHECK(NgFftExecute(p, 12, input, actual, &e) == NG_ERROR);
+    {
+        /* Invalid components in every SIMD lane and the final vector must be rejected. */
+        size_t positions[] = {0, 1, 2, 3, 4, 5, 6, 7, 32767};
+        size_t position;
+        memset(input, 0, sizeof(input));
+        for (position = 0; position < sizeof(positions) / sizeof(positions[0]); ++position) {
+            input[positions[position]] = -16385;
+            CHECK(NgFftExecute(p, 16384, input, actual, &e) == NG_ERROR);
+            input[positions[position]] = 16385;
+            CHECK(NgFftExecute(p, 16384, input, actual, &e) == NG_ERROR);
+            input[positions[position]] = 0;
+        }
+    }
     if (argc > 1 && strcmp(argv[1], "--benchmark") == 0) {
         for (n = 1024; n <= 16384; n *= 4) {
             double t;

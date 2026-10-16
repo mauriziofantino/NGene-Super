@@ -54,6 +54,8 @@ typedef struct {
     int bladeGainDb;
     /** Explicitly requested bladeRF RX bias-tee state. */
     int bladeBiasTee;
+    /** Native bladeRF transfer precision: CI8 (SC8 Q7) or SC16 Q11 (12 ADC bits). */
+    TNgSampleFormat bladeFormat;
     /** IQ representation for replay without a sidecar; metadata overrides this selection. */
     TNgSampleFormat replayFormat;
     /** Complex pairs in each shared engine window. */

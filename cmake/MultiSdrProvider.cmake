@@ -85,6 +85,10 @@ function(ngene_resolve_bladerf)
         find_path(NGENE_BLADERF_INCLUDE_DIR libbladeRF.h)
         find_library(NGENE_BLADERF_LIBRARY NAMES bladeRF libbladeRF)
         if(NGENE_BLADERF_INCLUDE_DIR AND NGENE_BLADERF_LIBRARY)
+            file(READ "${NGENE_BLADERF_INCLUDE_DIR}/libbladeRF.h" bladerfHeader)
+            if(NOT bladerfHeader MATCHES "BLADERF_FORMAT_SC8_Q7_META")
+                message(FATAL_ERROR "bladeRF SDK requires SC8_Q7_META support (libbladeRF >=2.5); use NGENE_BLADERF_PROVIDER=SOURCE or update the SDK")
+            endif()
             add_library(BladeRF::BladeRF UNKNOWN IMPORTED GLOBAL)
             set_target_properties(BladeRF::BladeRF PROPERTIES IMPORTED_LOCATION "${NGENE_BLADERF_LIBRARY}"
                 INTERFACE_INCLUDE_DIRECTORIES "${NGENE_BLADERF_INCLUDE_DIR}"

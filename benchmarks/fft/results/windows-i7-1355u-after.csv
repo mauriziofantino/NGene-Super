@@ -1,0 +1,41 @@
+# EVO_source=working-tree SSE2 fused stages; four-butterfly exact averaging; SIMD headroom validation
+# host=Windows x64; Intel Core i7-1355U; date=2026-10-16 Europe/Rome
+# compiler_flags=/O2 /Ob2 /MD /DNDEBUG; no fast-math; no march=native
+# legacy_flags=/O2 /Ob2 /MD /DNDEBUG /clang:-fno-vectorize /clang:-fno-slp-vectorize
+# legacy_fft_c_sha256=95a36b1dae1b9aafd91229b3b068995e7c52fefbced1800f4c81860bdb57b99f
+# legacy_fft_h_sha256=2f1c0512da9cc6c78f28258163cee26604f98f9b5044a026b2ad58203c25d7ec
+# legacy_simd_h_sha256=ae698bcca657fb2d1b6c345cda3f016f1875493cd028694ab1bf4f130322f6e1
+# affinity_mask=0x1,status=pinned
+# compiler=Clang-22.1.3,backend=SSE2-assembly,rounds=21,batches=8
+# Timed: full call, validation/permutation/stages; excluded: plan, I/O, window, power.
+# Alternating backend order; >=10ms per round; deterministic 12-bit ADC-level noise.
+N,backend,repeats,median_us,p95_us,min_us,Msamples_per_s
+# validation,N=256,SIMD=bit-exact,legacy_max_component_delta=1
+256,EVO-SIMD,16384,0.893,1.184,0.849,286.766
+256,EVO-scalar,4096,3.403,4.340,3.267,75.219
+256,NGene-original,32768,0.509,0.572,0.486,503.023
+# validation,N=512,SIMD=bit-exact,legacy_max_component_delta=1
+512,EVO-SIMD,8192,2.522,5.040,1.755,203.043
+512,EVO-scalar,2048,8.147,29.556,7.008,62.844
+512,NGene-original,8192,1.152,2.465,0.994,444.510
+# validation,N=1024,SIMD=bit-exact,legacy_max_component_delta=2
+1024,EVO-SIMD,4096,3.920,7.119,3.682,261.199
+1024,EVO-scalar,1024,16.431,18.796,14.999,62.321
+1024,NGene-original,8192,2.362,2.882,2.096,433.542
+# validation,N=2048,SIMD=bit-exact,legacy_max_component_delta=1
+2048,EVO-SIMD,1024,7.823,12.280,7.608,261.781
+2048,EVO-scalar,128,32.528,41.096,31.380,62.961
+2048,NGene-original,4096,4.560,5.050,4.487,449.170
+# validation,N=4096,SIMD=bit-exact,legacy_max_component_delta=1
+4096,EVO-SIMD,1024,16.762,22.018,15.852,244.369
+4096,EVO-scalar,256,70.116,100.795,68.047,58.417
+4096,NGene-original,2048,9.922,17.656,9.333,412.819
+# validation,N=8192,SIMD=bit-exact,legacy_max_component_delta=2
+8192,EVO-SIMD,512,35.047,43.598,32.972,233.741
+8192,EVO-scalar,64,150.433,178.297,142.248,54.456
+8192,NGene-original,512,20.315,24.866,19.732,403.248
+# validation,N=16384,SIMD=bit-exact,legacy_max_component_delta=2
+16384,EVO-SIMD,128,81.082,104.459,77.281,202.067
+16384,EVO-scalar,64,333.344,417.756,319.541,49.150
+16384,NGene-original,256,69.564,75.736,68.098,235.523
+# checksum=1956614275

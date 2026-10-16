@@ -8,7 +8,8 @@ const assert = require('node:assert/strict');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 (async () => {
   const executable = path.resolve(process.env.NGENE_EXECUTABLE || 'build/ngene');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ngene-web-'));
+  // Resolve Windows TEMP 8.3 aliases; CivetWeb intentionally rejects noncanonical paths.
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ngene-web-')));
   const output = path.join(root, 'selected folder');
   const profile = path.join(root, 'profile');
   const input = path.join(root, 'recorded-input.cs8');
@@ -158,6 +159,27 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(runtime.analysis.histogram_i.length,128);
     assert.equal(runtime.analysis.histogram_q.reduce((a,b)=>a+b,0),8192);
     await page.waitForFunction(() => Number(document.getElementById('waterfallInfo').textContent.match(/(\d+) snapshots/)?.[1])>=16);
+    await page.locator('#pausePlot').click();
+    const flatWaterfall=await page.locator('#waterfall').evaluate(canvas=>canvas.toDataURL());
+    const historyBefore3D=await page.evaluate(async()=>(await import('/app.js')).diagnosticSnapshot());
+    await page.locator('#waterfallMode').selectOption('3d');
+    const historyAfter3D=await page.evaluate(async()=>(await import('/app.js')).diagnosticSnapshot());
+    assert.deepEqual(historyAfter3D.history,historyBefore3D.history,'Changing projection must preserve the exact PSD history');
+    assert.equal(historyAfter3D.sequence,historyBefore3D.sequence);
+    assert.equal(historyAfter3D.waterfall.mode,'3d');
+    assert(historyAfter3D.waterfall.rows>1&&historyAfter3D.waterfall.rows<=48,'3D history rendering must remain bounded');
+    assert(historyAfter3D.waterfall.columns>1&&historyAfter3D.waterfall.columns<=192,'3D frequency rendering must remain bounded');
+    assert.notEqual(await page.locator('#waterfall').evaluate(canvas=>canvas.toDataURL()),flatWaterfall,'3D must render a different projection');
+    assert((await page.locator('#waterfall').getAttribute('aria-label')).includes('newest observation at front'));
+    if(process.env.NGENE_SCREENSHOTS)await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'waterfall-3d-desktop.png')});
+    await page.setViewportSize({width:390,height:844});
+    await page.locator('#waterfallMode').scrollIntoViewIfNeeded();
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile 3D waterfall overflows');
+    if(process.env.NGENE_SCREENSHOTS)await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'waterfall-3d-mobile.png')});
+    await page.locator('#waterfallMode').selectOption('2d');
+    assert.deepEqual((await page.evaluate(async()=>(await import('/app.js')).diagnosticSnapshot())).history,historyBefore3D.history);
+    await page.setViewportSize({width:1512,height:1100});
+    await page.locator('#pausePlot').click();
     const diagnostics=await page.evaluate(async()=>{
       const m=await import('/app.js'),a=(await (await fetch('/api/v1/status')).json()).analysis;
       const before=m.diagnosticSnapshot();
@@ -246,7 +268,9 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(files.files.length,8);
     for (const f of files.files) {
       assert(f.closed);
-      const bytes = Buffer.from(await (await fetch(`${base}/api/v1/files/${f.name}`)).arrayBuffer());
+      const response=await fetch(`${base}/api/v1/files/${f.name}`);
+      assert.equal(response.status,200,`Transfer failed for ${f.name}`);
+      const bytes = Buffer.from(await response.arrayBuffer());
       assert.deepEqual(bytes,fs.readFileSync(path.join(output,f.name)),'Transfer bytes differ');
       assert.equal(bytes.length,Number(f.bytes));
       if(f.name.endsWith('.meta.ini'))assert(bytes.toString().includes('recording_point=pre_conditioning'));
@@ -313,6 +337,10 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
       const gain = page.locator('[name="bladerf.gain_db"]');
       assert.equal(await gain.getAttribute('min'),'-12');assert.equal(await gain.getAttribute('max'),'60');
       assert.equal(await gain.getAttribute('step'),'1');assert(await gain.isEnabled());
+      assert.deepEqual(await page.locator('[name="bladerf.format"] option').evaluateAll(opts=>opts.map(o=>o.value)),['SC16_Q11','CI8']);
+      await page.locator('[name="bladerf.format"]').selectOption('CI8');
+      assert(await gain.isDisabled(),'Changing native precision invalidates the cached device capabilities');
+      await page.locator('[name="bladerf.format"]').selectOption('SC16_Q11');
       await page.unroute('**/api/v1/frontend/capabilities');
       await page.locator('#filePreset').click();
     }
@@ -333,7 +361,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.deepEqual(errors,[]);
     await post('shutdown',{});
     assert.equal(await exit,0);
-    console.log('PASS: receiver-side file picker (paths with spaces), per-file metadata import, single active source/no independent replay, recording deletion/active protection/token/revision/path/symlink checks, topic settings and mobile; PSD integrity/corruption, sequence skips without separator rows, slow/latest-frame GUI, 30 Hz polling, dormant producers, independent histogram, tuning axes, gain steps; recording, transfer, persistence, mobile and shutdown.');
+    console.log('PASS: receiver-side file picker (paths with spaces), per-file metadata import, single active source/no independent replay, recording deletion/active protection/token/revision/path/symlink checks, topic settings and mobile; 2D/3D waterfall projection, shared history and bounded mesh; PSD integrity/corruption, sequence skips without separator rows, slow/latest-frame GUI, 30 Hz polling, dormant producers, independent histogram, tuning axes, gain steps and bladeRF precision; recording, transfer, persistence, mobile and shutdown.');
   } finally {
     if (browser) await browser.close();
     if (child.exitCode === null) { child.kill('SIGTERM'); await exit; }

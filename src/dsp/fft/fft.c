@@ -216,17 +216,35 @@ static int Execute(const TNgFftPlan *p, size_t n, const int16_t *a, int16_t *b, 
             return NgFail(error, "FFT input/output arrays overlap");
         }
     }
-    for (i = 0; i < 2 * n; ++i) {
-        if (a[i] < -16384 || a[i] > 16384) {
+#if defined(NGENE_FFT_ASSEMBLY) && (defined(__x86_64__) || defined(_M_X64))
+    if (reference == 0) {
+        if (NgFftInputInRange(a, n) == 0) {
             return NgFail(error, "FFT input exceeds signed Q14 headroom");
+        }
+    } else
+#endif
+    {
+        for (i = 0; i < 2 * n; ++i) {
+            if (a[i] < -16384 || a[i] > 16384) {
+                return NgFail(error, "FFT input exceeds signed Q14 headroom");
+            }
         }
     }
     for (i = 0; i < n; ++i) {
         size_t r = p->reverse[i * (p->maximum / n)];
-        b[2 * r] = a[2 * i];
-        b[2 * r + 1] = a[2 * i + 1];
+        /* Copy a whole complex pair without imposing uint32 alignment or aliasing rules. */
+        memcpy(b + 2 * r, a + 2 * i, 2 * sizeof(*a));
     }
-    for (m = 2; m <= n; m *= 2) {
+    m = 2;
+#if defined(NGENE_FFT_ASSEMBLY) && (defined(__x86_64__) || defined(_M_X64))
+    if (reference == 0) {
+        /* Avoid N/2 + N/4 tiny ABI calls while retaining the reference rounding per stage. */
+        NgFftFirstStages(b, n);
+        m = 8;
+        offset = 12;
+    }
+#endif
+    for (; m <= n; m *= 2) {
         for (base = 0; base < n; base += m) {
 #ifdef NGENE_FFT_ASSEMBLY
             if (reference == 0) {

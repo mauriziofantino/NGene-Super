@@ -65,6 +65,10 @@ Lo snapshot status aggiunge l’oggetto `analysis`. Spettro e waterfall consuman
 
 Rate e sorgente pre/post separati per PSD e istogramma, overlap 0..99% intero, Welch nel limite del burst, densità per Hz, media temporale/EMA. Il display ha scale Y e colore globali regolabili, history/rate waterfall, limiti X e riferimenti hardware/signal/RF. Il fit colore è un comando esplicito una tantum e viene applicato a tutte le righe. Nessuna normalizzazione per riga. Nascondere un pannello, aprire Configuration o mettere in pausa fa scadere l’interesse diagnostico, senza fermare la ricezione.
 
+The waterfall header provides **View → 2D waterfall / 3D waterfall**. Both views use the same bounded PSD history; switching projection also works while paused and preserves every stored snapshot. In 3D, frequency runs horizontally, older observations recede from the newest row at the front, and height uses the Spectrum minimum/maximum settings. Colours use the same global Waterfall colour minimum/maximum in both views. The depth axis uses the snapshots' production times, including display skips. The history capacity remains 32–2048 snapshots; 3D drawing samples at most 48 history slices and 192 frequency buckets, retaining each bucket's peak so narrow carriers remain visible. Rendering uses the browser's existing Canvas API, without extra dependencies, raw I/Q transfers or receiver changes. These are browser display preferences and are not saved in the receiver INI profile.
+
+For bladeRF, **Input source → Sample precision** selects `SC16_Q11` (12-bit ADC data stored in 16-bit I and 16-bit Q components) or `CI8` (native signed 8-bit I and 8-bit Q transfer, requiring compatible device/FPGA support). The status line displays the actual stream format reported by the receiver. Changing precision invalidates previously queried device limits; query them again before setting gain.
+
 
 ## Configurazione e cancellazione 0.5
 
