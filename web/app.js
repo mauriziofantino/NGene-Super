@@ -49,6 +49,10 @@ let waiting = false, lastRequest = 0, lastResponse = -Infinity, lastSample = nul
 let paused = false, fileBusy = false, lastFileRefresh = 0;
 let selectedSettings = 'source', deletingFile = false;
 let quitting = false, pendingTelemetry=null, renderPending=false;
+const profileErrors = new Map(), profileTouched = new Set(), analysisErrors = new Map(), analysisTouched = new Set();
+let profileValidationRequested = false, analysisValidationRequested = false, profileRequestNotice = null;
+let lastNotice = {error:false, owner:'receiver'};
+const analysisHelp = 'Runtime changes stay in this session. Save the full profile while stopped to persist them.';
 
 function log(message, error = false) {
   const item = document.createElement('li'), time = document.createElement('time'), text = document.createElement('span');
@@ -56,7 +60,75 @@ function log(message, error = false) {
   if (error) item.classList.add('error'); item.append(time, text); $('events').prepend(item);
   while ($('events').children.length > 50) $('events').lastChild.remove();
 }
-function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
+function notice(message, error = false, owner = 'action') {
+  if (owner === 'receiver' && !error && lastNotice.error && lastNotice.owner !== 'receiver') return;
+  lastNotice = {error, owner};
+  if ($('notice').textContent !== message) $('notice').textContent = message;
+  $('notice').classList.toggle('error', error);
+}
+/** Keep validation feedback in the form instead of a transient browser tooltip. */
+function fieldFeedback(input, message) {
+  const feedback = $(`${input.id}_error`);
+  if (feedback.textContent !== message) feedback.textContent = message;
+  feedback.hidden = !message;
+  const invalid = String(Boolean(message));
+  if (input.getAttribute('aria-invalid') !== invalid) input.setAttribute('aria-invalid', invalid);
+}
+function attachFieldFeedback(input, wrapper) {
+  const feedback = document.createElement('small');
+  feedback.id = `${input.id}_error`; feedback.className = 'field-error'; feedback.hidden = true;
+  wrapper.append(feedback);
+  const hint = wrapper.querySelector('small:not(.field-error)');
+  if (hint) hint.id = `${input.id}_hint`;
+  input.setAttribute('aria-describedby', [hint?.id, feedback.id].filter(Boolean).join(' '));
+}
+function profileSummary() {
+  const first = profileErrors.values().next().value;
+  const message = first || profileRequestNotice?.message || (dirty ? 'Unsaved changes. Apply & save before starting.' : `Profile r${revision} · parameters lock during reception.`);
+  const node = $('configMessage');
+  if (node.textContent !== message) node.textContent = message;
+  node.classList.toggle('error', Boolean(first || profileRequestNotice?.error));
+  node.setAttribute('role', 'status'); node.setAttribute('aria-live', 'polite');
+}
+/** Reading validity never opens the browser bubble; raw integer text follows the INI parser. */
+function numericFieldError(input, title, required, integer) {
+  if (input.validity.badInput) return `${title}: enter a number.`;
+  if (!input.value) return required ? `${title}: enter a value.` : '';
+  const number = Number(input.value);
+  if (!Number.isFinite(number)) return `${title}: enter a finite number.`;
+  if (integer && !Number.isInteger(number)) return `${title}: enter a whole number.`;
+  if (integer === 'decimal' && !/^\d+$/.test(input.value)) return `${title}: use decimal digits without a sign or exponent.`;
+  if (input.min !== '' && number < Number(input.min)) return `${title}: minimum ${input.min}.`;
+  if (input.max !== '' && number > Number(input.max)) return `${title}: maximum ${input.max}.`;
+  if (input.validity.stepMismatch) return `${title}: use increments of ${input.step}.`;
+  return '';
+}
+function profileFieldError(input) {
+  if (input.type !== 'number') return '';
+  const title = fields.find(field => field[1] === input.name)?.[2] || input.name;
+  const integer = input.name === 'receiver.run_seconds' ? false : ['rtlsdr.ppm','bladerf.gain_db'].includes(input.name) ? true : 'decimal';
+  const message = numericFieldError(input, title, Object.hasOwn(values, input.name), integer);
+  if (message) return message;
+  const rate = Number(input.value);
+  if (input.name === 'frontend.sample_rate_hz' && values['frontend.type'] === 'rtlsdr' && rate > 300000 && rate <= 900000) return 'RTL-SDR sample rate must be (225000,300000] or (900000,3200000] pairs/s.';
+  return '';
+}
+function refreshProfileErrors(force = false) {
+  if (force) profileValidationRequested = true;
+  for (const input of $('configForm').elements) {
+    if (!input.name) continue;
+    if (profileValidationRequested || profileTouched.has(input.name)) {
+      const message = profileFieldError(input);
+      if (message) profileErrors.set(input.name, message); else profileErrors.delete(input.name);
+    }
+    fieldFeedback(input, profileErrors.get(input.name) || '');
+  }
+  profileSummary();
+  return profileErrors.size === 0;
+}
+function clearProfileErrors() {
+  profileErrors.clear(); profileTouched.clear(); profileValidationRequested = false; profileRequestNotice = null;
+}
 function connected() { return socket?.readyState === WebSocket.OPEN; }
 function editable() { return connected() && status && ['stopped', 'error'].includes(status.state) && !httpBusy && !pendingCommand; }
 function pairs(value) { try { return BigInt(value || '0').toLocaleString('en-US'); } catch { return '—'; } }
@@ -88,7 +160,8 @@ function toIni(object) {
 function dirtyState(changed) {
   dirty = changed; $('configBadge').textContent = dirty ? 'Unsaved' : `r${revision}`;
   $('configBadge').classList.toggle('dirty', dirty);
-  $('configMessage').textContent = dirty ? 'Unsaved changes. Apply & save before starting.' : `Profile r${revision} · parameters lock during reception.`;
+  if (changed) profileRequestNotice = null;
+  profileSummary();
   $('iniEditor').value = toIni(values); controls();
 }
 const settingsTopics = {
@@ -112,13 +185,15 @@ function selectSettings(topic) {
   updateSourceFields();
 }
 function validateProfileFields() {
-  const invalid = [...$('configForm').elements].find(input => !input.checkValidity());
+  refreshProfileErrors(true);
+  const invalid = [...$('configForm').elements].find(input => profileErrors.has(input.name));
   if (!invalid) return true;
   const group = invalid.closest('[data-group]')?.dataset.group;
   selectSettings(group === 'Recording' ? 'recording' : ['Receiver', 'Buffers'].includes(group) ? 'receiver' : 'source');
-  invalid.reportValidity(); return false;
+  invalid.focus(); return false;
 }
 function buildForm() {
+  $('configForm').noValidate = true;
   const holder = $('fields'); holder.replaceChildren(); let group = '', grid;
   for (const [section, key, label, type, options, unit, hint] of fields) {
     if (section !== group) {
@@ -133,10 +208,19 @@ function buildForm() {
     const input = document.createElement(type === 'select' && !nativeBandwidth ? 'select' : 'input'); input.name = key;
     if (type === 'select' && !nativeBandwidth) for (const option of (key === 'rtlsdr.gain_tenths_db' ? (deviceCaps?.tuner_gains_tenths_db || [values[key] || '0']) : options)) { const element = document.createElement('option'); element.value = option; element.textContent = option === 'true' ? 'On' : option === 'false' ? 'Off' : option === 'record' ? 'Record only' : option === 'capture' ? 'Capture' : option; input.append(element); }
     else { input.type = nativeBandwidth ? 'number' : type; if(input.type==='number'){input.step='any';input.min='0'; if(key==='conditioning.dc_shift'){input.min='4';input.max='24';input.step='1';} if(key==='frontend.sample_rate_hz'){input.min='1';input.max='20000000';input.step='1';} if(key.endsWith('frequency_hz')){input.max='6000000000';input.step='1';} } input.inputMode = type === 'number' ? 'decimal' : 'text'; input.autocomplete = 'off'; }
-    input.value = values[key] ?? ''; input.addEventListener('input', () => { values[key] = input.value.trim(); dirtyState(true); updateSourceFields(); });
+    const limits = {'conditioning.dc_shift':[4,24], 'buffer.window_samples':[1,1048576], 'buffer.ingress_blocks':[2,4096], 'buffer.ring_blocks':[2,4096], 'recording.queue_blocks':[2,4096], 'receiver.idle_timeout_ms':[100,3600000], 'receiver.run_seconds':[0,31536000], 'rtlsdr.ppm':[-1000,1000], 'bladerf.gain_db':[-100,100]};
+    if (input.type === 'number') { input.step = key === 'receiver.run_seconds' ? 'any' : '1'; if (limits[key]) [input.min,input.max] = limits[key]; }
+    input.id = `config_${key.replaceAll('.', '_')}`;
+    input.value = values[key] ?? ''; input.addEventListener('input', () => {
+      values[key] = input.value.trim();
+      if (key === 'frontend.type') profileTouched.add('frontend.sample_rate_hz');
+      dirtyState(true); updateSourceFields(); refreshProfileErrors();
+    });
+    input.addEventListener('blur', () => { profileTouched.add(key); refreshProfileErrors(); });
     wrapper.append(input); if (hint) { const small = document.createElement('small'); small.textContent = hint; wrapper.append(small); } grid.append(wrapper);
+    attachFieldFeedback(input, wrapper);
   }
-  selectSettings(selectedSettings); controls();
+  selectSettings(selectedSettings); controls(); refreshProfileErrors();
 }
 function updateSourceFields() {
   const source = values['frontend.type'];
@@ -182,7 +266,7 @@ async function api(path, body) {
 }
 async function loadConfig(force = false) {
   const data = await api('config');
-  if (!dirty || force) { revision = data.revision; savedValues = parseIni(data.ini); values = {...savedValues}; buildForm(); if (!analysisDirty) buildAnalysisForm(); dirtyState(false); selectSettings(selectedSettings); }
+  if (!dirty || force) { revision = data.revision; savedValues = parseIni(data.ini); values = {...savedValues}; clearProfileErrors(); buildForm(); if (!analysisDirty) buildAnalysisForm(); dirtyState(false); selectSettings(selectedSettings); }
   else if (data.revision !== revision) { notice('The server configuration changed. Export your draft, then reload this page before applying.', true); }
 }
 async function applyConfig(validateOnly = false) {
@@ -190,9 +274,10 @@ async function applyConfig(validateOnly = false) {
   httpBusy = true; controls();
   try {
     const result = await api(validateOnly ? 'config/validate' : 'config', {revision, ini: toIni(values)});
-    if (!validateOnly) { revision = result.revision; savedValues = parseIni(result.ini); values = {...savedValues}; buildForm(); if (!analysisDirty) buildAnalysisForm(); dirtyState(false); selectSettings(selectedSettings); }
-    notice(validateOnly ? 'Configuration is valid. Apply & save to use it.' : `Profile r${revision} saved on the receiver. Recording folder applied.`); log(validateOnly ? 'Configuration validated.' : `Configuration r${revision} saved.`);
-  } catch (error) { notice(error.message, true); log(error.message, true); }
+    if (!validateOnly) { revision = result.revision; savedValues = parseIni(result.ini); values = {...savedValues}; clearProfileErrors(); buildForm(); if (!analysisDirty) buildAnalysisForm(); dirtyState(false); selectSettings(selectedSettings); }
+    const message = validateOnly ? 'Configuration is valid. Apply & save to use it.' : `Profile r${revision} saved on the receiver. Recording folder applied.`;
+    profileRequestNotice = {message,error:false}; profileSummary(); notice(message); log(validateOnly ? 'Configuration validated.' : `Configuration r${revision} saved.`);
+  } catch (error) { profileRequestNotice = {message:error.message,error:true}; profileSummary(); notice(error.message, true); log(error.message, true); }
   finally { httpBusy = false; controls(); }
 }
 async function command(path) {
@@ -238,7 +323,7 @@ function renderStatus(next) {
   $('recordBadge').textContent = next.recording_state; $('sessionName').textContent = next.recording_name || 'No recording yet';
   $('sessionSamples').textContent = pairs(next.session_written_samples); $('segments').textContent = next.recording_segments;
   $('outputDirectory').textContent = next.output_directory;
-  if (next.message !== lastMessage) { lastMessage = next.message; notice(next.message, !next.command_ok || next.state === 'error'); log(next.message, !next.command_ok || next.state === 'error'); }
+  if (next.message !== lastMessage) { lastMessage = next.message; notice(next.message, !next.command_ok || next.state === 'error', 'receiver'); log(next.message, !next.command_ok || next.state === 'error'); }
   if (next.completed_command_id !== lastCommand) { lastCommand = next.completed_command_id; refreshFiles(); }
 
   renderAnalysis(next.analysis);
@@ -340,6 +425,9 @@ let analysisDirty=false, analysisSnapshot=null, analysisSequence='0', analysisRe
 let waterfallTime=-Infinity, skippedDisplay=0, rejectedFrames=0;
 function diagnosticInterest(){return document.hidden||paused||!$('configurationView').classList.contains('hidden')?0:($('showSpectrum').checked?1:0)|($('showHistogram').checked?2:0);}
 function buildAnalysisForm() {
+  $('analysisForm').noValidate = true;
+  analysisErrors.clear(); analysisTouched.clear(); analysisValidationRequested = false;
+  setAnalysisNotice(analysisHelp);
   $('analysisFields').replaceChildren();
   for (const [name,title,options,min,max,step] of analysisFields) {
     const label=document.createElement('label');label.className='field';
@@ -347,9 +435,29 @@ function buildAnalysisForm() {
     const input=document.createElement(options?'select':'input');input.id=`analysis_${name}`;input.name=name;
     if(options)for(const value of options){const option=document.createElement('option');option.value=String(value);option.textContent=String(value);input.append(option);}
     else {input.type='number';input.min=min;input.max=max;input.step=step;}
-    input.value=savedValues[`analysis.${name}`] ?? '';input.addEventListener('input',()=>{analysisDirty=true;});label.append(input);$('analysisFields').append(label);
+    input.value=savedValues[`analysis.${name}`] ?? '';input.addEventListener('input',()=>{analysisDirty=true;setAnalysisNotice(analysisHelp);refreshAnalysisErrors();});
+    input.addEventListener('blur',()=>{analysisTouched.add(name);refreshAnalysisErrors();});label.append(input);attachFieldFeedback(input,label);$('analysisFields').append(label);
   }
   controls();
+}
+function setAnalysisNotice(message, error = false) {
+  const node = $('analysisNotice');
+  if (node.textContent !== message) node.textContent = message;
+  node.classList.toggle('error', error); node.setAttribute('role', 'status'); node.setAttribute('aria-live', 'polite');
+}
+function refreshAnalysisErrors(force = false) {
+  if (force) analysisValidationRequested = true;
+  for (const [name,title,options] of analysisFields) {
+    const input = $(`analysis_${name}`);
+    if (analysisValidationRequested || analysisTouched.has(name)) {
+      const message = options ? (input.value ? '' : `${title}: choose a value.`) : numericFieldError(input,title,true,input.step==='1');
+      if (message) analysisErrors.set(name,message); else analysisErrors.delete(name);
+    }
+    fieldFeedback(input,analysisErrors.get(name)||'');
+  }
+  const first = analysisErrors.values().next().value;
+  if (first) setAnalysisNotice(first,true);
+  return analysisErrors.size===0;
 }
 function showView(configuration) {
   $('configurationView').classList.toggle('hidden',!configuration);$('observationView').classList.toggle('hidden',configuration);
@@ -360,16 +468,18 @@ function showView(configuration) {
 $('showConfiguration').addEventListener('click',()=>showView(true));
 $('showObservation').addEventListener('click',()=>showView(false));
 $('analysisForm').addEventListener('submit',async event=>{
-  event.preventDefault();const body={revision};
+  event.preventDefault();
+  if(!refreshAnalysisErrors(true)){ $(`analysis_${analysisErrors.keys().next().value}`).focus();return; }
+  const body={revision};
   for(const [name] of analysisFields){const value=$(`analysis_${name}`).value;body[name]=name.endsWith('_enabled')?value==='true':['window','temporal','units','spectrum_source','histogram_source'].includes(name)?value:Number(value);}
   httpBusy=true;controls();
   try {
     const result=await api('analysis/config',body);revision=result.revision;
     for(const [name,value] of Object.entries(result.analysis)){savedValues[`analysis.${name}`]=String(value);values[`analysis.${name}`]=String(value);}
     analysisDirty=false;dirtyState(true);resetAnalysis();
-    $('analysisNotice').textContent='Applied to this session. Use Apply & save in Receiver configuration while stopped to persist the full profile.';
+    setAnalysisNotice('Applied to this session. Use Apply & save in Receiver configuration while stopped to persist the full profile.');
     log('Analysis parameters applied without restarting the receiver.');requestStatus();
-  } catch(error){$('analysisNotice').textContent=error.message;log(error.message,true);}
+  } catch(error){setAnalysisNotice(error.message,true);log(error.message,true);}
   finally{httpBusy=false;controls();}
 });
 function resetAnalysis(){analysisSnapshot=null;analysisSequence='0';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;skippedDisplay=0;rejectedFrames=0;drawAnalysis();}
@@ -455,10 +565,16 @@ const waterfallPalette=Array.from({length:256},(_,n)=>{
 });
 const waterfallCssPalette=waterfallPalette.map(colour=>`rgb(${colour.join(',')})`);
 let waterfallRender={mode:'2d',rows:0,columns:0};
+const waterfallDefaultCamera={yaw:-24,pitch:34};
+let waterfallCamera={...waterfallDefaultCamera};
 function drawWaterfall(){
   const mode=$('waterfallMode').value,threeD=mode==='3d';
-  $('waterfall').setAttribute('aria-label',threeD?'3D spectrum waterfall: frequency, observation age and power; newest observation at front':'Spectrum waterfall, newest observation at top');
-  $('waterfallInfo').textContent=`${threeD?'3D · Newest at front':'Newest at top'} · ${waterfallHistory.length} snapshots · display skips ${skippedDisplay}${analysisSnapshot?` · sample ${analysisSnapshot.first_sample}`:''}`;
+  $('waterfall').setAttribute('aria-label',threeD?'3D spectrum waterfall: frequency, observation age and power; default view has newest observation at front. Drag or use arrow keys to rotate.':'Spectrum waterfall, newest observation at top');
+  $('waterfall').classList.toggle('waterfall-rotatable',threeD);
+  $('waterfall').tabIndex=threeD?0:-1;
+  if(threeD)$('waterfall').setAttribute('aria-describedby','waterfallHelp');else $('waterfall').removeAttribute('aria-describedby');
+  $('waterfallOrbit').classList.toggle('hidden',!threeD);
+  $('waterfallInfo').textContent=`${threeD?`3D · yaw ${Math.round(waterfallCamera.yaw)}° / tilt ${Math.round(waterfallCamera.pitch)}°`:'Newest at top'} · ${waterfallHistory.length} snapshots · display skips ${skippedDisplay}${analysisSnapshot?` · sample ${analysisSnapshot.first_sample}`:''}`;
   const [lo,hi]=range(true);
   $('colourLegend').textContent=`Global colours ${lo} … ${hi} ${analysisSnapshot?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin'}`;
   const s=surface('waterfall');if(!s)return;
@@ -484,31 +600,48 @@ function drawWaterfall(){
 function drawWaterfall3D(s){
   const {ctx,w,h,left,right,top,bottom}=s,[lo,hi]=range(),[colourLo,colourHi]=range(true),[flo,fhi]=frequencyRange();
   const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2);
-  const depthX=(right-left)*0.16,depthY=(bottom-top)*0.34,width=right-left-depthX,height=(bottom-top)*0.60;
-  const project=(frequency,depth,power)=>[left+frequency*width+depth*depthX,bottom-depth*depthY-power*height];
-  const line=(a,b)=>{ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();};
+  const yaw=waterfallCamera.yaw*Math.PI/180,pitch=waterfallCamera.pitch*Math.PI/180;
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const rotate=(frequency,depth,power)=>{
+    const x=(frequency-0.5)*2.2,z=(depth-0.5)*1.5,y=(power-0.5)*1.2,away=x*sy+z*cy;
+    return [x*cy-z*sy,y*cp+away*sp,away*cp-y*sp];
+  };
+  const corners=[];for(const x of [0,1])for(const z of [0,1])for(const y of [0,1])corners.push(rotate(x,z,y));
+  const minX=Math.min(...corners.map(p=>p[0])),maxX=Math.max(...corners.map(p=>p[0]));
+  const minY=Math.min(...corners.map(p=>p[1])),maxY=Math.max(...corners.map(p=>p[1]));
+  const scale=Math.min((right-left)/(maxX-minX),(bottom-top)/(maxY-minY));
+  const midX=(left+right)/2,midY=(top+bottom)/2;
+  const project=(frequency,depth,power)=>{const [x,y,z]=rotate(frequency,depth,power);return [midX+(x-(minX+maxX)/2)*scale,midY-(y-(minY+maxY)/2)*scale,z];};
+  const line=(a,b)=>{ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();};
   const unit=analysisSnapshot?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin';
-  ctx.fillStyle='#8fa6ba';ctx.fillText(unit,6,11);ctx.strokeStyle='#293e52';
+  const label=(text,point,dx=0,dy=0)=>ctx.fillText(text,Math.max(4,Math.min(w-ctx.measureText(text).width-4,point[0]+dx)),Math.max(12,Math.min(h-4,point[1]+dy)));
+  ctx.fillStyle='#8fa6ba';ctx.strokeStyle='#293e52';
   for(let j=0;j<=4;j++){
     const x=j/4;line(project(x,0,0),project(x,1,0));
-    ctx.fillText((flo+x*(fhi-flo)).toFixed($('frequencyReference').value==='rf'?3:1),Math.max(4,left+x*width-20),h-10);
+    line(project(0,x,0),project(1,x,0));
   }
+  const wall=cy>=0?1:0,side=sy>=0?1:0;
   for(let j=0;j<=2;j++){
-    const level=j/2;line(project(0,0,level),project(0,1,level));
-    line(project(0,1,level),project(1,1,level));
-    ctx.fillText((lo+level*(hi-lo)).toFixed(0),6,bottom-level*height+4);
+    const level=j/2;line(project(side,0,level),project(side,1,level));
+    line(project(0,wall,level),project(1,wall,level));
   }
-  line(project(0,0,0),project(1,0,0));line(project(1,0,0),project(1,1,0));
-  ctx.fillText(frequencyUnit(),Math.min(w-30,left+width+12),h-10);
-  ctx.fillText('New',left+width+6,bottom-3);
-  if(!waterfallHistory.length){ctx.fillText('Waiting for waterfall history',left+20,top+35);return;}
+  const axes=()=>{
+    ctx.strokeStyle='#7190aa';ctx.fillStyle='#adc5d8';
+    line(project(0,0,0),project(1,0,0));line(project(1,0,0),project(1,1,0));line(project(0,0,0),project(0,0,1));
+    for(let j=0;j<=4;j++){const x=j/4;label((flo+x*(fhi-flo)).toFixed($('frequencyReference').value==='rf'?3:1),project(x,0,0),-12,15);}
+    for(let j=0;j<=2;j++)label((lo+j*(hi-lo)/2).toFixed(0),project(0,0,j/2),-30,0);
+    label(frequencyUnit(),project(0.5,0,0),0,29);label(unit,project(0,0,1),-20,-9);
+    label('New',project(1,0,0),8,0);
+    const span=waterfallHistory.length?Math.max(0,waterfallHistory[0].produced-waterfallHistory[waterfallHistory.length-1].produced):0;
+    label(`Older · ${span.toFixed(1)} s`,project(1,1,0),8,0);
+  };
+  if(!waterfallHistory.length){axes();ctx.fillText('Waiting for waterfall history',left+20,top+35);return;}
   const oldest=waterfallHistory[waterfallHistory.length-1],newest=waterfallHistory[0];
   const span=Math.max(0,newest.produced-oldest.produced);
-  ctx.textAlign='right';ctx.fillText(`Older · ${span.toFixed(1)} s`,right,top+9);ctx.textAlign='left';
   // Each bucket retains its peak, including narrow carriers, across the selected frequency interval.
   const bins=newest.values.length,start=Math.max(0,Math.min(bins-1,Math.floor((flo-fullLo)/(fullHi-fullLo)*bins)));
   const end=Math.max(start+1,Math.min(bins,Math.ceil((fhi-fullLo)/(fullHi-fullLo)*bins)));
-  const columns=Math.min(end-start,192,Math.max(16,Math.floor(width/5)));
+  const columns=Math.min(end-start,192,Math.max(16,Math.floor((right-left)/5)));
   const rows=Math.min(48,waterfallHistory.length),mesh=[];
   for(let j=0;j<rows;j++){
     const index=rows===1?0:Math.round(j*(waterfallHistory.length-1)/(rows-1)),row=waterfallHistory[index];
@@ -521,17 +654,20 @@ function drawWaterfall3D(s){
     }
     mesh.push(points);
   }
-  ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top+1);ctx.clip();ctx.lineWidth=1;
-  for(let j=rows-1;j>=0;j--){
-    const row=mesh[j];
-    for(let k=0;k<columns-1;k++){
-      const a=row[k],b=row[k+1];
-      if(j>0){const near=mesh[j-1];ctx.fillStyle=a.colour;ctx.beginPath();ctx.moveTo(...a.xy);ctx.lineTo(...b.xy);ctx.lineTo(...near[k+1].xy);ctx.lineTo(...near[k].xy);ctx.closePath();ctx.fill();}
-      ctx.strokeStyle=a.colour;line(a.xy,b.xy);
-    }
-    if(columns===1){ctx.fillStyle=row[0].colour;ctx.fillRect(row[0].xy[0]-2,row[0].xy[1]-2,4,4);}
+  // Sort facets in camera space so rear observations also occlude correctly after rotation.
+  const facets=[];
+  for(let j=0;j<rows;j++)for(let k=0;k<columns-1;k++){
+    const a=mesh[j][k],b=mesh[j][k+1],points=j>0?[a,b,mesh[j-1][k+1],mesh[j-1][k]]:[a,b];
+    facets.push({points,colour:a.colour,depth:points.reduce((sum,p)=>sum+p.xy[2],0)/points.length});
   }
-  ctx.restore();waterfallRender={mode:'3d',rows,columns};
+  facets.sort((a,b)=>b.depth-a.depth);ctx.lineWidth=0.7;
+  for(const facet of facets){
+    ctx.beginPath();ctx.moveTo(facet.points[0].xy[0],facet.points[0].xy[1]);for(let n=1;n<facet.points.length;n++)ctx.lineTo(facet.points[n].xy[0],facet.points[n].xy[1]);
+    if(facet.points.length>2){ctx.closePath();ctx.fillStyle=facet.colour;ctx.fill();}
+    ctx.strokeStyle=facet.colour;ctx.stroke();
+  }
+  if(columns===1)for(const row of mesh){ctx.fillStyle=row[0].colour;ctx.fillRect(row[0].xy[0]-2,row[0].xy[1]-2,4,4);}
+  axes();waterfallRender={mode:'3d',rows,columns};
 }
 function drawHistogram(id,data,color){
   const s=surface(id);if(!s)return;const {ctx,w,h,left,right,top,bottom}=s;const percent=$('histScale').value==='percent',count=analysisSnapshot?.histogram_count||1;
@@ -543,6 +679,78 @@ function drawHistogram(id,data,color){
   ctx.fillStyle='#8fa6ba';for(let j=0;j<=4;j++)ctx.fillText(String(j===4?(analysisSnapshot?.histogram_max??127):Math.round((analysisSnapshot?.histogram_min??-128)+j*((analysisSnapshot?.histogram_max??127)-(analysisSnapshot?.histogram_min??-128)+1)/4)),Math.min(w-28,left+j*(right-left)/4-10),h-10);
 }
 function drawAnalysis(){drawSpectrum();drawWaterfall();drawHistogram('histogramI',analysisSnapshot?.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot?.histogram_q,'#62a6ff');}
+let plotDrawPending=false,waterfallDrawPending=false;
+function schedulePlotDraw(){if(plotDrawPending)return;plotDrawPending=true;requestAnimationFrame(()=>{plotDrawPending=false;drawAnalysis();});}
+function scheduleWaterfallDraw(){if(waterfallDrawPending)return;waterfallDrawPending=true;requestAnimationFrame(()=>{waterfallDrawPending=false;drawWaterfall();});}
+function setPlotHeight(id,height){
+  height=Math.max(180,Math.min(720,Math.round(height/10)*10));
+  $(`${id}Wrap`).style.height=`${height}px`;$(`${id}Height`).value=height;$(`${id}HeightValue`).value=`${height} px`;
+  $(`${id}Resize`).setAttribute('aria-valuenow',height);$(`${id}Resize`).setAttribute('aria-valuetext',`${height} pixels`);schedulePlotDraw();
+}
+for(const id of ['spectrum','waterfall']){
+  setPlotHeight(id,$(`${id}Wrap`).getBoundingClientRect().height);
+  $(`${id}Height`).addEventListener('input',event=>setPlotHeight(id,Number(event.target.value)));
+  const handle=$(`${id}Resize`);let drag=null;
+  handle.addEventListener('pointerdown',event=>{if(!event.isPrimary||event.button!==0)return;event.preventDefault();handle.focus();drag={pointer:event.pointerId,y:event.clientY,height:$(`${id}Wrap`).getBoundingClientRect().height};handle.setPointerCapture(event.pointerId);});
+  handle.addEventListener('pointermove',event=>{if(drag&&event.pointerId===drag.pointer)setPlotHeight(id,drag.height+event.clientY-drag.y);});
+  const finish=event=>{if(drag&&event.pointerId===drag.pointer){drag=null;if(handle.hasPointerCapture(event.pointerId))handle.releasePointerCapture(event.pointerId);}};
+  for(const name of ['pointerup','pointercancel','lostpointercapture'])handle.addEventListener(name,finish);
+  handle.addEventListener('keydown',event=>{
+    const change={ArrowUp:-10,ArrowDown:10,PageUp:-100,PageDown:100}[event.key];
+    if(change===undefined&&!['Home','End'].includes(event.key))return;
+    event.preventDefault();setPlotHeight(id,event.key==='Home'?180:event.key==='End'?720:Number($(`${id}Height`).value)+change);
+  });
+}
+let plotsExpanded=false,plotFocusReturn=null,plotScrollReturn=0;
+function setPlotsExpanded(expanded){
+  if(expanded===plotsExpanded)return;
+  if(expanded){plotFocusReturn=document.activeElement;plotScrollReturn=scrollY;}
+  plotsExpanded=expanded;const panel=$('spectrumPanel');
+  panel.classList.toggle('plot-focused',expanded);document.body.classList.toggle('plots-focused',expanded);
+  $('expandPlots').textContent=expanded?'Restore plots':'Expand plots';$('expandPlots').setAttribute('aria-expanded',String(expanded));
+  if(expanded){panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');$('expandPlots').focus({preventScroll:true});}
+  else {panel.removeAttribute('role');panel.removeAttribute('aria-modal');scrollTo(0,plotScrollReturn);if(plotFocusReturn?.isConnected)plotFocusReturn.focus({preventScroll:true});}
+  schedulePlotDraw();
+}
+$('expandPlots').addEventListener('click',()=>setPlotsExpanded(!plotsExpanded));
+document.addEventListener('keydown',event=>{
+  if(!plotsExpanded)return;
+  if(event.key==='Escape'){event.preventDefault();setPlotsExpanded(false);}
+  else if(event.key==='Tab'){
+    const controls=[...$('spectrumPanel').querySelectorAll('button,input,select,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);
+    const first=controls[0],last=controls[controls.length-1];
+    if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+  }
+});
+function rotateWaterfall(yaw,pitch){
+  waterfallCamera={yaw:((yaw+180)%360+360)%360-180,pitch:Math.max(12,Math.min(78,pitch))};scheduleWaterfallDraw();
+}
+function resetWaterfallCamera(){waterfallCamera={...waterfallDefaultCamera};scheduleWaterfallDraw();}
+for(const [id,yaw,pitch] of [['waterfallLeft',-10,0],['waterfallRight',10,0],['waterfallUp',0,5],['waterfallDown',0,-5]])$(id).addEventListener('click',()=>rotateWaterfall(waterfallCamera.yaw+yaw,waterfallCamera.pitch+pitch));
+$('waterfallReset').addEventListener('click',resetWaterfallCamera);
+let waterfallDrag=null;
+$('waterfall').addEventListener('pointerdown',event=>{
+  if($('waterfallMode').value!=='3d'||!event.isPrimary||event.button!==0)return;
+  event.preventDefault();$('waterfall').focus({preventScroll:true});
+  waterfallDrag={pointer:event.pointerId,x:event.clientX,y:event.clientY,...waterfallCamera};$('waterfall').setPointerCapture(event.pointerId);$('waterfall').classList.add('dragging');
+});
+$('waterfall').addEventListener('pointermove',event=>{
+  if(!waterfallDrag||event.pointerId!==waterfallDrag.pointer)return;
+  rotateWaterfall(waterfallDrag.yaw+(event.clientX-waterfallDrag.x)*0.4,waterfallDrag.pitch+(event.clientY-waterfallDrag.y)*0.25);
+});
+function finishWaterfallDrag(event){
+  if(!waterfallDrag||event.pointerId!==waterfallDrag.pointer)return;
+  waterfallDrag=null;$('waterfall').classList.remove('dragging');if($('waterfall').hasPointerCapture(event.pointerId))$('waterfall').releasePointerCapture(event.pointerId);
+}
+for(const name of ['pointerup','pointercancel','lostpointercapture'])$('waterfall').addEventListener(name,finishWaterfallDrag);
+$('waterfall').addEventListener('keydown',event=>{
+  if($('waterfallMode').value!=='3d')return;
+  const direction={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,5],ArrowDown:[0,-5]}[event.key];
+  if(direction){event.preventDefault();rotateWaterfall(waterfallCamera.yaw+direction[0],waterfallCamera.pitch+direction[1]);}
+  else if(event.key==='Home'){event.preventDefault();resetWaterfallCamera();}
+});
+$('waterfall').addEventListener('dblclick',()=>{if($('waterfallMode').value==='3d')resetWaterfallCamera();});
 $('clearWaterfall').addEventListener('click',()=>{waterfallHistory=[];drawWaterfall();});
 $('waterfallMode').addEventListener('change',drawWaterfall);
 $('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());drawAnalysis();});
@@ -566,13 +774,19 @@ $('bladePreset').addEventListener('click', () => {
   Object.assign(values, {'frontend.type':'bladerf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','bladerf.gain_db':'30','bladerf.format':'SC16_Q11','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
   buildForm(); dirtyState(true);
 });
+let capabilityRequestId = 0;
 $('deviceLimits').addEventListener('click', async () => {
-  if (!editable()) return;
+  if (!editable() || !validateProfileFields()) return;
+  const requestId = ++capabilityRequestId;
+  const keys = ['frontend.type','frontend.serial','frontend.center_frequency_hz','bladerf.format'];
+  const requested = keys.map(key => values[key] || '');
+  const current = () => requestId === capabilityRequestId && keys.every((key,index) => (values[key] || '') === requested[index]);
   try {
     const result = await api('frontend/capabilities', {ini: toIni(values)});
-    deviceCaps = { ...result, source: values['frontend.type'], serial: values['frontend.serial'] || '', tuning: values['frontend.center_frequency_hz'], precision: values['bladerf.format'] };
+    if (!current() || !editable()) return;
+    deviceCaps = { ...result, source: requested[0], serial: requested[1], tuning: requested[2], precision: requested[3] };
     buildForm(); notice(`Native device limits loaded · ${result.format}`);
-  } catch(error) { notice(error.message, true); }
+  } catch(error) { if (current()) { profileRequestNotice = {message:error.message,error:true}; profileSummary(); notice(error.message, true); } }
 });
 $('filePreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'file','replay.realtime':'true','replay.loop':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
 $('frequencyReference').addEventListener('change',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
@@ -584,11 +798,12 @@ $('hackrfPreset').addEventListener('click', () => { Object.assign(values, {'fron
 $('exit').addEventListener('click', async () => { if (!confirm('Stop the receiver, finish recording and close the local NGene service?')) return; try { await api('shutdown', {}); quitting = true; notice('NGene is closing. Restart ngene --web to reconnect.'); } catch (error) { notice(error.message, true); } });
 setInterval(() => { if (waiting && performance.now() - lastRequest > 4000) socket?.close(); else if (performance.now() - lastRequest >= Number($('refresh').value)) requestStatus(); }, 10);
 
-new ResizeObserver(drawAnalysis).observe($('spectrum'));
+const plotResizeObserver=new ResizeObserver(schedulePlotDraw);
+for(const id of ['spectrum','waterfall','histogramI','histogramQ'])plotResizeObserver.observe($(id));
 connect();
 
 /* Read-only inspection for frame troubleshooting and browser regression tests. */
-export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:skippedDisplay,rejected:rejectedFrames,waterfall:{...waterfallRender},history:waterfallHistory.map(row=>({...row,values:[...row.values]}))};}
+export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:skippedDisplay,rejected:rejectedFrames,waterfall:{...waterfallRender,camera:{...waterfallCamera}},history:waterfallHistory.map(row=>({...row,values:[...row.values]}))};}
 export {psdIntegrity, renderAnalysis, displayFrequency};
 
 document.querySelectorAll('[data-settings]').forEach(button => button.addEventListener('click', () => selectSettings(button.dataset.settings)));
