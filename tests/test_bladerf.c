@@ -23,9 +23,16 @@ struct bladerf {
 /** @brief Inject invalid native sample counts. */
 static int malformed;
 
+/** @brief Configurable device-list outcome for enumeration coverage. */
+static int device_list_result = 1;
+
 /** @brief Enumerate one fixture. @param list Receives owned list. @return One. */
 int CALL_CONV bladerf_get_device_list(struct bladerf_devinfo **list)
 {
+    if (device_list_result != 1) {
+        *list = NULL;
+        return device_list_result;
+    }
     *list = calloc(1, sizeof(**list));
     CHECK(*list);
     strcpy((*list)->serial, "blade-test");
@@ -252,11 +259,24 @@ int main(void)
     TNgError error = {{0}};
     TNgIqView view;
     unsigned scenario, index;
+    FILE *output;
+    char line[64];
     NgConfigDefaults(&config);
     config.frontend = NG_FRONTEND_BLADERF;
     config.windowSamples = 4;
     config.ingressBlocks = 64;
     strcpy(config.serial, "blade-test");
+    output = tmpfile();
+    CHECK(output != NULL);
+    device_list_result = BLADERF_ERR_NODEV;
+    CHECK(NgBladerfList(output, &error) == NG_OK);
+    CHECK(fflush(output) == 0 && fseek(output, 0, SEEK_SET) == 0);
+    CHECK(fgets(line, sizeof(line), output) != NULL && strcmp(line, "bladeRF devices=0\n") == 0);
+    CHECK(fclose(output) == 0);
+    device_list_result = BLADERF_ERR_IO;
+    CHECK(NgBladerfList(stdout, &error) == NG_ERROR);
+    CHECK(strstr(error.message, "bladeRF enumerate: fixture error") != NULL);
+    device_list_result = 1;
     CHECK(NgBladerfCapabilities(&config, &caps, &error) == NG_OK && caps.gainMinDb == -12 &&
           caps.gainMaxDb == 60);
     config.bladeGainDb = 61;

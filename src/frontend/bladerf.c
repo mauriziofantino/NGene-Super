@@ -402,6 +402,12 @@ int NgBladerfList(FILE *output, TNgError *error)
 {
     struct bladerf_devinfo *list = NULL;
     int count = bladerf_get_device_list(&list), i;
+    if (count == BLADERF_ERR_NODEV) {
+        if (list != NULL) {
+            bladerf_free_device_list(list);
+        }
+        count = 0;
+    }
     if (count < 0) {
         return NgFail(error, "bladeRF enumerate: %s", bladerf_strerror(count));
     }
