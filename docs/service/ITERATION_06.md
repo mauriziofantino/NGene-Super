@@ -1,6 +1,6 @@
 # Increment 0.6 — Windows/HackRF, naming, and replay
 
-> Historical report, 9 October 2026. Verification results and limitations describe that revision, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical report, 9 October 2026. Verification results and limitations describe that revision, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 9 October 2026. Revision of the existing project, without changing the conditioning → ring → channels path or FFT arithmetic. Original NGene remains the basis for GNSS modules to migrate.
 

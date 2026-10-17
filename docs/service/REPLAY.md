@@ -1,6 +1,6 @@
 # File replay contracts
 
-For the current procedure, see [Recording and replay](../wiki/Recording-and-Replay.md).
+For the current procedure, see [Recording and replay](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Recording-and-Replay).
 The older independent replay session described below is retained as explicitly historical
 engineering material; the current GUI/service has one source and rejects `/api/v1/replay/`.
 

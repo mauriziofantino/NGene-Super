@@ -1,6 +1,6 @@
 ﻿# NGene in VS Code on Windows
 
-> Supporting development notes. Current receiver operating instructions are in the [project wiki](../wiki/Getting-Started.md).
+> Supporting development notes. Current receiver operating instructions are in the [project wiki](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Getting-Started).
 
 Open the repository folder (`NGene-git`, containing CMakeLists.txt), rather than
 the folder holding the bundle. The build uses native MSVC and presets shared

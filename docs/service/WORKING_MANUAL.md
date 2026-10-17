@@ -1,6 +1,6 @@
 ﻿# NGene — working manual, inventory, and architecture
 
-> Historical engineering material. This document preserves the analysis, decisions, and implementation status recorded at each stage; statements about missing or unverified features describe that stage. Current operator instructions are in the [project wiki](../wiki/Home.md).
+> Historical engineering material. This document preserves the analysis, decisions, and implementation status recorded at each stage; statements about missing or unverified features describe that stage. Current operator instructions are in the [project wiki](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 Analysis, decisions, and NGene increment log · Revision 8, 9 October 2026
 

@@ -248,4 +248,4 @@ An earlier server hosted two controllers: primary and parallel replay. Each owne
 
 The current GUI and service have one active source. Independent replay routes are rejected.
 Parallel live reception and replay require separate NGene processes, ports and profile
-directories. See the [current operator manual](../wiki/Recording-and-Replay.md).
+directories. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Recording-and-Replay).

@@ -1,6 +1,6 @@
 # INI configuration engineering notes
 
-The [current configuration reference](../wiki/Configuration-Reference.md) lists every key,
+The [current configuration reference](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Configuration-Reference) lists every key,
 default and bound from the implementation. This document retains the original profile
 contract and versioned development notes. Older two-session and CI8-only descriptions are
 historical; the current service has one active source and supports three native I/Q formats.

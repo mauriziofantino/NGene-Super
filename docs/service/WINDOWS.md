@@ -1,6 +1,6 @@
 ﻿# Windows — native MSVC build and dependencies, v0.6.3 (candidate)
 
-> Historical build notes for versions 0.6.3/0.6.4. Validation statements below describe those iterations, including the Windows environments unavailable at the time. Current operator instructions are in [Getting Started](../wiki/Getting-Started.md).
+> Historical build notes for versions 0.6.3/0.6.4. Validation statements below describe those iterations, including the Windows environments unavailable at the time. Current operator instructions are in [Getting Started](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Getting-Started).
 
 The standard path starts from a clean checkout: Visual Studio 18/2026 with the C/C++ workload, Windows SDK, Git, and CMake >=4.2. No project file needs editing. The ARM64 toolset is required only for an ARM64 target. The general CMake minimum remains 3.26 for other generators/operating systems.
 

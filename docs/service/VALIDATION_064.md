@@ -1,6 +1,6 @@
 # NGene 0.6.4 validation — Linux candidate
 
-> Historical validation report for revision 0.6.4. These results describe that revision and its test environment, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical validation report for revision 0.6.4. These results describe that revision and its test environment, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 Validation evidence is under `validation/multisdr-064/`. This increment uses source baseline `c32d459`, CMake 4.4.4 and GCC 13.3.0 on Linux x86-64 (virtualized AMD EPYC 9V74 host). First-party warnings remain errors. Native Windows/MSVC, macOS, ARM64 execution and physical RF hardware were not available.
 

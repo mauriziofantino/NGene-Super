@@ -1,79 +1,55 @@
-# Publishing the operator manual on GitHub Wiki
+# Maintaining the GitHub Wiki
 
-The maintained source is [wiki/Home.md](wiki/Home.md). Its relative Markdown links work
-when browsing the main repository. The export helper converts page links to Wiki URLs,
-image links to the wiki's raw image URLs, and repository links to their source URLs. It
-also copies the images, sidebar and footer. Node.js 18 or newer is required only for this
-documentation task.
+The [NGene operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki) is
+maintained in GitHub's separate Wiki repository. That repository is the source of truth
+for its pages, sidebar, footer and screenshots; do not keep a second copy in this repository.
 
-GitHub stores a wiki in a separate Git repository. It becomes clonable after an initial
-page has been created through the Wiki tab; see GitHub's
-[local wiki workflow](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages#adding-or-editing-wiki-pages-locally).
+## Edit and publish
 
-The project repository is [mauriziofantino/nav-ngene-evo](https://github.com/mauriziofantino/nav-ngene-evo).
-For a private repository owned by a personal account, native Wikis require GitHub Pro.
-GitHub Free supports Wikis for public repositories. See [GitHub's Wiki availability](https://docs.github.com/en/communities/documenting-your-project-with-wikis/about-wikis).
-The versioned manual remains readable in the repository even when the Wiki feature is unavailable.
+From the receiver repository root, clone the Wiki once:
 
-## First publication
+```sh
+git clone https://github.com/mauriziofantino/nav-ngene-evo.wiki.git build/github-wiki
+```
 
-1. Open the project's **Wiki** tab. If necessary, enable Wikis in repository settings and
-   create its initial **Home** page. Repository write access is required.
-2. From the receiver repository root, clone the wiki to a separate working directory:
+Before editing an existing checkout, confirm its remote and pull the current pages:
 
-   ```sh
-   git clone https://github.com/mauriziofantino/nav-ngene-evo.wiki.git build/github-wiki
-   ```
+```sh
+git -C build/github-wiki remote -v
+git -C build/github-wiki pull --ff-only
+```
 
-3. Export the complete manual to that checkout:
+Edit the Markdown pages and `images/` directly in that checkout. Maintain English text,
+page links, `_Sidebar.md` and `_Footer.md` as appropriate. Review and publish the changes:
 
-   ```sh
-   node scripts/prepare-wiki.cjs --output build/github-wiki
-   git -C build/github-wiki status --short
-   git -C build/github-wiki diff
-   ```
+```sh
+git -C build/github-wiki status --short
+git -C build/github-wiki diff
+git -C build/github-wiki add --all
+git -C build/github-wiki commit -m "Update NGene operator manual"
+git -C build/github-wiki push origin HEAD
+```
 
-4. Review the pages and images, then publish from the wiki checkout:
+Use the Wiki's existing default branch. No architecture-specific or publication branches
+are needed. GitHub documents this [local Wiki workflow](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages#adding-or-editing-wiki-pages-locally).
 
-   ```sh
-   git -C build/github-wiki add Home.md Getting-Started.md GUI-Guide.md Configuration-Reference.md Signal-Diagnostics.md Recording-and-Replay.md Troubleshooting.md _Sidebar.md _Footer.md images
-   git -C build/github-wiki commit -m "Add English NGene operator manual"
-   git -C build/github-wiki push origin HEAD
-   ```
+## Refresh GUI screenshots
 
-The helper does not create commits, push changes, remove unrelated wiki pages or change
-repository settings. Existing pages with the same names are updated, so review the diff.
-Publish only from a wiki checkout with the expected remote and default branch.
-
-For another fork or source branch, supply `--repository https://github.com/OWNER/REPOSITORY`
-and `--ref BRANCH`. The branch setting is used only for links back to the main repository.
-
-## Update the manual
-
-Edit the source pages in `docs/wiki/` so changes remain versioned with the receiver code.
-Pull the latest wiki changes before exporting again, review the changes, commit and push
-from that checkout. Avoid editing both copies independently.
-
-The wiki is also readable directly in the main repository; it does not depend on the
-separate Wiki tab being enabled.
-
-## Refresh the GUI screenshots
-
-Build NGene, then run the capture helper with Node.js, Playwright and a Chromium-compatible
-browser available on the documentation host. On Windows, for example:
+Build NGene and provide Node.js, Playwright and a Chromium-compatible browser. For example,
+on Windows:
 
 ```powershell
 $env:NGENE_EXECUTABLE = 'build/msvc-x64-multisdr/Release/ngene.exe'
 $env:BROWSER_EXECUTABLE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
-node scripts/capture-wiki.cjs
+node scripts/capture-wiki.cjs --output build/github-wiki/images
 ```
 
-If Playwright is installed outside normal module resolution, set `PLAYWRIGHT_MODULE` to
-its module directory. The helper launches its own receiver on a free loopback port with
-a private profile under `build/`, generates a deterministic CI8 replay fixture, captures
-the real GUI and shuts down that instance. It uses no SDR hardware and does not alter
-another receiver's profile or live session. These images must remain labelled as a replay
-demonstration, rather than a real GNSS capture or position fix.
+If Playwright is outside normal module resolution, set `PLAYWRIGHT_MODULE` to its module
+directory. The helper starts its own receiver with a private profile and deterministic
+CI8 replay fixture, captures the real GUI, and stops that instance. It requires no SDR
+hardware and does not change another receiver's profile or session.
 
-The fixture is generated by this optional documentation helper, not by a receiver input
-mode. No image synthesis, mockup or browser rendering replacement is used.
+Review the images before committing them in the Wiki repository. Keep their captions
+clear that this is a replay demonstration, not an over-the-air GNSS capture or a position
+solution. If the README illustration also needs updating, copy `receiver-dashboard.png`
+to `docs/images/` and commit that image separately in the main receiver repository.

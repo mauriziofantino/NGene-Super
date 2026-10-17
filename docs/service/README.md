@@ -1,7 +1,7 @@
 # Engineering and service documentation
 
 This folder holds technical reference material and the historical development record.
-For current operating instructions, use the [operator manual](../wiki/Home.md).
+For current operating instructions, use the [operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 Historical reports describe the software and test environment at the time they were written;
 they do not establish the current feature set or platform acceptance status.
 

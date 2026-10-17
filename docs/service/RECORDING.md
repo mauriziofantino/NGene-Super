@@ -2,7 +2,7 @@
 
 Engineering reference. The original CI8 examples below also apply to native CU8 (`.cu8`)
 and SC16 Q11 (`.sc16q11`) recordings with their own format metadata and bytes per pair.
-See the [current recording manual](../wiki/Recording-and-Replay.md).
+See the [current recording manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Recording-and-Replay).
 
 With `prefix=example` and CI8 input, the recorder creates:
 

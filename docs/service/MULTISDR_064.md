@@ -1,6 +1,6 @@
 # NGene 0.6.4 — Native multi-SDR increment
 
-> Historical implementation report for revision 0.6.4. Verification results and limitations describe that revision, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical implementation report for revision 0.6.4. Verification results and limitations describe that revision, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 This increment starts from commit `c32d459` of NGene 0.6.3. It preserves the capture engine, conditioner-before-shared-ring order, channel dispatcher, FFT assembly, SIMD CI8 primitives, recorder, replay browser and bounded diagnostic workers. No second ring implementation or parallel statistics framework was introduced.
 

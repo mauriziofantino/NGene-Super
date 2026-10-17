@@ -1,6 +1,6 @@
 # NGene 0.6.1 — final consolidation report
 
-> Historical report, 9 October 2026. Verification results and limitations describe that revision, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical report, 9 October 2026. Verification results and limitations describe that revision, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 Follow-up to the delivered 0.6 review, 9 October 2026. The engine, conditioning/ring, FFT arithmetic, and live/replay stream separation remain unchanged.
 

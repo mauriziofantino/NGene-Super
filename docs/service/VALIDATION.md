@@ -1,6 +1,6 @@
 # Kernel, DSP, and WebGUI verification
 
-> Historical verification record covering revisions 0.3–0.6 in October 2026. Results and unavailable-platform statements describe those revisions and environments, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical verification record covering revisions 0.3–0.6 in October 2026. Results and unavailable-platform statements describe those revisions and environments, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 Results for **0.6** are in [ITERATION_06.md](ITERATION_06.md): Linux HackRF SOURCE 10/10, ASan/UBSan 9/9, headless 8/8, ARM64 executed with QEMU 9/9, warning-free Doxygen, and desktop/mobile browser. Native Windows build had not yet been executed at that stage.
 

@@ -1,6 +1,6 @@
 # NGene 0.4 — diagnostic, DC, and tuning consolidation
 
-> Historical report, 2 October 2026. Verification results and limitations describe that revision, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical report, 2 October 2026. Verification results and limitations describe that revision, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 2 October 2026. Incremental changes to project 0.3; original NGene remains the basis. Frontend → shared conditioning → single ring → channels remains the receiver path. No changes to existing FFT butterflies to correct the waterfall.
 

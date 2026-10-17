@@ -1,7 +1,7 @@
 # Signal analysis
 
 Engineering reference. For current operator instructions and native I/Q formats, see the
-[diagnostics manual](../wiki/Signal-Diagnostics.md). The CI8 arithmetic examples below retain
+[diagnostics manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Signal-Diagnostics). The CI8 arithmetic examples below retain
 the original numerical explanation; current input formats also include CU8 and SC16 Q11.
 
 Frontend → pre-conditioning tap → shared conditioning (bypass/DC IIR) → single GNSS ring →

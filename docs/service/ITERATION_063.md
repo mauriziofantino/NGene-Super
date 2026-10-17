@@ -1,6 +1,6 @@
 # NGene 0.6.3 — profiles, file selection, and replay metadata
 
-> Historical report for revision 0.6.3. Verification results and limitations describe that revision, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical report for revision 0.6.3. Verification results and limitations describe that revision, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 ## Configuration error correction
 

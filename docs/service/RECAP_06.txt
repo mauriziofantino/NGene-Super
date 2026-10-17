@@ -1,7 +1,7 @@
 NGene 0.6 — revision recap (historical record)
 
 This record describes its original iteration, not the current feature or platform status.
-Current operating instructions: ../wiki/Home.md.
+Current operating instructions: https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home
 
 Windows/HackRF build:
 - vcpkg baseline and port versions pinned in the repository;

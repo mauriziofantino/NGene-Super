@@ -1,6 +1,6 @@
 # NGene FFT: analysis and migration · 1 October 2026
 
-> Historical analysis with dated updates through 17 October 2026. Earlier target and validation tables describe the indicated revision; later sections supersede them. See the [current operator manual](../wiki/Home.md).
+> Historical analysis with dated updates through 17 October 2026. Earlier target and validation tables describe the indicated revision; later sections supersede them. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 ## Sources examined
 

@@ -1,6 +1,6 @@
 # NGene 0.6.2 — Windows/MSVC build candidate
 
-> Historical acceptance record for revision 0.6.2. OPEN statuses and platform limitations below describe that candidate and its original test environment, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical acceptance record for revision 0.6.2. OPEN statuses and platform limitations below describe that candidate and its original test environment, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 **Acceptance status: OPEN.** A complete native Windows acceptance run has not been verified. Partial user-supplied native feedback is recorded below; this environment cannot execute MSVC. No successful Linux test, simulated dependency resolver, PowerShell parser or unexecuted CI definition is counted as a Windows result.
 

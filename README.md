@@ -11,7 +11,7 @@ The current application provides live I/Q reception, signal conditioning, record
 replay and spectrum diagnostics. Satellite acquisition, tracking, navigation message decoding
 and position, velocity and time (PVT) computation are not yet integrated into this branch.
 
-![NGene receiver console](docs/wiki/images/receiver-dashboard.png)
+![NGene receiver console](docs/images/receiver-dashboard.png)
 
 *Actual NGene console running a deterministic I/Q replay fixture. This illustration is not
 an over-the-air GNSS capture or a position solution.*
@@ -30,7 +30,7 @@ an over-the-air GNSS capture or a position solution.*
 
 The application uses one active input source per service instance. To inspect a file while
 another instance receives live data, run a second service on a different port and profile
-directory. The [operator manual](docs/wiki/Home.md) explains the workflow and limits.
+directory. The [operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki) explains the workflow and limits.
 
 ## Supported inputs
 
@@ -59,7 +59,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -M
 
 The script configures and builds all three native SDR adapters and stages their DLLs.
 The first build may download pinned dependencies. USB drivers and device firmware remain
-separate setup steps. See [Getting started](docs/wiki/Getting-Started.md) for replay-only
+separate setup steps. See [Getting started](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Getting-Started) for replay-only
 setup and the first operating session. Additional platform build details are in the
 [Windows engineering guide](docs/service/WINDOWS.md).
 
@@ -109,13 +109,13 @@ profile first. Raw I/Q bytes do not encode those parameters.
 
 ## Documentation
 
-- [Operator manual / wiki](docs/wiki/Home.md): setup, GUI, diagnostics, recording and replay.
-- [Configuration reference](docs/wiki/Configuration-Reference.md): keys, units, defaults and limits.
-- [Troubleshooting](docs/wiki/Troubleshooting.md).
+- [Operator manual / wiki](https://github.com/mauriziofantino/nav-ngene-evo/wiki): setup, GUI, diagnostics, recording and replay.
+- [Configuration reference](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Configuration-Reference): keys, units, defaults and limits.
+- [Troubleshooting](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Troubleshooting).
 - [Engineering and service documentation](docs/service/README.md): architecture, numerical
   contracts, provenance and historical verification records.
-- [GitHub Wiki publication](docs/WIKI-PUBLISHING.md): publish the versioned manual in the
-  repository's Wiki tab.
+- [Wiki maintenance](docs/WIKI-PUBLISHING.md): update the operator manual in its separate
+  GitHub Wiki repository.
 
 All maintained documentation is in English. Optional API documentation can be generated
 with `-DNGENE_WITH_DOCUMENTATION=ON` and the `ngene_docs` build target when Doxygen is installed.

@@ -1,6 +1,6 @@
 # Native bladeRF precision, ring buffering and waterfall views
 
-> Engineering report from the October 2026 native-format and waterfall work. Measurements and verification statements apply to the documented builds and test environments. See the [current operator manual](../wiki/Home.md).
+> Engineering report from the October 2026 native-format and waterfall work. Measurements and verification statements apply to the documented builds and test environments. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 ## Storage and native transfer formats
 

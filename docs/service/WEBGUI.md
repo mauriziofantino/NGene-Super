@@ -1,6 +1,6 @@
 # WebGUI and control API · v1
 
-> Engineering service document. For the current operating instructions, see the [operator manual](../wiki/Home.md). The final section records an older parallel-session design that has been removed; it is not an available GUI feature or API.
+> Engineering service document. For the current operating instructions, see the [operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home). The final section records an older parallel-session design that has been removed; it is not an available GUI feature or API.
 
 The English GUI is included in the same project and C executable as the kernel. The local service remains running after Stop receiver. Closing the browser tab does not interrupt reception or recording; reopening the page shows the current state. Do not run multiple instances against the same device or profile directory.
 
@@ -109,4 +109,4 @@ In that earlier design, the **Receiver session** selector chose `Primary / live 
 
 The removed replay session used a separate FILE frontend, a `replay/receiver.ini` profile, and the `/api/v1/replay/...` API, with the primary's revision/command semantics. Bootstrap and shutdown were global. The same WebSocket accepted `replay:MASK` instead of `status:MASK`. Switching sessions cleared plot state and reconnected the socket; switching was disabled during unsaved changes or pending operations to prevent responses from being applied to the wrong controller.
 
-The file-source controls themselves remain available in the current single-source GUI. **Input source → Recorded I/Q** provides the path on the NGene computer, first pair, range length, pacing, and repeat. **Browse I/Q files…** selects a receiver-side file and imports the rate and RF references from a validated sidecar. Without one, the operator supplies them manually. Selecting a file does not automatically start the receiver. See the current [Recording and replay operator guide](../wiki/Recording-and-Replay.md), and [REPLAY.md](REPLAY.md) for engineering notes.
+The file-source controls themselves remain available in the current single-source GUI. **Input source → Recorded I/Q** provides the path on the NGene computer, first pair, range length, pacing, and repeat. **Browse I/Q files…** selects a receiver-side file and imports the rate and RF references from a validated sidecar. Without one, the operator supplies them manually. Selecting a file does not automatically start the receiver. See the current [Recording and replay operator guide](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Recording-and-Replay), and [REPLAY.md](REPLAY.md) for engineering notes.

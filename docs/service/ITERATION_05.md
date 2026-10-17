@@ -1,6 +1,6 @@
 # NGene 0.5 — native build, Doxygen, and GUI configuration
 
-> Historical report, 9 October 2026. Verification results and limitations describe that revision, not the current release. See the [current operator manual](../wiki/Home.md).
+> Historical report, 9 October 2026. Verification results and limitations describe that revision, not the current release. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 9 October 2026. Incremental changes to the existing 0.4 project. NGene remains the basis; frontend → shared conditioning → single ring → channels is unchanged.
 

@@ -1,14 +1,19 @@
 /* Capture the real receiver GUI with a deterministic replay fixture; Node/Playwright are
  * optional documentation tools, never receiver dependencies. */
-const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const {spawn} = require('node:child_process');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
+const args = process.argv.slice(2);
+if (args.length !== 2 || args[0] !== '--output' || !args[1]) {
+  console.error('Usage: node scripts/capture-wiki.cjs --output WIKI_CHECKOUT/images');
+  process.exit(args.length === 1 && args[0] === '--help' ? 0 : 1);
+}
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const executable = path.resolve(root, process.env.NGENE_EXECUTABLE || 'build/ngene');
-const images = path.join(root, 'docs/wiki/images');
+const images = path.resolve(root, args[1]);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, message, timeout = 10000) {
   const deadline = Date.now() + timeout;
