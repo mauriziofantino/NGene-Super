@@ -10,6 +10,11 @@ GitHub stores a wiki in a separate Git repository. It becomes clonable after an 
 page has been created through the Wiki tab; see GitHub's
 [local wiki workflow](https://docs.github.com/en/communities/documenting-your-project-with-wikis/adding-or-editing-wiki-pages#adding-or-editing-wiki-pages-locally).
 
+The project repository is [mauriziofantino/nav-ngene-evo](https://github.com/mauriziofantino/nav-ngene-evo).
+For a private repository owned by a personal account, native Wikis require GitHub Pro.
+GitHub Free supports Wikis for public repositories. See [GitHub's Wiki availability](https://docs.github.com/en/communities/documenting-your-project-with-wikis/about-wikis).
+The versioned manual remains readable in the repository even when the Wiki feature is unavailable.
+
 ## First publication
 
 1. Open the project's **Wiki** tab. If necessary, enable Wikis in repository settings and
@@ -17,7 +22,7 @@ page has been created through the Wiki tab; see GitHub's
 2. From the receiver repository root, clone the wiki to a separate working directory:
 
    ```sh
-   git clone https://github.com/links-ads/nav-ngene-evo.wiki.git build/github-wiki
+   git clone https://github.com/mauriziofantino/nav-ngene-evo.wiki.git build/github-wiki
    ```
 
 3. Export the complete manual to that checkout:

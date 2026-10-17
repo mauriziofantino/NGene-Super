@@ -4,7 +4,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const source = path.join(root, 'docs/wiki');
 const args = process.argv.slice(2);
-const options = {repository:'https://github.com/links-ads/nav-ngene-evo', ref:'main'};
+const options = {repository:'https://github.com/mauriziofantino/nav-ngene-evo', ref:'main'};
 for (let n = 0; n < args.length; n += 2) {
   const key = args[n].replace(/^--/, '');
   if (!['output', 'repository', 'ref'].includes(key) || !args[n + 1]) {
