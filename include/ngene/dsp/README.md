@@ -1,13 +1,13 @@
-# DSP NGene
+# NGene DSP
 
-La libreria `NGene::Dsp` espone API indipendenti dal backend CPU:
+The `NGene::Dsp` library exposes APIs independent of the CPU backend:
 
-- `fft.h`: FFT complessa Q14, piano immutabile, workspace per chiamata e oracolo scalare.
-- `statistics.h`: somme e somme dei quadrati I/Q CI8 esatte.
-- `power.h`: potenza complessa CI16 con accumulo uint64 esatto.
-- `sample_ops.h`: umbrella compatibile per statistica, potenza e nome del backend.
+- `fft.h`: complex Q14 FFT, immutable plan, per-call workspace, and scalar oracle.
+- `statistics.h`: exact CI8 I/Q sums and sums of squares.
+- `power.h`: complex CI16 power with exact uint64 accumulation.
+- `sample_ops.h`: compatible umbrella for statistics, power, and backend name.
 
-La chiamata applicativa non seleziona SSE2/NEON: compilatore e configurazione del target
-scelgono l'implementazione privata. I contratti dichiarano range, overflow, allineamento e
-concorrenza. Correlatori, NCO e repliche saranno migrati per incrementi; vedere
-[architettura](../../../docs/ARCHITECTURE.md) e [FFT](../../../docs/FFT_REVIEW.md).
+Application calls do not select SSE2/NEON: the compiler and target configuration select
+the private implementation. Contracts declare ranges, overflow, alignment, and concurrency.
+Correlators, NCOs, and replicas will be migrated incrementally; see the
+[architecture](../../../docs/service/ARCHITECTURE.md) and [FFT](../../../docs/service/FFT_REVIEW.md).

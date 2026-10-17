@@ -1,0 +1,43 @@
+NGene 0.6 — revision recap (historical record)
+
+This record describes its original iteration, not the current feature or platform status.
+Current operating instructions: ../wiki/Home.md.
+
+Windows/HackRF build:
+- vcpkg baseline and port versions pinned in the repository;
+- automatic vcpkg bootstrap before compiler detection;
+- HackRF AUTO with a pinned source/tag/hash fallback;
+- no ADD_EXPORTS redefinition; generated import header for consumers;
+- warnings disabled only for external targets; NGene retains /W4 /WX;
+- automatic Debug/Release libusb and dependent DLL handling;
+- Visual Studio 18/2026 x64/ARM64 scripts/CI, without MinGW.
+
+Verification command from a clean checkout with VS C++/SDK, CMake >=4.2 and Git:
+  ./scripts/verify-windows.ps1
+No CMake edits, x-update-baseline or manual DLL copying were required.
+
+Code: consistent ESA naming for types/tags/functions/members/variables/parameters;
+Doxygen checked without warnings; formatter and AST audit found no violations.
+Formal compliance with all ESA rules beyond naming was not certified.
+
+Replay at that iteration: synthetic removed from the product; CI8 range/pacing/loop;
+an independent replay session could run beside the primary in the GUI.
+Sample rate and RF references were explicit. Closed immutable files; no auto-concatenation.
+The independent-session GUI has since been removed from the current service.
+
+Evidence: Linux HackRF SOURCE 10/10, ASan/UBSan 9/9 without LeakSanitizer,
+ARM64 QEMU 9/9, headless 8/8, desktop/mobile browser checks passed.
+Native Windows MSVC and physical HackRF were unavailable in that environment:
+the new automated procedure still needed a Windows script/job run.
+Report: ITERATION_06.md.
+
+0.6.1 completion:
+- correct triplet with an ARM64 default and composite VS platform names;
+- bootstrap realigned the manifest cache and retained features;
+- consumer import header also supported an installed Windows SDK;
+- clang-tidy ran on production/tests with zero violations;
+- naming CI was configured with HackRF;
+- PowerShell syntax checked; smoke test used the actual CPack ZIP;
+- Linux SOURCE/AUTO 10/10 and browser checks passed.
+Native MSVC execution remained pending at the time: no Windows host/remote CI was available.
+Details: ITERATION_06_COMPLETION.md.

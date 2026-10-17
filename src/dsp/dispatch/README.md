@@ -1,10 +1,10 @@
-# Selezione backend
+# Backend selection
 
-`cmake/TargetArchitecture.cmake` verifica le macro del compilatore target.
-`cmake/FftBackend.cmake`, condiviso da ricevitore e benchmark, sceglie sorgente e opzioni
-locali: SSE2 assembly x64, SSE2 intrinsics x86-32 e NEON intrinsics ARM64/ARMv7.
-Gli algoritmi chiamano l'API matematica comune; non includono i kernel o header SIMD.
+`cmake/TargetArchitecture.cmake` checks target compiler macros.
+`cmake/FftBackend.cmake`, shared by the receiver and benchmark, selects sources and local
+options: x64 SSE2 assembly, x86-32 SSE2 intrinsics, and ARM64/ARMv7 NEON intrinsics.
+Algorithms call the common mathematical API; they include neither kernels nor SIMD headers.
 
-Su x86-32 il piano controlla SSE2 una volta e usa C sulle CPU prive dell'ISA. ARM32 NEON
-richiede hardware e ABI adeguati; il reference resta selezionabile esplicitamente.
-Non esiste dispatch AVX e non vengono abilitate ISA native globalmente.
+On x86-32, the plan checks SSE2 once and uses C on CPUs without the ISA. ARM32 NEON
+requires suitable hardware and ABI; the reference remains explicitly selectable.
+There is no AVX dispatch and native ISAs are not enabled globally.
