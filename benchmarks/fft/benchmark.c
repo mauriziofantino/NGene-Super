@@ -36,6 +36,28 @@ static DWORD_PTR PinThread(void)
 #define ROUNDS 21
 #define BATCHES 8
 #define MAX_SIZE 16384
+#define MAX_BACKENDS 4
+#ifdef NGENE_BENCH_LEGACY
+#define BASE_BACKENDS 3
+#else
+#define BASE_BACKENDS 2
+#endif
+#ifdef NGENE_BENCH_BASELINE
+#define BACKENDS (BASE_BACKENDS + 1)
+/** @brief Create a separate immutable plan owned by the frozen EVO baseline. */
+int NgBenchBaselineCreate(size_t maximumSize, TNgFftPlan **out, TNgError *error);
+/** @brief Release a plan using the same frozen implementation that allocated it. */
+void NgBenchBaselineDestroy(TNgFftPlan *baseline);
+/** @brief Execute the frozen complete public FFT call without arithmetic changes. */
+int NgBenchBaselineExecute(const TNgFftPlan *baseline, size_t n, const int16_t *input,
+                           int16_t *output, TNgError *error);
+/** @brief Report the frozen implementation's compiled architecture backend. */
+const char *NgBenchBaselineBackend(void);
+/** Separate plan prevents dependence on current private plan layout. */
+static TNgFftPlan *baselinePlan;
+#else
+#define BACKENDS BASE_BACKENDS
+#endif
 #ifdef NGENE_BENCH_LEGACY
 /** @brief Allocate the original NGene immutable plan and register-backup buffer. */
 int NgBenchLegacyCreate(void);
@@ -118,6 +140,11 @@ static void Fill(size_t n, int amplitude)
 /** @brief Execute one backend using its complete public FFT entry point. */
 static int Execute(unsigned backend, size_t n, const int16_t *input)
 {
+#ifdef NGENE_BENCH_BASELINE
+    if (backend == BASE_BACKENDS) {
+        return NgBenchBaselineExecute(baselinePlan, n, input, output, &error);
+    }
+#endif
 #ifdef NGENE_BENCH_LEGACY
     if (backend == 2) {
         return NgBenchLegacyExecute(n, input, output);
@@ -160,6 +187,11 @@ static void Validate(size_t n)
         Require(Execute(0, n, input) == NG_OK, "SIMD validation");
         Require(memcmp(reference, output, 2 * n * sizeof(*output)) == 0,
                 "bit-exact SIMD/reference");
+#ifdef NGENE_BENCH_BASELINE
+        Require(Execute(BASE_BACKENDS, n, input) == NG_OK, "frozen EVO baseline validation");
+        Require(memcmp(reference, output, 2 * n * sizeof(*output)) == 0,
+                "bit-exact frozen EVO baseline/reference");
+#endif
 #ifdef NGENE_BENCH_LEGACY
         Require(Execute(2, n, input) == NG_OK, "original NGene validation");
         for (i = 0; i < 2 * n; ++i) {
@@ -176,15 +208,18 @@ static void Validate(size_t n)
         inputs[2 * i] = (int16_t)lround(1000.0 * cos(phase));
         inputs[2 * i + 1] = (int16_t)lround(1000.0 * sin(phase));
     }
-    for (batch = 0; batch <
-#ifdef NGENE_BENCH_LEGACY
-                    3
-#else
-                    2
+#ifdef NGENE_BENCH_BASELINE
+    Require(NgFftReference(plan, n, inputs, reference, &error) == NG_OK,
+            "analytic tone scalar validation");
 #endif
-         ;
-         ++batch) {
+    for (batch = 0; batch < BACKENDS; ++batch) {
         Require(Execute(batch, n, inputs) == NG_OK, "tone execution");
+#ifdef NGENE_BENCH_BASELINE
+        if (batch == BASE_BACKENDS) {
+            Require(memcmp(reference, output, 2 * n * sizeof(*output)) == 0,
+                    "bit-exact frozen EVO analytic tone/reference");
+        }
+#endif
         for (i = 0; i < 2 * n; ++i) {
             Require(abs((int)output[i] - (i == 6 ? 1000 : 0)) <= 20,
                     "analytic tone /N, bin order and forward sign");
@@ -199,18 +234,115 @@ static void Validate(size_t n)
     (void)maxLegacyDifference;
     printf("# validation,N=%zu,SIMD=bit-exact,legacy=unavailable\n", n);
 #endif
+#ifdef NGENE_BENCH_BASELINE
+    printf("# validation,N=%zu,EVO-before=bit-exact,windows=%d,tone=passed\n", n, BATCHES);
+#endif
+}
+
+/** @brief Observe original/EVO numerical differences at full Q14 headroom, outside timing.
+ *
+ * Includes the 13,122-case eight-point rail/odd/rotation corpus from test_fft.c and
+ * all 65,536 independent I/Q rail-sign assignments across eight complex samples.
+ * SIMD must remain bit-identical to the scalar oracle. Original NGene intentionally has a
+ * different coefficient-quantization/saturation contract, so its observed difference is reported,
+ * not constrained by the low-amplitude timing-validation bound. No timing input PRNG is used.
+ */
+static void DiagnoseNumericalContract(void)
+{
+#ifdef NGENE_BENCH_LEGACY
+    static const int16_t pairs[3][2] = {{-16384, -16384}, {16384, -16383}, {1, -1}};
+    int16_t worstInput[16] = {0};
+    int maximumDifference = -1;
+    int worstReference = 0;
+    int worstLegacy = 0;
+    unsigned worstCorpus = 0;
+    unsigned worstRotation = 0;
+    unsigned worstCode = 0;
+    size_t worstComponent = 0;
+    unsigned cases = 0;
+    unsigned corpus;
+    unsigned code;
+    size_t i;
+    for (corpus = 0; corpus < 3; ++corpus) {
+        const unsigned rotation = corpus < 2 ? corpus : 0;
+        const unsigned assignments = corpus < 2 ? 6561u : 65536u;
+        for (code = 0; code < assignments; ++code) {
+            unsigned digits = code;
+            for (i = 0; i < 8; ++i) {
+                int16_t re;
+                int16_t im;
+                unsigned quarter;
+                if (corpus < 2) {
+                    re = pairs[digits % 3u][0];
+                    im = pairs[digits % 3u][1];
+                    digits /= 3;
+                } else {
+                    re = (int16_t)((digits & 1u) != 0 ? 16384 : -16384);
+                    im = (int16_t)((digits & 2u) != 0 ? 16384 : -16384);
+                    digits >>= 2;
+                }
+                for (quarter = 0; quarter < rotation * (unsigned)(i & 3u); ++quarter) {
+                    int16_t previousRe = re;
+                    re = (int16_t)-im;
+                    im = previousRe;
+                }
+                inputs[2 * i] = re;
+                inputs[2 * i + 1] = im;
+            }
+            Require(NgFftReference(plan, 8, inputs, reference, &error) == NG_OK,
+                    "full-headroom scalar diagnostic");
+            Require(Execute(0, 8, inputs) == NG_OK, "full-headroom SIMD diagnostic");
+            Require(memcmp(reference, output, 16 * sizeof(*output)) == 0,
+                    "bit-exact full-headroom SIMD/reference");
+            Require(Execute(2, 8, inputs) == NG_OK, "full-headroom original NGene diagnostic");
+            for (i = 0; i < 16; ++i) {
+                int difference = abs((int)reference[i] - output[i]);
+                if (difference > maximumDifference) {
+                    maximumDifference = difference;
+                    worstReference = reference[i];
+                    worstLegacy = output[i];
+                    worstCorpus = corpus;
+                    worstRotation = rotation;
+                    worstCode = code;
+                    worstComponent = i;
+                    memcpy(worstInput, inputs, sizeof(worstInput));
+                }
+            }
+            ++cases;
+        }
+    }
+    printf("# diagnostic_full_headroom,N=8,cases=%u,rail_odd_rotation_cases=13122,"
+           "independent_IQ_rail_cases=65536,SIMD=bit-exact,"
+           "legacy_max_component_delta=%d,comparison=observed_not_equivalence_bound,not_timed\n",
+           cases, maximumDifference);
+    printf("# diagnostic_full_headroom_worst,N=8,corpus=%s,rotation=%u,code=%u,component=%zu,"
+           "EVO=%d,original_NGene=%d\n",
+           worstCorpus < 2 ? "rail_odd_rotation" : "independent_IQ_rails", worstRotation, worstCode,
+           worstComponent, worstReference, worstLegacy);
+    printf("# diagnostic_full_headroom_worst_input,N=8,format=interleaved_IQ,values=");
+    for (i = 0; i < 16; ++i) {
+        printf("%s%d", i == 0 ? "" : ",", (int)worstInput[i]);
+    }
+    printf("\n");
+#else
+    printf("# diagnostic_full_headroom=unavailable,reason=original_NGene_not_linked\n");
+#endif
 }
 
 /** @brief Validate both kernels, calibrate repeated batches and emit CSV measurements. */
 int main(void)
 {
-    const char *names[] = {"EVO-SIMD", "EVO-scalar", "NGene-original"};
-    unsigned backends =
+    const char *names[MAX_BACKENDS] = {
+        "EVO-SIMD",
+        "EVO-scalar",
 #ifdef NGENE_BENCH_LEGACY
-        3;
-#else
-        2;
+        "NGene-original",
 #endif
+#ifdef NGENE_BENCH_BASELINE
+        "EVO-before",
+#endif
+    };
+    unsigned backends = BACKENDS;
     size_t n;
     unsigned backend;
 #ifdef _WIN32
@@ -225,19 +357,37 @@ int main(void)
     reference = AlignedAllocate(2 * MAX_SIZE * sizeof(*reference));
     Require(inputs != NULL && output != NULL && reference != NULL, "aligned buffers");
     Require(NgFftCreate(MAX_SIZE, &plan, &error) == NG_OK, "FFT plan");
+#ifdef NGENE_BENCH_BASELINE
+    Require(NgBenchBaselineCreate(MAX_SIZE, &baselinePlan, &error) == NG_OK,
+            "frozen EVO baseline plan");
+#endif
 #ifdef NGENE_BENCH_LEGACY
     Require(NgBenchLegacyCreate() == 0, "original NGene plan");
 #endif
     printf("# compiler=%s,backend=%s,rounds=%d,batches=%d\n", NGENE_BENCH_COMPILER, NgFftBackend(),
            ROUNDS, BATCHES);
+    printf("# target_arch=%s,pointer_bits=%u\n", NGENE_BENCH_ARCH, (unsigned)(sizeof(void *) * 8));
+    printf("# current_c_sha256=%s,current_kernel_sha256=%s\n", NGENE_BENCH_SOURCE_C_SHA256,
+           NGENE_BENCH_SOURCE_KERNEL_SHA256);
+#ifdef NGENE_BENCH_LEGACY
+    printf("# original_fft_c_sha256=%s,original_fft_h_sha256=%s,original_simd_h_sha256=%s\n",
+           NGENE_BENCH_LEGACY_FFT_C_SHA256, NGENE_BENCH_LEGACY_FFT_H_SHA256,
+           NGENE_BENCH_LEGACY_SIMD_H_SHA256);
+#endif
+#ifdef NGENE_BENCH_BASELINE
+    printf("# before_backend=%s,before_c_sha256=%s,before_kernel_sha256=%s\n",
+           NgBenchBaselineBackend(), NGENE_BENCH_BASELINE_C_SHA256,
+           NGENE_BENCH_BASELINE_KERNEL_SHA256);
+#endif
     printf(
         "# Timed: full call, validation/permutation/stages; excluded: plan, I/O, window, power.\n");
     printf(
         "# Alternating backend order; >=10ms per round; deterministic 12-bit ADC-level noise.\n");
+    DiagnoseNumericalContract();
     printf("N,backend,repeats,median_us,p95_us,min_us,Msamples_per_s\n");
-    for (n = 256; n <= MAX_SIZE; n *= 2) {
-        unsigned repeats[3] = {16, 16, 16};
-        double times[3][ROUNDS];
+    for (n = 8; n <= MAX_SIZE; n *= 2) {
+        unsigned repeats[MAX_BACKENDS] = {16, 16, 16, 16};
+        double times[MAX_BACKENDS][ROUNDS];
         unsigned round;
         Validate(n);
         Fill(n, 2047);
@@ -268,6 +418,9 @@ int main(void)
     printf("# checksum=%u\n", (unsigned)checksum);
 #ifdef NGENE_BENCH_LEGACY
     NgBenchLegacyDestroy();
+#endif
+#ifdef NGENE_BENCH_BASELINE
+    NgBenchBaselineDestroy(baselinePlan);
 #endif
     NgFftDestroy(plan);
     AlignedFree(inputs);

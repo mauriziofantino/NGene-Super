@@ -1,0 +1,50 @@
+﻿# affinity_mask=0x1,status=pinned
+# compiler=Clang-22.1.3,backend=SSE2-assembly,rounds=21,batches=8
+# current_c_sha256=ee7a9a80cd9688d69829e08c20df97a517183bab17ed6e09f3dabb76a54b478b,current_kernel_sha256=1b051c40b420b01776cd2147221b8c7c2e86a592a6bb3f49fd9604775c7d0304
+# before_backend=SSE2-assembly,before_c_sha256=570f30c407fe5af70629f0567ff188f4f6d5329d1a0a43fcd5ffe0d4bede9868,before_kernel_sha256=1b051c40b420b01776cd2147221b8c7c2e86a592a6bb3f49fd9604775c7d0304
+# Timed: full call, validation/permutation/stages; excluded: plan, I/O, window, power.
+# Alternating backend order; >=10ms per round; deterministic 12-bit ADC-level noise.
+N,backend,repeats,median_us,p95_us,min_us,Msamples_per_s
+# validation,N=256,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=256,EVO-before=bit-exact,windows=8,tone=passed
+256,EVO-SIMD,32768,0.435,0.557,0.392,588.835
+256,EVO-scalar,4096,3.123,3.220,2.781,81.967
+256,NGene-original,32768,0.435,0.557,0.389,588.360
+256,EVO-before,32768,0.443,0.487,0.393,578.130
+# validation,N=512,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=512,EVO-before=bit-exact,windows=8,tone=passed
+512,EVO-SIMD,16384,0.948,1.168,0.849,540.225
+512,EVO-scalar,2048,6.810,8.318,5.950,75.186
+512,NGene-original,16384,0.957,1.316,0.843,535.046
+512,EVO-before,16384,0.975,1.134,0.849,524.872
+# validation,N=1024,SIMD=bit-exact,legacy_max_component_delta=2
+# validation,N=1024,EVO-before=bit-exact,windows=8,tone=passed
+1024,EVO-SIMD,8192,2.991,3.342,2.535,342.345
+1024,EVO-scalar,1024,21.137,23.326,16.299,48.446
+1024,NGene-original,8192,2.929,3.519,2.327,349.592
+1024,EVO-before,4096,3.026,3.515,2.316,338.354
+# validation,N=2048,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=2048,EVO-before=bit-exact,windows=8,tone=passed
+2048,EVO-SIMD,2048,6.259,6.656,5.306,327.184
+2048,EVO-scalar,256,43.823,47.767,39.934,46.734
+2048,NGene-original,2048,6.093,6.444,5.297,336.149
+2048,EVO-before,2048,6.452,7.076,5.499,317.442
+# validation,N=4096,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=4096,EVO-before=bit-exact,windows=8,tone=passed
+4096,EVO-SIMD,1024,12.636,13.920,10.925,324.152
+4096,EVO-scalar,128,92.799,101.735,81.788,44.138
+4096,NGene-original,1024,12.362,13.182,11.175,331.332
+4096,EVO-before,1024,13.121,14.750,11.055,312.183
+# validation,N=8192,SIMD=bit-exact,legacy_max_component_delta=2
+# validation,N=8192,EVO-before=bit-exact,windows=8,tone=passed
+8192,EVO-SIMD,512,27.001,29.989,22.876,303.396
+8192,EVO-scalar,64,185.903,207.244,163.838,44.066
+8192,NGene-original,512,27.549,29.596,23.694,297.363
+8192,EVO-before,512,26.617,29.684,24.733,307.776
+# validation,N=16384,SIMD=bit-exact,legacy_max_component_delta=2
+# validation,N=16384,EVO-before=bit-exact,windows=8,tone=passed
+16384,EVO-SIMD,256,59.968,68.878,52.573,273.213
+16384,EVO-scalar,32,427.178,471.856,382.544,38.354
+16384,NGene-original,128,92.898,106.128,81.104,176.366
+16384,EVO-before,256,60.547,64.703,53.362,270.600
+# checksum=1111157057

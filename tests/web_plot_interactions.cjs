@@ -6,7 +6,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
 const policy="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-ancestors 'none'; base-uri 'none'";
-const assets=new Map([['/',['index.html','text/html']],['/app.js',['app.js','text/javascript']],['/style.css',['style.css','text/css']]]);
+const assets=new Map([['/',['index.html','text/html']],['/app.js',['app.js','text/javascript']],['/style.css',['style.css','text/css']],['/ngene-logo.svg',['ngene-logo.svg','image/svg+xml']]]);
 const server=http.createServer((request,response)=>{
   response.setHeader('Content-Security-Policy',policy);
   const asset=assets.get(request.url);
@@ -31,6 +31,9 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const snapshot=()=>page.evaluate(async()=>(await import('/app.js')).diagnosticSnapshot());
     await until(()=>page.locator('#configBadge').textContent().then(text=>text==='r1'),'Fixture profile did not load');
+    const logo=page.locator('.brandmark');
+    assert(await logo.isVisible(),'The NGene logo is missing from the console header');
+    await until(()=>logo.evaluate(image=>image.complete&&image.naturalWidth>0),'The NGene logo asset did not load under production CSP');
     await page.evaluate(async()=>{
       const {renderAnalysis}=await import('/app.js');
       const stats={mean:0,std:10,rms:10,min:-32,max:32,clipping_count:0,zero_count:0};
@@ -68,9 +71,13 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     assert.equal(await page.locator('#expandPlots').getAttribute('aria-expanded'),'true');
     assert((await page.locator('#spectrumPanel').boundingBox()).width>panelWidth,'Expanded plots did not use the viewport width');
     assert.equal(await page.locator('#spectrumPanel').getAttribute('aria-modal'),'true');
-    await page.locator('#refresh').focus();await page.keyboard.press('Shift+Tab');
-    assert.equal(await page.evaluate(()=>document.activeElement.id),'waterfallResize','Focus escaped expanded plot dialog');
-    await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),'refresh');
+    const focusBounds=await page.locator('#spectrumPanel').evaluate(panel=>{
+      const controls=[...panel.querySelectorAll('button,input,select,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);
+      return {first:controls[0].id,last:controls.at(-1).id};
+    });
+    await page.locator(`#${focusBounds.first}`).focus();await page.keyboard.press('Shift+Tab');
+    assert.equal(await page.evaluate(()=>document.activeElement.id),focusBounds.last,'Focus escaped expanded plot dialog');
+    await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),focusBounds.first);
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#expandPlots').getAttribute('aria-expanded'),'false');
     assert.equal(await page.locator('#spectrumPanel').getAttribute('aria-modal'),null);
@@ -81,6 +88,21 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     assert(initial3D.waterfall.rows>1&&initial3D.waterfall.rows<=48);assert(initial3D.waterfall.columns>1&&initial3D.waterfall.columns<=192);
     assert.notEqual(await image(),flat);
     const defaultImage=await image();
+    // Manually entered bounds can exceed HTML min/max; clipping must never invert
+    // or collapse the power/colour scale used by the 3D projection.
+    for(const [minimum,maximum] of [['dbMin','dbMax'],['colourMin','colourMax']]){
+      for(const [lo,hi] of [[200,300],[-400,-300],[100,200],[-300,-250]]){
+        await page.evaluate(({minimum,maximum,lo,hi})=>{
+          document.getElementById(minimum).value=lo;document.getElementById(maximum).value=hi;
+          document.getElementById(maximum).dispatchEvent(new Event('change'));
+        },{minimum,maximum,lo,hi});
+        assert((await image())===defaultImage,`${minimum}: invalid clipped scale ${lo}..${hi} must use the default range`);
+      }
+      await page.evaluate(({minimum,maximum})=>{
+        document.getElementById(minimum).value=-100;document.getElementById(maximum).value=0;
+        document.getElementById(maximum).dispatchEvent(new Event('change'));
+      },{minimum,maximum});
+    }
     await page.locator('#waterfallRight').click();await page.locator('#waterfallUp').click();
     await until(async()=>{const camera=(await snapshot()).waterfall.camera;return camera.yaw===initialCamera.yaw+10&&camera.pitch===initialCamera.pitch+5;},'Arrow controls did not rotate the waterfall');
     assert.notEqual(await image(),defaultImage,'Rotating camera did not change the rendered projection');
@@ -117,6 +139,17 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     assert.deepEqual((await snapshot()).history,original.history,'Mode changes or mobile resizing mutated PSD history');
     await page.locator('#waterfallMode').selectOption('3d');await page.locator('#waterfallReset').click();
     if(process.env.NGENE_SCREENSHOTS)await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'plot-interactions-mobile.png')});
+    const enabledHeight=(await page.locator('#spectrumPanel').boundingBox()).height;
+    await page.locator('#showSpectrum').uncheck();
+    assert(await page.locator('#spectrumBody').isHidden()&&await page.locator('#waterfallBody').isVisible(),'Mobile spectrum enable also hid the waterfall');
+    await page.locator('#showWaterfall').uncheck();
+    assert(await page.locator('#spectrumBody').isHidden()&&await page.locator('#waterfallBody').isHidden(),'Disabled mobile plots left stale images visible');
+    assert(await page.locator('#showSpectrum').isVisible()&&await page.locator('#showWaterfall').isVisible(),'Mobile plot enables disappeared with their plots');
+    assert((await page.locator('#spectrumPanel').boundingBox()).height<enabledHeight/2,'Disabled mobile plots retained their canvas layout space');
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Disabled mobile plot controls overflowed');
+    if(process.env.NGENE_SCREENSHOTS)await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'plot-interactions-mobile-disabled.png')});
+    await page.locator('#showSpectrum').check();await page.locator('#showWaterfall').check();
+    assert.deepEqual((await snapshot()).history,original.history,'Mobile plot enables mutated paused PSD history');
     assert.deepEqual(errors,[]);
     console.log('PASS: live plot sizing, mouse/keyboard resize, viewport expand/restore and focus, 3D depth-sorted orbit via mouse/touch/arrows/keyboard/reset, bounded tilt/mesh, mobile layout/2D scroll and unchanged paused PSD history under production CSP.');
   }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}

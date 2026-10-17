@@ -506,7 +506,7 @@ static void TestRecording(void)
         f = fopen(path, "rb");
         CHECK(f != NULL);
         count = fread(actual + done, sizeof(TNgIq8), 13 - done, f);
-        CHECK(count == (index == 0 ? 7 : 6));
+        CHECK(count == (index == 0 ? (size_t)7 : (size_t)6));
         done += count;
         CHECK(!ferror(f));
         fclose(f);

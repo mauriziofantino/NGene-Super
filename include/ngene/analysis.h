@@ -274,9 +274,10 @@ void NgAnalysisSubmit(TNgAnalysis *analysis, const TNgIqView *view);
  *
  * @details
  * Updates selected lane deadlines under the observer mutex. Mask bit 1 selects PSD and bit 2
- * histogram; zero deadlines disable the selected lanes. The controller renews a two-second
- * lease so independent interested clients keep producers active. Does not alter receiver
- * dispatch.
+ * histogram; expired/zero deadlines discard queued and partial observations and cancel
+ * in-flight calculations between bounded stages. Renewing an expired lane starts a fresh
+ * observation and temporal history. The controller aggregates independent consumer leases.
+ * Does not alter receiver dispatch.
  *
  * @param analysis Live diagnostic worker.
  * @param mask Interest mask: 1 PSD, 2 histogram, 3 both.

@@ -63,6 +63,64 @@ static void Submit(TNgAnalysis *a, const TNgIqView *v, int pre)
     CHECK(0);
 }
 
+/** @brief Revocation and lease expiry must discard partial PSD observations before resuming. */
+static void DormantCapture(void)
+{
+    unsigned expire;
+    for (expire = 0; expire < 2; ++expire) {
+        TNgAnalysisConfig c;
+        TNgAnalysis *a;
+        TNgError error = {{0}};
+        TNgIqView v = {data, {0}, NG_FORMAT_CI8};
+        NgAnalysisDefaults(&c);
+        c.histogramEnabled = 0;
+        c.fftSize = 1024;
+        c.averages = 2;
+        c.window = NG_WINDOW_RECT;
+        c.updateHz = 30;
+        CHECK(NgAnalysisCreate(65536, &c, &a, &error) == NG_OK);
+        NgAnalysisRead(a, &snapshot);
+        CHECK(snapshot.sequence == 0 && snapshot.revision == 1 &&
+              snapshot.config.spectrumEnabled == 1 && snapshot.config.histogramEnabled == 0);
+        if (expire != 0) {
+            NgAnalysisInterest(a, 1, NgMonotonicSeconds() + 0.02);
+        }
+        v.meta.count = 512;
+        Submit(a, &v, 0);
+        if (expire != 0) {
+            NgSleepMs(30);
+        } else {
+            NgAnalysisInterest(a, 1, 0);
+            v.meta.firstSample = 512;
+            v.meta.count = 4096;
+            Submit(a, &v, 0);
+            NgSleepMs(10);
+            NgAnalysisRead(a, &snapshot);
+            CHECK(snapshot.sequence == 0);
+        }
+        NgAnalysisInterest(a, 1, NgMonotonicSeconds() + 2.0);
+        v.meta.firstSample = 512;
+        v.meta.count = 512;
+        Submit(a, &v, 0);
+        v.meta.firstSample = 1024;
+        v.meta.count = 1024;
+        Submit(a, &v, 0);
+        WaitResult(a, 1);
+        CHECK(snapshot.firstSample == 512 && snapshot.observedPairs == 1536);
+        /* Both configured producers disabled: no capture or publication, even with interest. */
+        c.spectrumEnabled = 0;
+        CHECK(NgAnalysisConfigure(a, &c, &error) == NG_OK);
+        NgAnalysisInterest(a, 3, NgMonotonicSeconds() + 2.0);
+        v.meta.firstSample = 2048;
+        v.meta.count = 4096;
+        Submit(a, &v, 0);
+        NgSleepMs(10);
+        NgAnalysisRead(a, &snapshot);
+        CHECK(snapshot.sequence == 0 && snapshot.spectrumBins == 0 && snapshot.histogramBins == 0);
+        NgAnalysisDestroy(a);
+    }
+}
+
 /**
  * @brief Run the C contract test executable.
  *
@@ -250,7 +308,8 @@ int main(void)
         CHECK(snapshot.sequence == previous);
     }
     NgAnalysisDestroy(a);
+    DormantCapture();
     puts("PASS: tone frequency/level, histogram totals/rails, gap reset and runtime "
-         "reconfiguration");
+         "reconfiguration, dormant capture cancellation");
     return 0;
 }

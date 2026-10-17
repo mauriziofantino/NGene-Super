@@ -3,6 +3,7 @@
  */
 #include "ngene/receiver.h"
 #include "ngene/ring.h"
+#include "core/channel_dispatch.h"
 #include "platform/platform.h"
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +54,7 @@ int NgChannelTransitionValid(TNgChannelState from, TNgChannelState to)
  * @param input Borrowed conditioned input window.
  * @param channels Channel array, or NULL if count is zero.
  * @param count Number of channel entries.
+ * @param dispatch Optional parallel channel worker pool, completed before lease release.
  * @param recorder Optional engine-owned recorder.
  * @param stats Read/write engine counters.
  * @param hooks Optional synchronous hooks.
@@ -61,8 +63,8 @@ int NgChannelTransitionValid(TNgChannelState from, TNgChannelState to)
  * @return NG_OK on success; NG_ERROR if ring, recording, hook or channel processing fails.
  */
 static int Dispatch(TNgRing *ring, const TNgIqView *input, TNgChannel *channels, size_t count,
-                    TNgRecorder *recorder, TNgReceiverStats *stats, const TNgReceiverHooks *hooks,
-                    TNgError *error)
+                    TNgChannelDispatch *dispatch, TNgRecorder *recorder, TNgReceiverStats *stats,
+                    const TNgReceiverHooks *hooks, TNgError *error)
 {
     TNgIqView window;
     size_t k;
@@ -72,7 +74,11 @@ static int Dispatch(TNgRing *ring, const TNgIqView *input, TNgChannel *channels,
     }
     /* The same pointer, sample interval and gap metadata go to every channel.
      * Channels may keep private accumulators, never separate ring cursors. */
-    for (k = 0; k < count; ++k) {
+    if (dispatch != NULL && NgChannelDispatchProcess(dispatch, &window, error) != NG_OK) {
+        NgRingRelease(ring);
+        return NG_ERROR;
+    }
+    for (k = 0; dispatch == NULL && k < count; ++k) {
         TNgChannelState next = channels[k].state;
         result = channels[k].ops->process(channels[k].context, &channels[k].id, channels[k].state,
                                           &window, &next, error);
@@ -107,35 +113,20 @@ static int Dispatch(TNgRing *ring, const TNgIqView *input, TNgChannel *channels,
     return NG_OK;
 }
 
-/**
- * @brief Run the synchronous shared-stream receiver engine.
- *
- * @details
- * Starts the frontend, assembles common windows, applies conditioning, feeds the single ring
- * and dispatches the same view to every channel. Stop/EOF drains recorder work and stops
- * transport. Blocks until completion. Channels may update state but must not retain samples;
- * no acquisition/tracking algorithm is implied by capture mode.
- *
- * Parameter config: Validated core configuration matching the frontend descriptor.
- * Parameter frontend: Opened frontend; caller retains ownership and destroys after the run.
- * Parameter conditioner: Rate- and native-format-preserving conditioner with valid context for this run.
- * Parameter channels: Caller-owned channel array; NULL permitted when count is zero.
- * Parameter channelCount: Number of channels; each sees the same borrowed window.
- * Parameter stop: Optional stop predicate called by the engine.
- * Parameter stopContext: Opaque context passed to the stop predicate.
- * Parameter stats: Receives final engine counters; writable and non-NULL.
- * Parameter hooks: Optional engine hooks; contexts remain live throughout the run.
- * Parameter error: Optional error destination.
- *
- * Result: NG_OK for requested stop or clean EOF; NG_ERROR for transport, module, recorder or
- * contract failures.
+/** @brief Coordinate frontend, conditioning and serial or parallel channel execution.
+ * @details The calling thread owns the shared stream and holds each ring lease until every
+ * channel callback finishes. All worker storage is allocated before transport starts, and
+ * cleanup joins workers before stopping transport and destroying sample storage. Stop/EOF
+ * preserves the existing partial-window and recorder-drain contracts.
  */
-int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
-                    const TNgConditioner *conditioner, TNgChannel *channels, size_t channelCount,
-                    TNgStopRequested stop, void *stopContext, TNgReceiverStats *stats,
-                    const TNgReceiverHooks *hooks, TNgError *error)
+int NgReceiverRunScheduled(const TNgConfig *config, TNgFrontend *frontend,
+                           const TNgConditioner *conditioner, TNgChannel *channels,
+                           size_t channelCount, TNgStopRequested stop, void *stopContext,
+                           TNgReceiverStats *stats, const TNgReceiverExecution *execution,
+                           const TNgReceiverHooks *hooks, TNgError *error)
 {
     TNgRing *ring = NULL;
+    TNgChannelDispatch *dispatch = NULL;
     TNgRecorder *recorder = NULL;
     TNgIq8 *assembly = NULL;
     TNgIqView pending;
@@ -158,6 +149,9 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
     }
     memset(stats, 0, sizeof(*stats));
     memset(&pending, 0, sizeof(pending));
+    if (execution != NULL && execution->workerCount == 0) {
+        return NgFail(error, "Channel worker count must be positive");
+    }
     if (NgConfigValidate(config, error) != NG_OK) {
         return NG_ERROR;
     }
@@ -191,6 +185,12 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
     }
     pending.samples = assembly;
     pending.format = frontend->info.format;
+    if (NgChannelDispatchCreate(channels, (config->recordOnly) != 0 ? 0 : channelCount,
+                                execution != NULL ? execution->workerCount : 1, &dispatch,
+                                error) != NG_OK) {
+        result = NG_ERROR;
+        goto cleanup;
+    }
     if (config->recordingEnabled != 0 && (hooks == NULL || hooks->externalRecording == 0) &&
         NgRecorderOpen(config, &frontend->info, conditioner->name, &recorder, error) != NG_OK) {
         result = NG_ERROR;
@@ -317,9 +317,10 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
             }
             if (pending.meta.count != 0) {
                 pending.meta.flags |= NG_BLOCK_PARTIAL;
-                result = Dispatch(
-                    ring, &pending, channels, (config->recordOnly) != 0 ? 0 : channelCount,
-                    (config->recordingPreConditioning) != 0 ? NULL : recorder, stats, hooks, error);
+                result =
+                    Dispatch(ring, &pending, channels, (config->recordOnly) != 0 ? 0 : channelCount,
+                             dispatch, (config->recordingPreConditioning) != 0 ? NULL : recorder,
+                             stats, hooks, error);
                 pending.meta.count = 0;
                 if (result != NG_OK) {
                     frontend->ops->release(frontend->context);
@@ -357,9 +358,10 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
             pending.meta.count += count;
             offset += count;
             if (pending.meta.count == config->windowSamples) {
-                result = Dispatch(
-                    ring, &pending, channels, (config->recordOnly) != 0 ? 0 : channelCount,
-                    (config->recordingPreConditioning) != 0 ? NULL : recorder, stats, hooks, error);
+                result =
+                    Dispatch(ring, &pending, channels, (config->recordOnly) != 0 ? 0 : channelCount,
+                             dispatch, (config->recordingPreConditioning) != 0 ? NULL : recorder,
+                             stats, hooks, error);
                 pending.meta.count = 0;
                 if (result != NG_OK) {
                     break;
@@ -374,14 +376,15 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
     if (result == NG_OK && pending.meta.count != 0) {
         pending.meta.flags |= NG_BLOCK_PARTIAL;
         result = Dispatch(ring, &pending, channels, (config->recordOnly) != 0 ? 0 : channelCount,
-                          (config->recordingPreConditioning) != 0 ? NULL : recorder, stats, hooks,
-                          error);
+                          dispatch, (config->recordingPreConditioning) != 0 ? NULL : recorder,
+                          stats, hooks, error);
         if (result == NG_OK) {
             pending.meta.count = 0;
         }
     }
     stats->discardedPartialSamples = pending.meta.count;
 cleanup:
+    NgChannelDispatchDestroy(dispatch);
     if (startAttempted != 0 && frontend->ops->stop(frontend->context, &cleanupError) != NG_OK &&
         result == NG_OK) {
         if (error != NULL) {
@@ -408,6 +411,16 @@ cleanup:
     return result;
 }
 
+/** @brief Preserve the original serial engine API and synchronous callback ordering. */
+int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
+                    const TNgConditioner *conditioner, TNgChannel *channels, size_t channelCount,
+                    TNgStopRequested stop, void *stopContext, TNgReceiverStats *stats,
+                    const TNgReceiverHooks *hooks, TNgError *error)
+{
+    return NgReceiverRunScheduled(config, frontend, conditioner, channels, channelCount, stop,
+                                  stopContext, stats, NULL, hooks, error);
+}
+
 /**
  * @brief Run the synchronous shared-stream receiver engine.
  *
@@ -419,8 +432,8 @@ cleanup:
  *
  * Parameter config: Validated core configuration matching the frontend descriptor.
  * Parameter frontend: Opened frontend; caller retains ownership and destroys after the run.
- * Parameter conditioner: Rate- and native-format-preserving conditioner with valid context for this run.
- * Parameter channels: Caller-owned channel array; NULL permitted when channelCount is zero.
+ * Parameter conditioner: Rate- and native-format-preserving conditioner with valid context for this
+ * run. Parameter channels: Caller-owned channel array; NULL permitted when channelCount is zero.
  * Parameter channelCount: Number of channels; each sees the same borrowed window.
  * Parameter stop: Optional stop predicate called by the engine.
  * Parameter stopContext: Opaque context passed to the stop predicate.

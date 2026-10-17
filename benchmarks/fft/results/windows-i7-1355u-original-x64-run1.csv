@@ -1,0 +1,85 @@
+﻿# affinity_mask=0x1,status=pinned
+# compiler=Clang-22.1.3,backend=SSE2-assembly,rounds=21,batches=8
+# target_arch=x86_64,pointer_bits=64
+# current_c_sha256=7ca6a9f17fe32fc50edf631adc6b71353d699a0253d20de81b0a2276c36aeb61,current_kernel_sha256=1b051c40b420b01776cd2147221b8c7c2e86a592a6bb3f49fd9604775c7d0304
+# original_fft_c_sha256=95a36b1dae1b9aafd91229b3b068995e7c52fefbced1800f4c81860bdb57b99f,original_fft_h_sha256=2f1c0512da9cc6c78f28258163cee26604f98f9b5044a026b2ad58203c25d7ec,original_simd_h_sha256=ae698bcca657fb2d1b6c345cda3f016f1875493cd028694ab1bf4f130322f6e1
+# before_backend=SSE2-assembly,before_c_sha256=dddb55b7153106d6efb2f06c8466eb86a2eb1caa97f0b3ac88e48dcf0e2b0eed,before_kernel_sha256=e5f49b64ef03e6f57718306eec933cae591bdc0a88ed99911c4e17b87fe1bea4
+# Timed: full call, validation/permutation/stages; excluded: plan, I/O, window, power.
+# Alternating backend order; >=10ms per round; deterministic 12-bit ADC-level noise.
+# diagnostic_full_headroom,N=8,cases=78658,rail_odd_rotation_cases=13122,independent_IQ_rail_cases=65536,SIMD=bit-exact,legacy_max_component_delta=3394,comparison=observed_not_equivalence_bound,not_timed
+# diagnostic_full_headroom_worst,N=8,corpus=independent_IQ_rails,rotation=0,code=6342,component=11,EVO=19777,original_NGene=16383
+# diagnostic_full_headroom_worst_input,N=8,format=interleaved_IQ,values=-16384,16384,16384,-16384,-16384,-16384,16384,16384,-16384,-16384,-16384,16384,16384,-16384,-16384,-16384
+N,backend,repeats,median_us,p95_us,min_us,Msamples_per_s
+# validation,N=8,SIMD=bit-exact,legacy_max_component_delta=0
+# validation,N=8,EVO-before=bit-exact,windows=8,tone=passed
+8,EVO-SIMD,524288,0.019,0.022,0.019,411.505
+8,EVO-scalar,262144,0.052,0.058,0.048,153.781
+8,NGene-original,524288,0.024,0.026,0.023,334.455
+8,EVO-before,524288,0.024,0.026,0.023,326.830
+# validation,N=16,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=16,EVO-before=bit-exact,windows=8,tone=passed
+16,EVO-SIMD,524288,0.031,0.034,0.029,520.660
+16,EVO-scalar,65536,0.147,0.166,0.129,108.511
+16,NGene-original,524288,0.034,0.040,0.033,470.374
+16,EVO-before,262144,0.047,0.052,0.044,338.409
+# validation,N=32,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=32,EVO-before=bit-exact,windows=8,tone=passed
+32,EVO-SIMD,262144,0.048,0.050,0.045,672.363
+32,EVO-scalar,65536,0.257,0.281,0.244,124.632
+32,NGene-original,262144,0.055,0.059,0.051,586.817
+32,EVO-before,131072,0.087,0.094,0.085,366.779
+# validation,N=64,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=64,EVO-before=bit-exact,windows=8,tone=passed
+64,EVO-SIMD,131072,0.087,0.094,0.086,735.623
+64,EVO-scalar,16384,0.636,0.681,0.594,100.562
+64,NGene-original,131072,0.159,0.177,0.154,403.107
+64,EVO-before,65536,0.174,0.195,0.169,368.737
+# validation,N=128,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=128,EVO-before=bit-exact,windows=8,tone=passed
+128,EVO-SIMD,65536,0.192,0.199,0.183,667.102
+128,EVO-scalar,8192,1.335,1.650,1.301,95.867
+128,NGene-original,65536,0.255,0.273,0.250,501.234
+128,EVO-before,32768,0.372,0.399,0.357,343.745
+# validation,N=256,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=256,EVO-before=bit-exact,windows=8,tone=passed
+256,EVO-SIMD,32768,0.479,0.526,0.393,534.425
+256,EVO-scalar,4096,3.347,3.788,2.799,76.480
+256,NGene-original,32768,0.566,0.619,0.501,452.287
+256,EVO-before,16384,0.890,0.987,0.760,287.717
+# validation,N=512,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=512,EVO-before=bit-exact,windows=8,tone=passed
+512,EVO-SIMD,16384,1.015,1.058,0.995,504.411
+512,EVO-scalar,2048,7.217,7.873,6.865,70.944
+512,NGene-original,16384,1.021,1.090,0.995,501.261
+512,EVO-before,8192,1.822,1.922,1.744,281.039
+# validation,N=1024,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=1024,EVO-before=bit-exact,windows=8,tone=passed
+1024,EVO-SIMD,8192,2.238,2.345,2.147,457.549
+1024,EVO-scalar,1024,15.741,17.221,15.075,65.055
+1024,NGene-original,8192,2.138,2.460,2.075,478.985
+1024,EVO-before,4096,3.782,3.995,3.668,270.770
+# validation,N=2048,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=2048,EVO-before=bit-exact,windows=8,tone=passed
+2048,EVO-SIMD,2048,5.019,6.546,4.482,408.078
+2048,EVO-scalar,512,33.400,34.420,31.523,61.317
+2048,NGene-original,4096,4.800,5.232,4.610,426.686
+2048,EVO-before,2048,7.954,9.304,7.770,257.487
+# validation,N=4096,SIMD=bit-exact,legacy_max_component_delta=1
+# validation,N=4096,EVO-before=bit-exact,windows=8,tone=passed
+4096,EVO-SIMD,2048,10.025,11.176,9.680,408.594
+4096,EVO-scalar,256,69.671,93.302,66.781,58.791
+4096,NGene-original,2048,9.942,10.668,9.596,411.970
+4096,EVO-before,1024,16.679,18.203,16.051,245.583
+# validation,N=8192,SIMD=bit-exact,legacy_max_component_delta=2
+# validation,N=8192,EVO-before=bit-exact,windows=8,tone=passed
+8192,EVO-SIMD,512,21.613,26.878,20.155,379.030
+8192,EVO-scalar,128,146.137,167.801,142.073,56.057
+8192,NGene-original,512,21.792,26.649,20.213,375.915
+8192,EVO-before,512,34.087,36.943,33.339,240.325
+# validation,N=16384,SIMD=bit-exact,legacy_max_component_delta=2
+# validation,N=16384,EVO-before=bit-exact,windows=8,tone=passed
+16384,EVO-SIMD,256,46.481,55.055,43.779,352.486
+16384,EVO-scalar,32,323.978,428.394,306.616,50.571
+16384,NGene-original,256,71.658,84.891,68.780,228.642
+16384,EVO-before,128,81.205,96.130,78.894,201.762
+# checksum=807880486

@@ -14,10 +14,10 @@ Il motore è il solo consumatore logico del ring GNSS: tutti i canali ricevono l
 - Ciclo di vita del ricevitore e frontend nativo HackRF.
 - Replay CI8 indipendente, anche in parallelo al live; vettori generati soltanto nei test.
 - Bypass, assemblaggio delle finestre, ring e dispatch comune.
-- Contratto e validazione degli stati del canale, senza algoritmi fittizi in produzione.
+- Contratto e validazione degli stati del canale; dispatcher opzionale con pool fisso e job dinamici per finestra. Gli algoritmi GNSS restano da integrare.
 - Recorder, segmenti, metadati, gestione overflow/EOF/arresto.
 - Controller, GUI dark con configurazione/osservazione separate, registrazione indipendente pre/post e trasferimento file.
-- FFT intera assembly SSE2/NEON, spettro/waterfall, istogrammi e configurazione runtime.
+- Libreria DSP separata per FFT, statistica e potenza; API comuni con backend SSE2/NEON secondo il target. Spettro/waterfall, istogrammi e configurazione runtime.
 - Diagnostica con integrità PSD end-to-end, history senza righe artificiali, istogrammi indipendenti e statistiche I/Q.
 - DC remover continuo opzionale, tuning hardware/segnale distinto e contratto NCO/digital IF.
 - Primitive intrinsics SSE2/NEON e riferimento C; preset Windows nativi MSVC x64/ARM64.

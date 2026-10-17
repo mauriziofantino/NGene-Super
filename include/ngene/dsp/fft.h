@@ -35,7 +35,9 @@ void NgFftDestroy(TNgFftPlan *plan);
  * Forward exp(-j*2*pi*k*n/N), natural-order output scaled by 1/N. Components must be in
  * [-16384,16384]; Q14 twiddles and arithmetic-floor scaling are used. Arrays must be disjoint,
  * have 2*N int16 elements and natural int16 alignment. Execution allocates no memory. Uses the
- * selected architecture assembly backend, or explicitly configured reference.
+ * selected architecture SIMD backend, or explicitly configured reference. On 32-bit x86,
+ * plans fall back to the scalar oracle when the CPU lacks SSE2. ARM32 NEON builds require
+ * NEON-capable hardware; select the reference build for older ARM CPUs.
  *
  * @param plan Immutable plan created by NgFftCreate.
  * @param size Transform size, power of two in 8..plan maximum.
@@ -70,10 +72,10 @@ int NgFftReference(const TNgFftPlan *plan, size_t size, const int16_t *input, in
  * @brief Report the FFT backend selected at compilation.
  *
  * @details
- * The returned string has static storage; do not free it. This is not runtime CPU-feature
- * dispatch.
+ * The returned string has static storage; do not free it. On 32-bit x86 it reflects the
+ * CPU's SSE2 capability; the other targets select their backend at compilation.
  *
- * @return Static backend name: SSE2-assembly, NEON-assembly or C-reference.
+ * @return Static name of the available SSE2, NEON or C-reference backend.
  */
 const char *NgFftBackend(void);
 #endif

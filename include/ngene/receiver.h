@@ -31,6 +31,13 @@ typedef struct {
     TNgRecordingStats recording;
 } TNgReceiverStats;
 
+/** @brief Explicit run-local channel execution policy; OS scheduling chooses the cores. */
+typedef struct {
+    /** Positive maximum channel workers, capped to channel count; one keeps serial dispatch.
+     * Private or synchronized channel contexts are required when greater than one. */
+    size_t workerCount;
+} TNgReceiverExecution;
+
 /** Optional synchronous engine hooks; never retain a borrowed block.
  * Transport/UI work must use snapshots or bounded queues, not these callbacks.
  */
@@ -68,6 +75,37 @@ typedef struct {
     int (*rawBlock)(void *context, const TNgIqView *view, TNgError *error);
 } TNgReceiverHooks;
 
+/** @brief Run the shared-stream engine with optional bounded parallel channel dispatch.
+ * @details NULL execution preserves serial processing. Otherwise workerCount must be positive;
+ * the effective count is capped to channelCount and no pool is started for zero/one channel
+ * or record-only runs. Workers and result storage are created before frontend start and joined
+ * before return; no per-window allocation or CPU pinning is performed. The OS places workers
+ * on cores, while idle workers dynamically claim channel jobs. All channels complete a window
+ * before its ring lease is released or the next window begins. Channel workspace must be
+ * private or explicitly synchronized; never rely on callback order in parallel mode. Every
+ * channel runs once in parallel mode even if another fails, then the first error in registration
+ * order is reported. Successful valid transitions are committed after the completion barrier.
+ * Frontend, conditioning, recording submission and hooks remain on the calling receiver thread.
+ * @param config Validated core configuration matching the frontend descriptor.
+ * @param frontend Opened caller-owned frontend, destroyed by caller after return.
+ * @param conditioner Borrowed rate- and native-format-preserving conditioner.
+ * @param channels Caller-owned validated registrations, unchanged throughout the run except
+ * engine-owned state transitions; NULL permitted when channelCount is zero.
+ * @param channelCount Number of channels receiving each common immutable window.
+ * @param stop Optional nonblocking stop predicate, called between complete windows.
+ * @param stopContext Borrowed context retained throughout the run.
+ * @param stats Writable non-NULL final engine counters.
+ * @param execution Optional fixed worker-count policy, read before frontend start.
+ * @param hooks Optional synchronous observer hooks with contexts live throughout the run.
+ * @param error Optional error destination, written by the receiver after all workers finish.
+ * @return NG_OK on stop/EOF; NG_ERROR on invalid policy, resources, transport or module failure.
+ */
+int NgReceiverRunScheduled(const TNgConfig *config, TNgFrontend *frontend,
+                           const TNgConditioner *conditioner, TNgChannel *channels,
+                           size_t channelCount, TNgStopRequested stop, void *stopContext,
+                           TNgReceiverStats *stats, const TNgReceiverExecution *execution,
+                           const TNgReceiverHooks *hooks, TNgError *error);
+
 /**
  * @brief Run the synchronous shared-stream receiver engine.
  *
@@ -79,7 +117,8 @@ typedef struct {
  *
  * @param config Validated core configuration matching the frontend descriptor.
  * @param frontend Opened frontend; caller retains ownership and destroys after the run.
- * @param conditioner Rate- and native-format-preserving conditioner with valid context for this run.
+ * @param conditioner Rate- and native-format-preserving conditioner with valid context for this
+ * run.
  * @param channels Caller-owned channel array; NULL permitted when count is zero.
  * @param channelCount Number of channels; each sees the same borrowed window.
  * @param stop Optional stop predicate called by the engine.
@@ -107,7 +146,8 @@ int NgReceiverRunEx(const TNgConfig *config, TNgFrontend *frontend,
  *
  * @param config Validated core configuration matching the frontend descriptor.
  * @param frontend Opened frontend; caller retains ownership and destroys after the run.
- * @param conditioner Rate- and native-format-preserving conditioner with valid context for this run.
+ * @param conditioner Rate- and native-format-preserving conditioner with valid context for this
+ * run.
  * @param channels Caller-owned channel array; NULL permitted when count is zero.
  * @param channelCount Number of channels; each sees the same borrowed window.
  * @param stop Optional stop predicate called by the engine.

@@ -110,6 +110,9 @@ int main(void)
     cfg.recordingEnabled = 0;
     strcpy(cfg.recordingPrefix, "test");
     CHECK(NgControlCreate(&cfg, directory, &c, &error) == NG_OK);
+    NgControlSnapshot(c, &s);
+    CHECK(s.analysis.config.spectrumEnabled == cfg.analysis.spectrumEnabled);
+    CHECK(s.analysis.config.histogramEnabled == cfg.analysis.histogramEnabled);
     NgControlConfig(c, &saved, &revision);
     CHECK(revision == 1);
     CHECK(NgControlConfigure(c, &cfg, 0, &error) == NG_ERROR);
@@ -176,6 +179,16 @@ int main(void)
     CHECK(NgControlRequest(c, NG_CMD_START, revision, &id, &error) == NG_OK);
     s = WaitState(c, NG_STOPPED, NG_REC_OFF);
     CHECK(s.commandOk && s.receiver.processedSamples == 3500 && s.recording.samples == 3500);
+    /* Runtime switches also need authoritative metadata while the worker is absent. */
+    NgControlConfig(c, &saved, &revision);
+    saved.analysis.spectrumEnabled = 0;
+    CHECK(NgControlAnalysisConfigure(c, &saved.analysis, revision, &error) == NG_OK);
+    NgControlSnapshot(c, &s);
+    CHECK(s.analysis.config.spectrumEnabled == 0 && s.analysis.sequence == 0);
+    saved.analysis.spectrumEnabled = 1;
+    CHECK(NgControlAnalysisConfigure(c, &saved.analysis, s.revision, &error) == NG_OK);
+    NgControlSnapshot(c, &s);
+    CHECK(s.analysis.config.spectrumEnabled == 1 && s.analysis.sequence == 0);
     NgControlDestroy(c);
     CHECK(NgDirectoryFiles(directory, RemoveCapture, directory) == 0);
     CHECK(NG_TEST_REMOVE_DIRECTORY(directory) == 0);

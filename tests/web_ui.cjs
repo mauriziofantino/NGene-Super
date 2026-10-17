@@ -185,6 +185,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
       const before=m.diagnosticSnapshot();
       if(!m.psdIntegrity(a))throw new Error('Valid producer frame rejected');
       const corrupted=structuredClone(a);corrupted.dbfs[0]+=3;
+      corrupted.sequence_id=(BigInt(before.sequence)+1n).toString();
       if(m.psdIntegrity(corrupted))throw new Error('Corrupted PSD accepted');
       m.renderAnalysis(corrupted);
       const after=m.diagnosticSnapshot();
@@ -214,14 +215,14 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     await delay(1200);
     assert.equal(websocketCloses,closesBeforeDelay,'One delayed request must not trigger a burst or disconnect');
     assert.equal(await page.locator('#connection').textContent(),'Connected','30 Hz selection must not cause unanswered requests');
-    await page.locator('#showSpectrum').uncheck();await page.locator('#showHistogram').uncheck();
+    await page.locator('#showSpectrum').uncheck();await page.locator('#showWaterfall').uncheck();await page.locator('#showHistogram').uncheck();
     await delay(2400);
     const dormant=await (await fetch(`${base}/api/v1/status`)).json();
     await delay(350);
     const dormant2=await (await fetch(`${base}/api/v1/status`)).json();
     assert.equal(dormant2.analysis.sequence,dormant.analysis.sequence,'Hidden diagnostic producers must stop');
     assert(BigInt(dormant2.processed_samples)>BigInt(dormant.processed_samples),'Receiver stopped with hidden diagnostics');
-    await page.locator('#showSpectrum').check();await page.locator('#showHistogram').check();
+    await page.locator('#showSpectrum').check();await page.locator('#showWaterfall').check();await page.locator('#showHistogram').check();
     await page.locator('#refresh').selectOption('250');
 
     if (process.env.NGENE_SCREENSHOTS) {
@@ -269,7 +270,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     for (const f of files.files) {
       assert(f.closed);
       const response=await fetch(`${base}/api/v1/files/${f.name}`);
-      assert.equal(response.status,200,`Transfer failed for ${f.name}`);
+      assert.equal(response.status,200,`Transfer failed for ${f.name}${response.ok?'':`: ${await response.text()}`}`);
       const bytes = Buffer.from(await response.arrayBuffer());
       assert.deepEqual(bytes,fs.readFileSync(path.join(output,f.name)),'Transfer bytes differ');
       assert.equal(bytes.length,Number(f.bytes));

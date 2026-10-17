@@ -48,6 +48,179 @@ static void ParallelFft(void *context)
     }
 }
 
+/** @brief Compare public backends at independent natural alignments in guarded storage. */
+static void CheckGuardedTransformAtOffsets(TNgFftPlan *plan, size_t n, size_t inputLane,
+                                           size_t outputLane)
+{
+    static int16_t guardedInput[32768 + 16];
+    static int16_t guardedOutput[32768 + 16];
+    const int16_t canary = 23130;
+    const size_t inputOffset =
+        inputLane + (size_t)((16u - ((uintptr_t)guardedInput & 15u)) & 15u) / sizeof(int16_t);
+    const size_t outputOffset =
+        outputLane + (size_t)((16u - ((uintptr_t)guardedOutput & 15u)) & 15u) / sizeof(int16_t);
+    const size_t count = 2 * n + 16;
+    TNgError error = {{0}};
+    size_t i;
+    memset(guardedInput, 0x5a, count * sizeof(*guardedInput));
+    memset(guardedOutput, 0x5a, count * sizeof(*guardedOutput));
+    memcpy(guardedInput + inputOffset, input, 2 * n * sizeof(*input));
+    CHECK(((uintptr_t)(guardedInput + inputOffset) & 15u) == inputLane * sizeof(int16_t));
+    CHECK(((uintptr_t)(guardedOutput + outputOffset) & 15u) == outputLane * sizeof(int16_t));
+    CHECK(NgFftReference(plan, n, input, reference, &error) == NG_OK);
+    CHECK(NgFftExecute(plan, n, guardedInput + inputOffset, guardedOutput + outputOffset, &error) ==
+          NG_OK);
+    CHECK(memcmp(guardedInput + inputOffset, input, 2 * n * sizeof(*input)) == 0);
+    for (i = 0; i < 2 * n; ++i) {
+        if (guardedOutput[outputOffset + i] != reference[i]) {
+            fprintf(stderr, "FFT mismatch: N=%zu component=%zu actual=%d reference=%d\n", n, i,
+                    (int)guardedOutput[outputOffset + i], (int)reference[i]);
+            CHECK(guardedOutput[outputOffset + i] == reference[i]);
+        }
+    }
+    for (i = 0; i < inputOffset; ++i) {
+        CHECK(guardedInput[i] == canary);
+    }
+    for (i = inputOffset + 2 * n; i < count; ++i) {
+        CHECK(guardedInput[i] == canary);
+    }
+    for (i = 0; i < outputOffset; ++i) {
+        CHECK(guardedOutput[i] == canary);
+    }
+    for (i = outputOffset + 2 * n; i < count; ++i) {
+        CHECK(guardedOutput[i] == canary);
+    }
+}
+
+/** @brief Keep the exhaustive arithmetic corpus deliberately two bytes off vector alignment. */
+static void CheckGuardedTransform(TNgFftPlan *plan, size_t n)
+{
+    CheckGuardedTransformAtOffsets(plan, n, 1, 1);
+}
+
+/** @brief Exercise every input/output lane alignment independently on every transform width. */
+static void CheckNaturalAlignments(TNgFftPlan *plan)
+{
+    uint32_t random = 0x41524d32u;
+    size_t n;
+    for (n = 8; n <= 16384; n *= 2) {
+        size_t i;
+        size_t inputLane;
+        size_t outputLane;
+        for (i = 0; i < 2 * n; ++i) {
+            random = random * 1664525u + 1013904223u;
+            input[i] = (int16_t)((int)(random % 32769u) - 16384);
+        }
+        for (inputLane = 0; inputLane < 8; ++inputLane) {
+            for (outputLane = 0; outputLane < 8; ++outputLane) {
+                CheckGuardedTransformAtOffsets(plan, n, inputLane, outputLane);
+            }
+        }
+    }
+}
+
+/** @brief Validate signed input bounds in every first/last SIMD lane, including int16 extrema. */
+static void CheckInvalidVectorLanes(TNgFftPlan *plan)
+{
+    static const int16_t invalid[] = {-32768, -16385, 16385, 32767};
+    TNgError error = {{0}};
+    size_t n;
+    memset(input, 0, sizeof(input));
+    for (n = 8; n <= 16384; n *= 2) {
+        size_t lane;
+        size_t laneCount = 2 * n < 32 ? 2 * n : 32;
+        for (lane = 0; lane < laneCount; ++lane) {
+            size_t side;
+            for (side = 0; side < 2; ++side) {
+                size_t position = side == 0 ? lane : 2 * n - 1 - lane;
+                size_t value;
+                for (value = 0; value < sizeof(invalid) / sizeof(invalid[0]); ++value) {
+                    input[position] = invalid[value];
+                    CHECK(NgFftExecute(plan, n, input, actual, &error) == NG_ERROR);
+                    CHECK(NgFftReference(plan, n, input, reference, &error) == NG_ERROR);
+                }
+                input[position] = 0;
+            }
+        }
+    }
+}
+
+/** @brief Exhaust the eight-point codelet's ternary rails/odd corpus and its rotated inputs. */
+static void CheckEightPointCorpus(TNgFftPlan *plan)
+{
+    static const int16_t pairs[3][2] = {{-16384, -16384}, {16384, -16383}, {1, -1}};
+    unsigned rotation;
+    unsigned code;
+    for (rotation = 0; rotation < 2; ++rotation) {
+        for (code = 0; code < 6561;
+             ++code) { /* All 3^8 assignments of a complex pair per sample. */
+            unsigned digits = code;
+            size_t i;
+            for (i = 0; i < 8; ++i) {
+                int16_t re = pairs[digits % 3u][0];
+                int16_t im = pairs[digits % 3u][1];
+                unsigned quarter;
+                digits /= 3;
+                for (quarter = 0; quarter < rotation * (unsigned)(i & 3u); ++quarter) {
+                    int16_t previousRe = re;
+                    re = (int16_t)-im;
+                    im = previousRe;
+                }
+                input[2 * i] = re;
+                input[2 * i + 1] = im;
+            }
+            CheckGuardedTransform(plan, 8);
+        }
+    }
+}
+
+/** @brief Cover every plan/subsize pair, odd floors, full headroom and block boundaries. */
+static void CheckPlanSubsizes(void)
+{
+    uint32_t random = 0x14f17e5u;
+    size_t maximum;
+    for (maximum = 8; maximum <= 16384; maximum *= 2) {
+        TNgFftPlan *plan;
+        TNgError error = {{0}};
+        size_t n;
+        CHECK(NgFftCreate(maximum, &plan, &error) == NG_OK);
+        for (n = 8; n <= maximum; n *= 2) {
+            unsigned trial;
+            for (trial = 0; trial < 6; ++trial) {
+                size_t i;
+                for (i = 0; i < 2 * n; ++i) {
+                    int value;
+                    random = random * 1664525u + 1013904223u;
+                    value = (int)(random % 32769u) - 16384;
+                    if (trial == 1) {
+                        value = 2 * (int)((random >> 8) & 16383u) - 16383;
+                    } else if (trial == 2) {
+                        value = (random & 0x80000000u) != 0 ? 16384 : -16384;
+                    } else if (trial == 3) {
+                        value = 16384 - (int)((random >> 8) & 3u);
+                        if ((random & 0x80000000u) != 0) {
+                            value = -value;
+                        }
+                    } else if (trial == 4) {
+                        /* A nonzero tail detects reversed-index truncation and omitted groups. */
+                        value = i / 2 == n - 1 ? value : 0;
+                    } else if (trial == 5) {
+                        size_t sample = i / 2;
+                        /* Include both sides of 4/8-point and prospective cache-block borders. */
+                        value = sample % 4 == 3 || sample % 4 == 0 || sample == n / 2 - 1 ||
+                                        sample == n / 2 || sample == n / 2 + 1
+                                    ? value
+                                    : 0;
+                    }
+                    input[i] = (int16_t)value;
+                }
+                CheckGuardedTransform(plan, n);
+            }
+        }
+        NgFftDestroy(plan);
+    }
+}
+
 /**
  * @brief Run the C contract test executable.
  *
@@ -122,6 +295,10 @@ int main(int argc, char **argv)
             }
         }
     }
+    CheckEightPointCorpus(p);
+    CheckPlanSubsizes();
+    CheckNaturalAlignments(p);
+    CheckInvalidVectorLanes(p);
     {
         TNgThread threads[2];
         TNgParallelCase cases[2];
@@ -195,7 +372,8 @@ int main(int argc, char **argv)
                    scalar / assembly);
         }
     }
-    printf("PASS: %s, every size 8..16384, bit-exact scalar and DFT checks\n", NgFftBackend());
+    printf("PASS: %s, pointer_bits=%u, every size 8..16384, bit-exact scalar and DFT checks\n",
+           NgFftBackend(), (unsigned)(sizeof(void *) * 8));
     NgFftDestroy(p);
     return 0;
 }

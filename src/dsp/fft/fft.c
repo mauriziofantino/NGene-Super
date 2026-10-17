@@ -15,10 +15,15 @@ struct TNgFftPlan {
     uint32_t *reverse;
     /** Owned immutable interleaved Q14 sine/cosine butterfly coefficients. */
     int16_t *twiddles;
+#ifdef NGENE_FFT_RUNTIME_SSE2
+    /** ISA decision made once at creation; never execute SSE2 on unsupported CPUs. */
+    int simd;
+#endif
 };
 
-#ifdef NGENE_FFT_ASSEMBLY
+#if defined(NGENE_FFT_ASSEMBLY) || defined(NGENE_FFT_SIMD)
 #include "dsp/fft/butterfly.h"
+#define NG_FFT_HAVE_KERNEL 1
 #endif
 
 /**
@@ -40,7 +45,7 @@ static int PowerTwo(size_t n)
  * @brief Compute defined signed floor division by a power of two.
  *
  * @details
- * Used by Q14 products and stage scaling to match assembly rounding; arithmetic intermediates
+ * Used by Q14 products and stage scaling to match SIMD rounding; arithmetic intermediates
  * remain in the FFT headroom contract.
  *
  * @param x Signed intermediate.
@@ -57,7 +62,7 @@ static int32_t FloorShift(int32_t x, unsigned shift)
  * @brief Saturate a butterfly intermediate to signed int16.
  *
  * @details
- * Never wrap on narrowing; this is identical to the architecture saturating conversion.
+ * Never wrap on narrowing; this defines the numerical contract for the SIMD kernels.
  *
  * @param x Signed32 butterfly intermediate.
  *
@@ -73,7 +78,7 @@ static int16_t Narrow(int32_t x)
  *
  * @details
  * Reads four twiddle coefficients per complex pair, floors products, divides sum/difference by
- * two and saturates to int16. This is the bit-exact oracle for SIMD assembly.
+ * two and saturates to int16. This is the bit-exact oracle for the SIMD kernels.
  *
  * @param u Read/write first butterfly half, 2*count int16 elements.
  * @param v Read/write second disjoint half.
@@ -127,6 +132,9 @@ int NgFftCreate(size_t maximumSize, TNgFftPlan **out, TNgError *error)
         return NgFail(error, "Cannot allocate FFT plan");
     }
     p->maximum = maximumSize;
+#ifdef NGENE_FFT_RUNTIME_SSE2
+    p->simd = NgFftSimdAvailable();
+#endif
     for (i = maximumSize; i > 1; i >>= 1) {
         ++p->bits;
     }
@@ -187,7 +195,7 @@ void NgFftDestroy(TNgFftPlan *plan)
  *
  * @details
  * Checks Q14 headroom and disjoint storage, performs bit reversal, then uses immutable plan
- * twiddles with either assembly or scalar butterflies. Output is natural order and scaled 1/N.
+ * twiddles with either SIMD or scalar butterflies. Output is natural order and scaled 1/N.
  *
  * @param p Immutable FFT plan.
  * @param n Complex transform size.
@@ -208,6 +216,11 @@ static int Execute(const TNgFftPlan *p, size_t n, const int16_t *a, int16_t *b, 
     if (p == NULL || a == NULL || b == NULL || a == b || PowerTwo(n) == 0 || n > p->maximum) {
         return NgFail(error, "Invalid FFT plan, size or disjoint arrays");
     }
+#ifdef NGENE_FFT_RUNTIME_SSE2
+    if (p->simd == 0) {
+        reference = 1;
+    }
+#endif
     {
         uintptr_t source = (uintptr_t)a;
         uintptr_t destination = (uintptr_t)b;
@@ -216,7 +229,7 @@ static int Execute(const TNgFftPlan *p, size_t n, const int16_t *a, int16_t *b, 
             return NgFail(error, "FFT input/output arrays overlap");
         }
     }
-#if defined(NGENE_FFT_ASSEMBLY) && (defined(__x86_64__) || defined(_M_X64))
+#ifdef NG_FFT_HAVE_KERNEL
     if (reference == 0) {
         if (NgFftInputInRange(a, n) == 0) {
             return NgFail(error, "FFT input exceeds signed Q14 headroom");
@@ -230,23 +243,48 @@ static int Execute(const TNgFftPlan *p, size_t n, const int16_t *a, int16_t *b, 
             }
         }
     }
-    for (i = 0; i < n; ++i) {
-        size_t r = p->reverse[i * (p->maximum / n)];
-        /* Copy a whole complex pair without imposing uint32 alignment or aliasing rules. */
-        memcpy(b + 2 * r, a + 2 * i, 2 * sizeof(*a));
-    }
-    m = 2;
-#if defined(NGENE_FFT_ASSEMBLY) && (defined(__x86_64__) || defined(_M_X64))
+#ifdef NG_FFT_HAVE_KERNEL
     if (reference == 0) {
-        /* Avoid N/2 + N/4 tiny ABI calls while retaining the reference rounding per stage. */
-        NgFftFirstStages(b, n);
-        m = 8;
-        offset = 12;
-    }
+        const size_t quarter = n / 4;
+        const size_t stride = p->maximum / n;
+        const size_t block = n < 512 ? n : 512;
+        size_t chunk;
+        /* Bit reversal is an involution. Gather four reversed inputs and write a
+         * contiguous output quartet, sharing one reverse-table entry. */
+        for (i = 0; i < n; i += 4) {
+            size_t r = p->reverse[i * stride];
+            memcpy(b + 2 * i, a + 2 * r, 2 * sizeof(*a));
+            memcpy(b + 2 * (i + 1), a + 2 * (r + 2 * quarter), 2 * sizeof(*a));
+            memcpy(b + 2 * (i + 2), a + 2 * (r + quarter), 2 * sizeof(*a));
+            memcpy(b + 2 * (i + 3), a + 2 * (r + 3 * quarter), 2 * sizeof(*a));
+        }
+        /* Butterfly groups below block are independent. Complete each small
+         * subtree while its workspace is hot, retaining every Q14 /2 rounding. */
+        for (chunk = 0; chunk < n; chunk += block) {
+            NgFftFirstStages(b + 2 * chunk, block);
+            offset = 28;
+            for (m = 16; m <= block; m *= 2) {
+                for (base = chunk; base < chunk + block; base += m) {
+                    NgFftButterflies(b + 2 * base, b + 2 * base + m, p->twiddles + offset, m / 2);
+                }
+                offset += 2 * m;
+            }
+        }
+        m = 2 * block;
+        offset = 4 * block - 4;
+    } else
 #endif
+    {
+        for (i = 0; i < n; ++i) {
+            size_t r = p->reverse[i * (p->maximum / n)];
+            /* The oracle retains the independent scatter permutation and stage schedule. */
+            memcpy(b + 2 * r, a + 2 * i, 2 * sizeof(*a));
+        }
+        m = 2;
+    }
     for (; m <= n; m *= 2) {
         for (base = 0; base < n; base += m) {
-#ifdef NGENE_FFT_ASSEMBLY
+#ifdef NG_FFT_HAVE_KERNEL
             if (reference == 0) {
                 NgFftButterflies(b + 2 * base, b + 2 * base + m, p->twiddles + offset, m / 2);
             } else
@@ -267,7 +305,7 @@ static int Execute(const TNgFftPlan *p, size_t n, const int16_t *a, int16_t *b, 
  * Forward exp(-j*2*pi*k*size/N), natural-order output scaled by 1/N. Components must be in
  * [-16384,16384]; Q14 twiddles and arithmetic-floor scaling are used. Arrays must be disjoint,
  * have 2*N int16 elements and natural int16 alignment. Execution allocates no memory. Uses the
- * selected architecture assembly backend, or explicitly configured reference.
+ * selected architecture SIMD backend, or explicitly configured reference.
  *
  * Parameter plan: Immutable plan created by NgFftCreate.
  * Parameter size: Transform size, power of two in 8..plan maximum.
@@ -310,12 +348,17 @@ int NgFftReference(const TNgFftPlan *plan, size_t size, const int16_t *input, in
  * @brief Report the FFT backend selected at compilation.
  *
  * @details
- * The returned string has static storage; do not free it. This is not runtime CPU-feature
- * dispatch.
+ * The returned string has static storage; do not free it. On 32-bit x86, SSE2 capability
+ * is checked and older CPUs report the scalar fallback. Plans cache that decision.
  *
- * Result: Static backend name: SSE2-assembly, NEON-assembly or C-reference.
+ * Result: Static name of the available SSE2, NEON or C-reference backend.
  */
 const char *NgFftBackend(void)
 {
+#ifdef NGENE_FFT_RUNTIME_SSE2
+    if (NgFftSimdAvailable() == 0) {
+        return "C-reference";
+    }
+#endif
     return NGENE_FFT_BACKEND;
 }

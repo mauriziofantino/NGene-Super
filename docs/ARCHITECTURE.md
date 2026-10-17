@@ -2,32 +2,171 @@
 
 L’architettura recepisce lo schema e le istruzioni del 28 settembre 2026. Sono superate le proposte di implementazione C++/SoapySDR e di lettori indipendenti per ogni canale.
 
+La revisione del 17 ottobre 2026 separa la matematica dal ricevitore e aggiunge un dispatcher
+parallelo opzionale. Frontend, conditioning, registrazione e diagnostica sono operativi;
+acquisizione satellitare, tracking, demodulazione e PVT restano moduli da integrare. CLI e
+controller registrano attualmente zero canali GNSS: il nuovo pool è pronto per moduli reali,
+ma non implica che questi algoritmi siano già presenti.
+
 ```mermaid
 flowchart TD
-    H[Callback libhackrf] --> Q[Coda di trasporto preallocata]
+    H[Frontend nativo o file] --> Q[Trasporto e buffer posseduti dal frontend]
     Q --> F[API frontend acquire e release]
-    F --> C[Conditioning bypass]
+    F --> C[Conditioning bypass o DC]
     C --> A[Assemblaggio finestra comune]
     A --> R[Ring centrale I/Q]
     R --> E[Motore: una sola vista]
-    E --> G[Gruppo di canali sequenziali]
-    G --> W[Coda di registrazione opzionale]
+    E --> G[Dispatcher seriale o pool di canali]
+    G --> B[Completamento di tutti i job della finestra]
+    B --> W[Coda di registrazione opzionale]
     W --> D[Writer su disco]
-    G --> X[Rilascio unico della finestra]
+    B --> X[Rilascio unico della finestra]
 ```
 
 La coda iniziale appartiene al trasporto del frontend: assorbe i burst USB e mantiene breve la callback. Non è un secondo stream GNSS né introduce cursori per satellite. Nella modalità di sola registrazione il motore salta il gruppo di canali e alimenta direttamente il writer.
 
 Il thread che esegue `NgReceiverRun()` preleva i blocchi del frontend, applica il conditioner, assembla finestre e coordina i canali. Libhackrf ha i propri thread di trasporto; il recorder ha un thread aggiuntivo. Non esiste un thread per satellite.
 
+## Confini dei moduli e librerie
+
+| Responsabilità | Sorgenti/API | Confine |
+|---|---|---|
+| Motore | `src/core/`, `receiver.h`, `channel.h` | Ordine delle finestre, lease, dispatch, transizioni, stop e chiusura |
+| Frontend | `src/frontend/`, `frontend.h` | Acquisizione dei campioni e adattatori nativi; nessuna logica di tracking |
+| Conditioning | `src/conditioning/`, `conditioning.h` | Trasformazione condivisa prima del ring, stato temporale proprio |
+| Algoritmi GNSS futuri | Acquisizione/tracking dietro `TNgChannelOps` | Stato e workspace per canale; nessun cursore autonomo sul ring |
+| Matematica | `src/dsp/`, `include/ngene/dsp/` | Funzioni numeriche e piani; indipendente da driver, GUI e scheduler |
+| Osservazione/registrazione | `src/analysis/`, `src/recording/` | Code/workspace limitati e worker indipendenti |
+| Controllo/presentazione | `src/control/`, `src/web/`, `web/` | Comandi e snapshot; nessuna elaborazione GNSS nei thread HTTP |
+| Piattaforma | `src/platform/` | Thread, mutex, condizioni, clock e filesystem portabili |
+
+Le dipendenze CMake ora rendono riutilizzabile la matematica senza collegare frontend o controller:
+
+```mermaid
+flowchart TD
+    App[CLI o Web] --> Control[ngene_control]
+    App --> Engine[ngene_core / NGene::Engine]
+    Control --> Engine
+    Engine --> Dsp[ngene_dsp / NGene::Dsp]
+    Engine --> Platform[ngene_platform / NGene::Platform]
+    Dsp --> Base[ngene_base / NGene::Base]
+    Platform --> Base
+```
+
+`ngene_base` contiene gli errori comuni; evita una dipendenza circolare DSP→motore.
+`ngene_dsp` non dipende dai thread o dalle librerie dei dispositivi. Il test FFT collega
+direttamente DSP e piattaforma di test, senza `ngene_core`. Gli altri moduli mantengono
+interfacce C e directory separate, pur essendo ancora raccolti nel target `ngene_core`.
+Separarli in ulteriori librerie sarà utile quando avranno consumatori indipendenti.
+
+## Concorrenza e scelta dei core
+
+La politica implementata distingue tre decisioni:
+
+1. **Numero di worker fisso per run**, esplicitamente scelto dal chiamante. Thread e scratch
+   dei risultati sono preparati prima dello start del frontend; nessuna allocazione per finestra.
+2. **Assegnazione dinamica dei job**: ogni worker libero preleva il prossimo canale della
+   finestra. Un canale impegnativo non resta legato a uno specifico worker fra finestre.
+3. **Assegnazione ai core affidata al sistema operativo**. Il ricevitore non impone affinity
+   o priorità speciali. L'affinity limita le scelte dello scheduler e va valutata soltanto
+   con misure sulla macchina di destinazione; anche la
+   [documentazione Windows](https://learn.microsoft.com/en-us/windows/win32/procthread/multiple-processors)
+   raccomanda generalmente di lasciare questa scelta al sistema.
+
+`NgReceiverRun()` e `NgReceiverRunEx()` conservano l'ordine sequenziale precedente.
+`NgReceiverRunScheduled()` accetta `TNgReceiverExecution { workerCount }`: NULL o 1 usa il
+percorso seriale; 0 è invalido; il numero effettivo non supera quello dei canali. Con zero
+o un canale e in modalità record-only non viene creato alcun pool. La scelta è un'API del
+motore, non un parametro GUI che avvii algoritmi GNSS assenti.
+
+```c
+TNgReceiverExecution execution = {4};
+int result = NgReceiverRunScheduled(&config, &frontend, &conditioner,
+                                    channels, channelCount, StopRequested, context,
+                                    &stats, &execution, &hooks, &error);
+```
+
+Tutti i job ricevono gli stessi campioni immutabili, indici e gap. Il motore mantiene
+l'unica lease del ring fino alla barriera di completamento. Lo stesso canale non elabora
+due finestre contemporaneamente. I contesti mutabili condivisi richiedono sincronizzazione
+esplicita; un callback parallelo non può dipendere dall'ordine degli altri canali.
+
+In parallelo tutti i job della finestra terminano anche in presenza di un errore. Il motore
+valida e applica le transizioni riuscite dopo la barriera; il primo errore nell'ordine di
+registrazione determina la diagnostica restituita. Chiude e unisce i worker prima di
+distruggere i campioni. Il percorso seriale conserva lo stop al primo errore.
+
+Frontend, conditioning e hook restano sul thread coordinatore; recorder e diagnostica
+mantengono i propri worker. La barriera fa dipendere l'avanzamento dal canale più lento:
+il pool non modifica le politiche di overflow e non garantisce hard real-time. Non vengono
+avviati thread interni per ogni FFT. Se due sessioni live/replay condividono la macchina,
+il chiamante deve distribuire fra loro un budget complessivo di worker.
+
+## Libreria matematica e selezione del target
+
+| Famiglia | Header pubblico | Implementazione |
+|---|---|---|
+| Trasformate | `ngene/dsp/fft.h` | `src/dsp/fft/` e kernel privati in `x86/`, `arm/` |
+| Statistica I/Q | `ngene/dsp/statistics.h` | `src/dsp/statistics/moments.c` |
+| Potenza complessa | `ngene/dsp/power.h` | `src/dsp/power/power.c` |
+
+`ngene/dsp/sample_ops.h` resta l'umbrella compatibile. Formule, reference e loop SIMD delle
+primitive sono stati separati senza modificarli. Correlazione, NCO/mixing, finestre,
+filtri e operazioni fixed-point avranno famiglie proprie quando verranno portate e validate;
+non sono aggiunte implementazioni vuote.
+
+Il chiamante usa sempre `NgFftExecute`, `NgIqMoments` o `NgPowerAccumulate`, senza tipi SIMD
+né selezioni ISA negli algoritmi GNSS. `TargetArchitecture.cmake` interroga le macro del
+compilatore target; `FftBackend.cmake`, condiviso fra ricevitore e benchmark, sceglie un kernel
+e le relative opzioni locali. Nessun rilevamento dell'architettura del computer host e
+nessun `-march=native` globale.
+
+La FFT usa SSE2 assembly su x64, SSE2 intrinsics su x86-32 e NEON intrinsics su ARM64/ARMv7.
+Su x86-32 resta il controllo SSE2 al momento della creazione del piano, necessario per
+eseguire il fallback su CPU prive dell'ISA. Questo controllo di sicurezza non cambia l'API.
+Le primitive di statistica/potenza mantengono SIMD su x64/ARM64 e C su x86-32/ARM32.
+`NGENE_FFT_REFERENCE` e `NGENE_SAMPLE_REFERENCE` selezionano gli oracoli in compilazione.
+
+Ogni famiglia dichiara range, scaling, allineamento, aliasing, remainder e overflow negli
+header. I piani FFT sono immutabili e condivisibili; ogni chiamata usa buffer disgiunti.
+Precisione e parallelismo sono separati: più worker non cambiano l'ordine aritmetico interno
+di una FFT né il suo contratto bit-exact.
+
+## Struttura proposta per le prossime integrazioni
+
+```text
+src/
+  core/           motore, finestre, stati e dispatcher
+  frontend/       adattatori di trasporto e file
+  conditioning/   stadi condivisi prima del ring
+  stream/         formati, indici, ring e lease
+  dsp/            matematica per famiglia e kernel CPU privati
+  acquisition/    futuro: ricerca, raffinamento, conferma
+  tracking/       futuro: correlatori, loop, holdover e riacquisizione
+  navigation/     futuro: decodifica e dati di navigazione
+  observables/    futuro: misure su epoche comuni
+  pvt/            futuro: soluzione di navigazione
+  analysis/       diagnostica asincrona
+  recording/      registrazione asincrona e metadati
+  control/        ciclo di vita delle sessioni
+  platform/       servizi OS
+  web/            adattatore HTTP/WebSocket
+```
+
+L'adattatore di canale riceverà la finestra dal motore e invocherà acquisizione o tracking
+in base allo stato. Il motore manterrà scheduling, tempo e transizioni; i moduli GNSS
+manterranno algoritmi, accumulatori e workspace. La migrazione parte dai kernel e dagli
+algoritmi originali documentati in [LEGACY_MIGRATION.md](LEGACY_MIGRATION.md), con test su
+replay prima di collegare gli osservabili e il PVT.
+
 ## Memoria e tempo
 
 - Il frontend possiede i campioni fino a `release()`. La callback USB copia in memoria preallocata prima che libhackrf riutilizzi il transfer.
-- Il conditioner produce una vista valida fino alla chiamata successiva e non trattiene quella di ingresso. Il bypass non copia. In questa versione il contratto ammette soltanto CI8 e conservazione di rate, conteggio, indici ed eventi.
+- Il conditioner produce una vista valida fino alla chiamata successiva e non trattiene quella di ingresso. Il bypass non copia. I percorsi attuali conservano formato nativo CI8/CU8/SC16 Q11, rate, conteggio, indici ed eventi. Il contratto dei canali GNSS resta per ora CI8.
 - Il motore assembla finestre di `window_samples` coppie; confini USB e confini delle finestre non devono coincidere.
 - Il ring è **a blocchi**, con slot contigui riutilizzati circolarmente. Una vista non attraversa fisicamente due slot; il wrap avviene fra finestre. È un ring di segnali complessi, non due ring indipendenti I/Q.
 - Una sola lease è attiva per il consumatore del ring. Mentre è attiva, i dati restano immutabili e non sovrascrivibili. Tutti i canali vedono lo stesso puntatore, intervallo ed evento.
-- In questo incremento il motore produce e consuma il ring centrale nello stesso thread, una finestra alla volta. La capacità configurabile e l’API del ring preparano l’evoluzione; non si dichiara una pipeline centrale già parallela. La coda USB è invece effettivamente concorrente.
+- Il motore produce e acquisisce il ring centrale nello stesso thread, una finestra alla volta. Il dispatcher opzionale parallelizza i canali sulla finestra corrente; non sovrappone finestre successive né introduce più consumatori logici del ring. La coda USB è concorrente e indipendente.
 - Le copie correnti sono esplicite: ingresso USB→coda frontend, assemblaggio della finestra, pubblicazione nel ring centrale, eventuale coda del recorder. Non sono copie private dello stream per canale. Ridurle è un’ottimizzazione successiva da misurare.
 - Gli indici contano **coppie** I/Q. `sample_rate_hz` è il numero di coppie/s. L’indice assoluto nella coppia `(epoch, first_sample)` non è la posizione fisica nello slot.
 - HackRF, nell’interfaccia usata qui, non fornisce un timestamp RF per blocco. L’orario host del file è informativo; non viene presentato come tempo GNSS né come istante esatto dell’antenna.
@@ -74,9 +213,9 @@ Stop e destroy si eseguono fuori dalla callback. Il recorder svuota la propria c
 
 ## Confini di piattaforma e formato
 
-Il solo `src/platform/` contiene Win32/POSIX. Il codice operativo è C11. La memoria dei campioni è allineata naturalmente per CI8; non è ancora un contratto di allineamento AVX/NEON. Le API DSP future dovranno dichiarare allineamento, remainder, scaling e accumuli.
+`src/platform/` isola i servizi Win32/POSIX usati dal motore. Gli adattatori dei dispositivi e i kernel CPU mantengono le proprie dipendenze private. Il codice operativo è C11. Le API DSP esistenti dichiarano già allineamento naturale, remainder, scaling e accumuli; le famiglie future dovranno fare altrettanto.
 
-CI8 è la scelta esplicita del **primo percorso HackRF**. Non è un formato universale già imposto a bladeRF, Pluto, filtri, mixer o FFT. La loro integrazione richiederà estendere descrittore e viste con nuovi formati, mantenendo le unità in coppie complesse.
+CI8 appartiene al percorso HackRF; RTL-SDR usa CU8 e bladeRF conserva CI8 o SC16 Q11. Il formato nativo è esplicito in descrittori e viste, con unità in coppie complesse. Filtri, mixer e canali multibit futuri richiederanno un contratto numerico e temporale proprio.
 
 
 ## Controllo e osservazione (v0.2.0)

@@ -82,3 +82,13 @@ th{background:#0f1b28;color:#8da9bf}th,td{border-color:#233548}td a{color:#70dfb
 .settings-content .preset-row{max-width:none;display:flex;flex-wrap:wrap;gap:8px}
 .settings-content .preset-row button{flex:0 1 auto;padding:8px 12px;font-size:12px}
 @media(min-width:1001px){#configForm{overflow:visible}#fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}#fields .field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#fields .field.full{grid-column:1/-1}}
+
+/* Independent plot switches retain a compact heading while disabled content collapses. */
+.brandmark{display:block;width:48px;height:48px;flex-shrink:0;border:0;border-radius:0;padding:0;object-fit:contain}
+.plot-section{margin:0}.plot-heading{padding:12px 21px}.plot-disabled{padding:10px 21px;border-bottom:1px solid #233446}
+.plot-toggle{display:inline-flex;align-items:center;gap:8px;padding:5px 9px;border:1px solid #324b5e;border-radius:20px;background:#101d2a;color:#9db3c5;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}
+.plot-toggle input{appearance:none;position:relative;width:29px;height:17px;flex:0 0 29px;margin:0;border:1px solid #4e6476;border-radius:10px;background:#203141;cursor:pointer}
+.plot-toggle input::before{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#a5b8c9}
+.plot-toggle input:checked{background:#39d5b0;border-color:#39d5b0}.plot-toggle input:checked::before{transform:translateX(12px);background:#0b2825}
+.plot-toggle input:focus-visible{outline:2px solid #65b0ff;outline-offset:3px}.waterfall-tools{justify-content:space-between}.waterfall-tools select{margin-left:8px}
+@media(max-width:600px){.plot-heading{padding:12px 14px}.plot-disabled{padding:10px 14px}}

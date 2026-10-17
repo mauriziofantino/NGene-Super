@@ -97,3 +97,109 @@ corners that drive valid intermediate components above 16384. The public API, `/
 immutable-plan concurrency and input/output ownership remain unchanged. Original NGene still has
 different high-level clipping behavior and unsafe shared register backup, so these timing results
 do not establish numerical interchangeability in acquisition or tracking.
+
+## Eight-point codelet, permutation and subtree scheduling
+
+The next SSE2 update supersedes the preceding performance comparison: the production path now
+fuses widths 2/4/8 in an eight-point register codelet, gathers bit-reversed inputs in contiguous
+output quartets and completes independent subtrees of at most 512 points before global stages.
+These apply the small-codelet and depth-first locality techniques discussed by
+[Frigo and Johnson](https://www.fftw.org/fftw-paper-ieee.pdf); implementation and coefficient
+arithmetic remain internal. The [benchmark report](../benchmarks/fft/README.md#eight-point-codelet-update)
+provides same-process frozen/current comparisons, raw CSV, hashes and the isolated cache-blocking
+experiment. Latency falls about 39–44% at 1024/4096/16384 against the preceding EVO version on the
+tested x86-64 host. The original NGene remains competitive for smaller sizes; the new EVO is
+faster at 16384 in these measurements.
+
+This is fusion of the existing scaled radix-2 graph, not a reassociation of its arithmetic.
+Widths 2 and 4 use exact W=1/-j sign/permutations, so every resulting component remains within
+inclusive ±16384. The signed16 floor-average identity computes the same `/2` at each stage.
+Width 8 uses precisely the plan's Q14 eighth-root coefficients (11585 for the diagonal
+components); `pmaddwd` and signed shift perform the original product floor before averaging.
+Its rotated components have magnitude at most 23171, so packing before the stage average is
+lossless. The final averages fit signed16. A single `/4` replacing two floors, or negating a
+previously floored noninteger product, would not satisfy this contract and is not used.
+
+Bit reversal is an involution: gathering `b[i]=a[reverse(i)]` gives the same permutation as the
+reference scatter. For a quartet starting at an index divisible by four, its reversed inputs
+are `r`, `r+N/2`, `r+N/4`, `r+3N/4`. Below a subtree boundary the butterfly groups are disjoint;
+completing one subtree first changes no data dependency or rounding boundary. The scalar oracle
+keeps the original scatter and breadth-first traversal. The expanded regression checks 13,122
+small codelet cases, every plan/subsize combination, odd/full-scale values, unaligned guarded
+storage and input immutability, alongside the existing independent DFT and concurrency checks.
+MASM, Windows GAS and the explicit scalar builds pass; Linux/macOS assembly objects compile.
+ARM arithmetic is unchanged. Public headroom, normalization, immutable plans and ownership stay
+the same, and no receiver-wide CPU-utilization reduction is inferred from the FFT microbenchmark.
+
+## NEON and 32-bit backends — 17 October 2026
+
+The production ARM FFT now uses `src/dsp/arm/fft_neon_intrinsics.c` on both AArch64 and
+ARMv7 with NEON. Intrinsics generate native integer SIMD instructions and let the compiler
+manage the target ABI and its different register sets. The original AArch64 `.S`/`.asm`
+files remain available as frozen benchmark kernels; CMake selects the new implementation.
+32-bit x86 now uses `src/dsp/x86/fft_sse2_32.c`. The existing x86-64 assembly is retained.
+
+All optimized targets use the eight-point initial codelet, contiguous quartet bit-reversal
+gather and independent subtrees of at most 512 points. The NEON loop processes four complex
+butterflies per iteration instead of two. Deinterleaved input/coefficient loads feed widening
+integer multiply/accumulate instructions directly, avoiding duplicated complex lanes and
+pairwise reduction chains. Input headroom validation is vectorized on ARM as well.
+
+### Numerical contract
+
+Output must remain **bit-identical to `NgFftReference`**, including odd negative intermediates,
+both Q14 rails and every stage's separate floor division by two. The scalar oracle's arithmetic,
+scatter permutation and breadth-first schedule are preserved.
+
+NEON `vmull`/`vmlal` compute the signed32 Q14 products exactly. The existing norm bound
+(`|component| < 23230`) proves that narrowing after the 14-bit arithmetic shift loses no bits.
+Signed halving add/subtract (`vhadd`/`vhsub`) retain the carry/sign bit of the 17-bit sum before
+the arithmetic division by two. These are the same floors as the oracle's signed32 operations;
+neither saturating addition before division nor rounded multiply-high instructions are used.
+The width-eight constants remain exactly `0`, `±11585` and `±16384`. No floating-point arithmetic
+is introduced during execution. The intrinsic semantics are specified in the
+[Arm Neon reference](https://arm-software.github.io/acle/neon_intrinsics/advsimd.html).
+
+The x86-32 kernel uses the same SSE2 product and exact floor-average identities as x86-64,
+with a register budget suitable for eight XMM registers. CPU capability is checked once when
+creating a plan; unsupported SSE2 selects the scalar FFT. The dispatcher/oracle translation
+unit uses `/arch:IA32` or `-mno-sse2`, while only the optimized translation unit enables SSE2.
+This is an FFT fallback guarantee; other application components and the OS/toolchain retain
+their own CPU requirements. ARM32 builds explicitly require NEON hardware and a compatible
+softfp/hard-float ABI; non-NEON machines need `NGENE_FFT_REFERENCE=ON`.
+
+### Validation and measurement scope
+
+Native Windows x86-32 MSVC and Clang FFT tests pass for all powers of two from 8 to 16384,
+all 78 plan/subsize pairs, the 13,122-case eight-point corpus, all 64 independent input/output
+natural-alignment combinations at every size, input immutability, guarded buffers, invalid
+components in initial/final vector lanes, independent DFT/tones and shared-plan concurrency.
+A separate Win32 test reruns the full contract with a false SSE2 probe and aborting SIMD
+entry points to verify dispatch. The Release Win32 receiver and its integration contracts
+also build and run; x86-64 FFT, analysis and controller regressions pass after the shared changes.
+
+The ARM kernel cross-compiles for Linux ARMv7/AArch64, Windows ARMv7/ARM64 with Clang and
+Apple ARM64. These object checks establish compiler/ISA compatibility, not native ARM speed.
+Native MSVC ARM32 requires an older supported toolset; current toolsets may provide ARM64
+intrinsics only, and the configure-time feature check reports unavailable NEON headers.
+The new `linux-armv7.cmake` toolchain and Linux x86-32/ARMv7 CI jobs provide reproducible
+complete builds and contract execution where those toolchains and QEMU are installed.
+
+The optional [`test_fft_arm_emulated.py`](../tests/test_fft_arm_emulated.py) also runs the
+actual compiled NEON instructions with Unicorn 2.1.4. ARMv7 and AArch64 each pass **17,140**
+cases against the production scalar oracle: all transform lengths and plan/subsize pairs,
+64 independent input/output alignments, guarded storage, input immutability, invalid initial/final
+vector lanes, analytic tones and the complete 13,122-case eight-point corpus. The preceding
+AArch64 assembly and execution source from commit `0dd9729f40b2837de496b9a5765ed5f0323410a2`
+pass the same 17,140-case harness separately.
+The freestanding harness supplies externally generated immutable tables, byte copying, integer
+division and error return; it does not exercise native plan allocation/trigonometric generation
+or the OS thread ABI. These emulator runs establish numerical equivalence for the tested inputs;
+they provide no ARM hardware latency or throughput measurement.
+
+Native Win32 benchmarks use the same full-call, alternating-order methodology as above.
+The previous 32-bit backend was **C-reference**, so its speedup must not be described as a
+comparison with original NGene SSE2 or with the previous ARM64 assembly. Raw runs and exact
+compiler/source hashes are in the [FFT benchmark documentation](../benchmarks/fft/README.md).
+Native ARM before/after timings are still required before quoting an ARM speedup; emulated
+instruction counts or timings do not establish a hardware performance result.

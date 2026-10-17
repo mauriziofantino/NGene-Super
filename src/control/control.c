@@ -671,6 +671,7 @@ int NgControlCreate(const TNgConfig *config, const char *outputDirectory, TNgCon
     snprintf(c->config.recordingDirectory, sizeof(c->config.recordingDirectory), "%s",
              c->status.outputDirectory);
     c->status.revision = 1;
+    c->status.analysis.config = config->analysis;
     c->status.commandOk = 1;
     snprintf(c->status.message, sizeof(c->status.message), "Ready to configure and start");
     if (NgThreadStart(&c->manager, Manager, c) != 0) {
@@ -893,6 +894,8 @@ int NgControlConfigure(TNgControl *control, const TNgConfig *config, uint64_t ex
     }
     if (result == NG_OK) {
         control->config = normalized;
+        memset(&control->status.analysis, 0, sizeof(control->status.analysis));
+        control->status.analysis.config = normalized.analysis;
         snprintf(control->status.outputDirectory, sizeof(control->status.outputDirectory), "%s",
                  normalized.recordingDirectory);
         ++control->status.revision;
@@ -938,6 +941,7 @@ int NgControlAnalysisConfigure(TNgControl *control, const TNgAnalysisConfig *con
         NgAnalysisConfigure(control->analysis, config, error);
     } else {
         memset(&control->status.analysis, 0, sizeof(control->status.analysis));
+        control->status.analysis.config = *config;
     }
     snprintf(control->status.message, sizeof(control->status.message),
              "Analysis applied to session; save full profile while stopped to persist");
@@ -957,9 +961,15 @@ int NgControlAnalysisConfigure(TNgControl *control, const TNgAnalysisConfig *con
  */
 void NgControlDiagnosticInterest(TNgControl *control, unsigned mask)
 {
+    NgControlDiagnosticInterestUntil(control, mask, NgMonotonicSeconds() + 2.0);
+}
+
+/** @brief Replace aggregated diagnostic deadlines while protecting worker lifetime. */
+void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double expiresSeconds)
+{
     NgMutexLock(&control->mutex);
     if (control->analysis != NULL) {
-        NgAnalysisInterest(control->analysis, mask & 3u, NgMonotonicSeconds() + 2.0);
+        NgAnalysisInterest(control->analysis, mask & 3u, expiresSeconds);
     }
     NgMutexUnlock(&control->mutex);
 }

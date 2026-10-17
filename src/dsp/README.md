@@ -1,5 +1,25 @@
 # DSP NGene
 
-La FFT Q14 intera è implementata in `src/dsp/fft/fft.c` con butterfly assembly x86-64 SSE2 e AArch64 NEON. API pubblica: `include/ngene/dsp/fft.h`. Piano immutabile, workspace per chiamata, riferimento C per verifica. Correlatori, NCO e repliche saranno migrati per incrementi. Vedere `docs/FFT_REVIEW.md`.
+`ngene_dsp` (`NGene::Dsp`) è la libreria matematica indipendente da motore, frontend e GUI.
+Dipende soltanto da `ngene_base` per gli errori comuni e dalla libreria matematica di sistema
+dove necessaria. Le API pubbliche non espongono tipi SIMD o dettagli dei dispositivi.
 
-`sample_ops.c` implementa momenti CI8 e accumulo di potenza CI16 con intrinsics SSE2/NEON e riferimento C. Il limite di lunghezza dei momenti è dichiarato nell’header. Verifiche, benchmark e limiti della portabilità sono in `docs/ITERATION_04.md`.
+| Famiglia | API | Sorgente |
+|---|---|---|
+| FFT Q14 complessa | `ngene/dsp/fft.h` | `fft/fft.c`, kernel privati `x86/` e `arm/` |
+| Statistica I/Q CI8 | `ngene/dsp/statistics.h` | `statistics/moments.c` |
+| Potenza CI16 e accumulo uint64 | `ngene/dsp/power.h` | `power/power.c` |
+
+`ngene/dsp/sample_ops.h` resta l'umbrella compatibile. `sample_backend.h` è privato e
+centralizza la selezione SIMD delle primitive, senza duplicarla fra famiglie. Le formule,
+i loop e gli oracoli sono preservati nello split.
+
+`cmake/FftBackend.cmake` seleziona il kernel FFT secondo il target del compilatore, anche
+nei benchmark: SSE2 assembly x64, SSE2 intrinsics x86-32, NEON intrinsics ARM64/ARMv7.
+Le primitive statistiche/potenza mantengono SSE2 su x64, NEON su ARM64 e C sugli altri target.
+Le opzioni reference restano disponibili per verifica. Piano FFT immutabile e workspace
+disgiunti permettono chiamate concorrenti senza thread interni alla libreria.
+
+Correlatori, NCO e repliche avranno famiglie proprie quando migrati e validati.
+Vedere [architettura](../../docs/ARCHITECTURE.md),
+[contratto FFT](../../docs/FFT_REVIEW.md) e [benchmark](../../benchmarks/fft/README.md).

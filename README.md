@@ -2,13 +2,19 @@
 
 **NGene is the functional and algorithmic foundation of this project.** Development remains incremental: I/Q frontends, conditioning, a shared ring buffer, a scheduler and internal DSP libraries. The [migration map](docs/LEGACY_MIGRATION.md) connects this code to the original receiver.
 
-The kernel uses C11, with integer FFTs and SSE2/NEON assembly butterflies, SIMD primitives and a scalar reference implementation. The HTML/CSS/JavaScript GUI is included in the same executable. Targets are Windows, Linux and macOS, on x86-64 and ARM64 architectures. FFTW, SoapySDR, Python and Node are not required to build or use the receiver.
+The kernel uses C11, with integer SSE2/NEON FFTs, SIMD primitives and a scalar reference implementation. The HTML/CSS/JavaScript GUI is included in the same executable. FFT backends cover x86-64, ARM64, 32-bit x86 and ARMv7 with NEON, subject to OS/toolchain support. FFTW, SoapySDR, Python and Node are not required to build or use the receiver.
 
 This version receives and records I/Q and produces diagnostics. Satellite acquisition, tracking, demodulation and PVT will be integrated through the existing interfaces.
 
+The engine now also exposes optional bounded parallel channel dispatch through
+`NgReceiverRunScheduled`: a fixed worker pool claims jobs dynamically while the OS schedules
+the cores. Existing entry points remain serial. `NGene::Dsp` is a separate math library
+organized into FFT, statistics and power APIs; CPU selection stays private to the build.
+[Module boundaries, concurrency policy and proposed GNSS structure](docs/ARCHITECTURE.md).
+
 ## Multi-SDR increment 0.6.4
 
-Native HackRF, RTL-SDR and bladeRF RX0 drivers; CI8, CU8 and SC16 Q11 formats are preserved through ingress, conditioning, the ring buffer and recording. Histograms and PSD use the native ADC resolution; existing assembly FFTs and CI8 SIMD primitives remain unchanged. The GUI has a single active source, selected in Configuration. Common occupancy/high-water/overflow/transport counters include explicit indications of device information availability.
+Native HackRF, RTL-SDR and bladeRF RX0 drivers; CI8, CU8 and SC16 Q11 formats are preserved through ingress, conditioning, the ring buffer and recording. Histograms and PSD use the native ADC resolution; optimized FFTs preserve the same integer numerical contract. The GUI has a single active source, selected in Configuration. Common occupancy/high-water/overflow/transport counters include explicit indications of device information availability.
 
 [Contracts, build procedure, limitations and hardware verification](docs/MULTISDR_064.md) · [Checks actually performed](docs/VALIDATION_064.md).
 
@@ -61,7 +67,7 @@ ctest --test-dir build --output-on-failure
 
 For HackRF, add `-DNGENE_WITH_HACKRF=ON`. `AUTO` uses an installed SDK or builds libhackrf from the pinned sources; the latter option requires the libusb development packages. hackrf-tools is not built.
 
-For Linux ARM64, `cmake/toolchains/linux-aarch64.cmake` is available, with a GNU cross-compiler and tests through QEMU if available. The target determines the DSP backend; the architecture of the computer hosting CMake is not used. For now, 32-bit ARM/x86 require the C reference implementation through `-DNGENE_FFT_REFERENCE=ON`.
+For Linux ARM64 and ARMv7, `cmake/toolchains/linux-aarch64.cmake` and `cmake/toolchains/linux-armv7.cmake` select GNU cross-compilers and tests through QEMU if available. The compiler target determines the DSP backend. ARMv7 FFTs require NEON-capable hardware and a compatible float ABI; use `-DNGENE_FFT_REFERENCE=ON` on older ARM CPUs. For 32-bit x86, select Visual Studio `-A Win32`, or use a multilib compiler with `-DCMAKE_C_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32`. Its FFT uses SSE2 intrinsics, with a per-plan CPU check and scalar fallback. On macOS, supported modern SDK targets remain x86-64 and ARM64; 32-bit support here applies to Windows/Linux toolchains that provide it.
 
 ## Console and parallel sessions
 

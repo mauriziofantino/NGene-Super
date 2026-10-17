@@ -45,7 +45,7 @@ const fields = [
 ];
 let values = {}, savedValues = {}, revision = '1', token = '', status = null, capabilities = null;
 let dirty = false, httpBusy = false, pendingCommand = null, socket = null, reconnectTimer = null;
-let waiting = false, lastRequest = 0, lastResponse = -Infinity, lastSample = null, lastMessage = '', lastCommand = '', lastRun = '';
+let waiting = false, statusRequestPending = false, lastRequest = 0, lastResponse = -Infinity, lastSample = null, lastMessage = '', lastCommand = '', lastRun = '';
 let paused = false, fileBusy = false, lastFileRefresh = 0;
 let selectedSettings = 'source', deletingFile = false;
 let quitting = false, pendingTelemetry=null, renderPending=false;
@@ -244,6 +244,7 @@ function updateSourceFields() {
 function controls() {
   const ready = editable(), running = connected() && status?.state === 'running';
   const commandPending = httpBusy || pendingCommand !== null;
+  for(const id of ['showSpectrum','showWaterfall'])$(id).disabled=commandPending||['starting','stopping'].includes(status?.state);
   for (const field of $('configForm').elements) field.disabled = !ready;
   for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
   if (capabilities && !capabilities.hackrf) $('hackrfPreset').disabled = true;
@@ -266,7 +267,7 @@ async function api(path, body) {
 }
 async function loadConfig(force = false) {
   const data = await api('config');
-  if (!dirty || force) { revision = data.revision; savedValues = parseIni(data.ini); values = {...savedValues}; clearProfileErrors(); buildForm(); if (!analysisDirty) buildAnalysisForm(); dirtyState(false); selectSettings(selectedSettings); }
+  if (!dirty || force) { revision = data.revision; analysisConfigRevision=revision; analysisConfig=null; savedValues = parseIni(data.ini); values = {...savedValues}; clearProfileErrors(); buildForm(); if (!analysisDirty) buildAnalysisForm(); dirtyState(false); selectSettings(selectedSettings); syncPlotVisibility(); }
   else if (data.revision !== revision) { notice('The server configuration changed. Export your draft, then reload this page before applying.', true); }
 }
 async function applyConfig(validateOnly = false) {
@@ -274,7 +275,7 @@ async function applyConfig(validateOnly = false) {
   httpBusy = true; controls();
   try {
     const result = await api(validateOnly ? 'config/validate' : 'config', {revision, ini: toIni(values)});
-    if (!validateOnly) { revision = result.revision; savedValues = parseIni(result.ini); values = {...savedValues}; clearProfileErrors(); buildForm(); if (!analysisDirty) buildAnalysisForm(); dirtyState(false); selectSettings(selectedSettings); }
+    if (!validateOnly) { revision = result.revision; analysisConfigRevision=revision; analysisConfig=null; savedValues = parseIni(result.ini); values = {...savedValues}; clearProfileErrors(); buildForm(); if (!analysisDirty) buildAnalysisForm(); dirtyState(false); selectSettings(selectedSettings); syncPlotVisibility(); }
     const message = validateOnly ? 'Configuration is valid. Apply & save to use it.' : `Profile r${revision} saved on the receiver. Recording folder applied.`;
     profileRequestNotice = {message,error:false}; profileSummary(); notice(message); log(validateOnly ? 'Configuration validated.' : `Configuration r${revision} saved.`);
   } catch (error) { profileRequestNotice = {message:error.message,error:true}; profileSummary(); notice(error.message, true); log(error.message, true); }
@@ -288,9 +289,12 @@ async function command(path) {
 }
 function requestStatus() {
   // Space requests after receiving the previous reply, even if that request was delayed.
+  // Retain explicit requests across this pacing guard so disabling a plot does not wait
+  // for the selected display refresh interval before notifying the receiver.
+  statusRequestPending=true;
   const now = performance.now();
   if (!connected() || waiting || now-lastRequest < 34 || now-lastResponse < 34) return;
-  waiting = true; lastRequest = performance.now(); socket.send(`status:${diagnosticInterest()}`);
+  statusRequestPending=false;waiting = true; lastRequest = performance.now(); socket.send(`status:${diagnosticInterest()}`);
 }
 function renderStatus(next) {
   status = next;
@@ -326,7 +330,7 @@ function renderStatus(next) {
   if (next.message !== lastMessage) { lastMessage = next.message; notice(next.message, !next.command_ok || next.state === 'error', 'receiver'); log(next.message, !next.command_ok || next.state === 'error'); }
   if (next.completed_command_id !== lastCommand) { lastCommand = next.completed_command_id; refreshFiles(); }
 
-  renderAnalysis(next.analysis);
+  renderAnalysis(next.analysis,next.revision);
 
   if (next.revision !== revision && !dirty) loadConfig().catch(error => log(error.message, true));
   if (performance.now() - lastFileRefresh > 4000) refreshFiles();
@@ -422,8 +426,72 @@ const analysisFields = [
   ['histogram_bins','Histogram bins',[16,32,64,128,256]]
 ];
 let analysisDirty=false, analysisSnapshot=null, analysisSequence='0', analysisRevision='', waterfallHistory=[];
-let waterfallTime=-Infinity, skippedDisplay=0, rejectedFrames=0;
-function diagnosticInterest(){return document.hidden||paused||!$('configurationView').classList.contains('hidden')?0:($('showSpectrum').checked?1:0)|($('showHistogram').checked?2:0);}
+let waterfallTime=-Infinity, skippedDisplay=0, rejectedFrames=0, histogramSequence='', analysisConfig=null;
+let analysisConfigRevision='0', plotConfigBusy=false, lastSpectrumComputation=null;
+let previousPlotSelection={spectrum:true,waterfall:true};
+function diagnosticVisibility(){return document.hidden||!$('configurationView').classList.contains('hidden')?0:(($('showSpectrum').checked||$('showWaterfall').checked)?1:0)|($('showHistogram').checked?2:0);}
+function diagnosticEnabled(name){const value=analysisConfig?.[name]??savedValues[`analysis.${name}`];return value!==false&&value!=='false';}
+function plotEnabled(id){return diagnosticEnabled('spectrum_enabled')&&$(id==='spectrum'?'showSpectrum':'showWaterfall').checked;}
+function syncPlotVisibility(){
+  const computation=diagnosticEnabled('spectrum_enabled');
+  if(!plotConfigBusy&&computation!==lastSpectrumComputation){
+    if(!computation){
+      if($('showSpectrum').checked||$('showWaterfall').checked)previousPlotSelection={spectrum:$('showSpectrum').checked,waterfall:$('showWaterfall').checked};
+      $('showSpectrum').checked=false;$('showWaterfall').checked=false;
+    }else if(lastSpectrumComputation===false&&!$('showSpectrum').checked&&!$('showWaterfall').checked){
+      $('showSpectrum').checked=previousPlotSelection.spectrum;$('showWaterfall').checked=previousPlotSelection.waterfall;
+    }
+    lastSpectrumComputation=computation;
+  }
+  for(const id of ['spectrum','waterfall']){
+    const enabled=plotEnabled(id),message=$(`${id}Disabled`);
+    $(`${id}Body`).classList.toggle('hidden',!enabled);
+    message.classList.toggle('hidden',enabled);
+    const text=computation?`${id==='spectrum'?'Spectrum':'Waterfall'} disabled.`:'FFT computation is off. Use Enable to restart it.';
+    if(message.textContent!==text)message.textContent=text;
+  }
+}
+function diagnosticMask(){
+  const visible=diagnosticVisibility();
+  return (visible&1&&diagnosticEnabled('spectrum_enabled')?1:0)|(visible&2&&diagnosticEnabled('histogram_enabled')?2:0);
+}
+function diagnosticInterest(){return paused?0:diagnosticMask();}
+/** Apply current server settings without replacing unrelated profile or diagnostic drafts. */
+function acceptAnalysisConfig(result){
+  const iniDraft=$('iniEditor').value,customIni=iniDraft!==toIni(values);
+  revision=result.revision;analysisConfigRevision=revision;
+  for(const [name,value] of Object.entries(result.analysis)){
+    const key=`analysis.${name}`,previous=savedValues[key],next=String(value),input=$(`analysis_${name}`);
+    if(name==='spectrum_enabled'||values[key]===previous)values[key]=next;
+    if(input&&(name==='spectrum_enabled'||input.value===previous))input.value=next;
+    savedValues[key]=next;
+  }
+  analysisDirty=analysisFields.some(([name])=>$(`analysis_${name}`)?.value!==savedValues[`analysis.${name}`]);
+  analysisErrors.delete('spectrum_enabled');fieldFeedback($('analysis_spectrum_enabled'),'');
+  dirtyState(true);if(customIni)$('iniEditor').value=iniDraft;resetAnalysis(result.analysis);
+}
+async function changePlotEnabled(event){
+  const id=event.target.id,selection={spectrum:$('showSpectrum').checked,waterfall:$('showWaterfall').checked};
+  const before={...selection,[id==='showSpectrum'?'spectrum':'waterfall']:!event.target.checked};
+  const previousSelection={...previousPlotSelection},enabled=selection.spectrum||selection.waterfall;
+  if(enabled)previousPlotSelection={...selection};
+  $('plotNotice').classList.add('hidden');
+  syncPlotVisibility();requestStatus();
+  if(enabled===diagnosticEnabled('spectrum_enabled'))return;
+  plotConfigBusy=true;httpBusy=true;controls();
+  try{
+    // The endpoint accepts a complete analysis configuration. Use applied server
+    // settings rather than sending any unsaved form fields with this one toggle.
+    const current=await api('analysis/config');
+    const result=current.analysis.spectrum_enabled===enabled?current:await api('analysis/config',{revision:current.revision,...current.analysis,spectrum_enabled:enabled});
+    acceptAnalysisConfig(result);
+    log(`Spectrum FFT computation ${enabled?'enabled':'disabled'} for this session.`);
+  }catch(error){
+    $('showSpectrum').checked=before.spectrum;$('showWaterfall').checked=before.waterfall;previousPlotSelection=previousSelection;
+    $('plotNotice').textContent=`Cannot change FFT computation: ${error.message}`;$('plotNotice').classList.remove('hidden');
+    log(error.message,true);
+  }finally{plotConfigBusy=false;httpBusy=false;syncPlotVisibility();controls();requestStatus();}
+}
 function buildAnalysisForm() {
   $('analysisForm').noValidate = true;
   analysisErrors.clear(); analysisTouched.clear(); analysisValidationRequested = false;
@@ -438,7 +506,7 @@ function buildAnalysisForm() {
     input.value=savedValues[`analysis.${name}`] ?? '';input.addEventListener('input',()=>{analysisDirty=true;setAnalysisNotice(analysisHelp);refreshAnalysisErrors();});
     input.addEventListener('blur',()=>{analysisTouched.add(name);refreshAnalysisErrors();});label.append(input);attachFieldFeedback(input,label);$('analysisFields').append(label);
   }
-  controls();
+  syncPlotVisibility();controls();
 }
 function setAnalysisNotice(message, error = false) {
   const node = $('analysisNotice');
@@ -474,15 +542,15 @@ $('analysisForm').addEventListener('submit',async event=>{
   for(const [name] of analysisFields){const value=$(`analysis_${name}`).value;body[name]=name.endsWith('_enabled')?value==='true':['window','temporal','units','spectrum_source','histogram_source'].includes(name)?value:Number(value);}
   httpBusy=true;controls();
   try {
-    const result=await api('analysis/config',body);revision=result.revision;
+    const result=await api('analysis/config',body);revision=result.revision;analysisConfigRevision=revision;
     for(const [name,value] of Object.entries(result.analysis)){savedValues[`analysis.${name}`]=String(value);values[`analysis.${name}`]=String(value);}
-    analysisDirty=false;dirtyState(true);resetAnalysis();
+    analysisDirty=false;dirtyState(true);resetAnalysis(result.analysis);
     setAnalysisNotice('Applied to this session. Use Apply & save in Receiver configuration while stopped to persist the full profile.');
     log('Analysis parameters applied without restarting the receiver.');requestStatus();
   } catch(error){setAnalysisNotice(error.message,true);log(error.message,true);}
   finally{httpBusy=false;controls();}
 });
-function resetAnalysis(){analysisSnapshot=null;analysisSequence='0';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;skippedDisplay=0;rejectedFrames=0;drawAnalysis();}
+function resetAnalysis(config=null){analysisSnapshot=null;analysisConfig=config;analysisSequence='0';histogramSequence='';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;skippedDisplay=0;rejectedFrames=0;syncPlotVisibility();drawAnalysis();}
 function psdIntegrity(a){
   if(!Array.isArray(a.dbfs)||a.dbfs.length>1024||a.dbfs.length!==Math.min(a.fft_size,1024))return false;
   let hash=2166136261,sum=0,min=Infinity,max=-Infinity;
@@ -495,41 +563,62 @@ function psdIntegrity(a){
   return a.integrity_ok&&a.nan_count===0&&a.inf_count===0&&hash===a.checksum&&hash===a.telemetry_checksum&&
     Math.abs(min-a.min)<0.00001&&Math.abs(max-a.max)<0.00001&&Math.abs(sum/a.dbfs.length-a.mean)<0.00001;
 }
-function renderAnalysis(a){
-  if(!a||paused)return;
-  $('fftBackend').textContent=a.backend||'Integer FFT';
-  if(a.sequence==='0'){if(analysisSequence!=='0')resetAnalysis();return;}
-  if(a.revision!==analysisRevision){waterfallHistory=[];waterfallTime=-Infinity;analysisSequence='0';analysisRevision=a.revision;}
+function renderAnalysis(a,configRevision=null){
+  if(!a||plotConfigBusy||configRevision!==null&&BigInt(configRevision)<BigInt(analysisConfigRevision))return;
+  if(configRevision!==null)analysisConfigRevision=configRevision;
+  analysisConfig=a.config;
+  syncPlotVisibility();
+  if(paused)return;
+  const mask=diagnosticMask();
+  if(!mask)return;
+  if(a.sequence==='0'){if(analysisSequence!=='0')resetAnalysis(a.config);return;}
+  if(a.revision!==analysisRevision){waterfallHistory=[];waterfallTime=-Infinity;analysisSequence='0';histogramSequence='';analysisRevision=a.revision;}
   const incoming=a.sequence_id||'0';
-  if(a.dbfs.length){
-    if(!psdIntegrity(a)||BigInt(incoming)<BigInt(analysisSequence)){
+  const spectrumChanged=Boolean(mask&1)&&incoming!==analysisSequence&&a.dbfs.length>0;
+  const histogramIncoming=a.histogram_sequence??`${a.histogram_first_sample}:${a.histogram_count}`;
+  const histogramChanged=Boolean(mask&2)&&histogramIncoming!==histogramSequence;
+  let waterfallChanged=false;
+  if(spectrumChanged){
+    if(BigInt(incoming)<BigInt(analysisSequence)||!psdIntegrity(a)){
       rejectedFrames++;$('frameIntegrity').textContent=`Rejected invalid/stale PSD: ${rejectedFrames}`;return;
     }
   }
-  if(a.dbfs.length&&incoming!==analysisSequence){
+  if(!spectrumChanged&&!histogramChanged)return;
+  if(spectrumChanged){
     if(analysisSequence!=='0')skippedDisplay+=Number(BigInt(incoming)-BigInt(analysisSequence)-1n);
     analysisSequence=incoming;
-    if(a.produced_seconds-waterfallTime>=1/Math.max(0.1,Math.min(30,Number($('waterfallRate').value)))){
+    if(plotEnabled('waterfall')&&a.produced_seconds-waterfallTime>=1/Math.max(0.1,Math.min(30,Number($('waterfallRate').value)))){
       waterfallHistory.unshift({values:Object.freeze([...a.dbfs]),first:a.first_sample,epoch:a.epoch,sequence:incoming,produced:a.produced_seconds});
       waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());waterfallTime=a.produced_seconds;
+      waterfallChanged=true;
     }
   }
-  analysisSnapshot={...a,dbfs:[...a.dbfs]};
+  analysisSnapshot={...a,dbfs:spectrumChanged?[...a.dbfs]:(analysisSnapshot?.dbfs||[]),
+    histogram_i:histogramChanged?a.histogram_i:(analysisSnapshot?.histogram_i||[]),histogram_q:histogramChanged?a.histogram_q:(analysisSnapshot?.histogram_q||[])};
   const unit=a.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin';
-  $('spectrumInfo').textContent=a.dbfs.length?`${a.fft_size}-point FFT · Δf ${a.bin_hz.toFixed(2)} Hz · ENBW ${a.enbw_hz.toFixed(2)} Hz · ${a.config.window} · ${a.config.averages} Welch segments · ${a.config.spectrum_source}`:'Spectrum disabled / waiting';
-  $('spectrumPeak').textContent=a.dbfs.length?`Peak ${displayFrequency(a.peak_hz).toFixed(4)} ${frequencyUnit()} · ${a.peak_dbfs.toFixed(1)} ${unit}`:'';
-  $('histogramInfo').textContent=a.histogram_count?`${pairs(a.histogram_count)} pairs · ${a.histogram_i.length} bins · ${a.config.histogram_source}`:'Histogram disabled / waiting';
-  for(const [id,t] of [['statsI',a.stats_i],['statsQ',a.stats_q]]){
-    const dl=document.createElement('dl');
-    for(const [label,value] of [['Mean',t.mean],['Std',t.std],['RMS',t.rms],['Min',t.min],['Max',t.max],['Clipping / rail count',t.clipping_count],['Zero count',t.zero_count]]){
-      const div=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=Number.isInteger(value)?pairs(value):value.toFixed(4);div.append(dt,dd);dl.append(div);
-    }$(id).replaceChildren(dl);
+  if(spectrumChanged){
+    $('fftBackend').textContent=a.backend||'Integer FFT';
+    if(plotEnabled('spectrum')){
+    $('spectrumInfo').textContent=`${a.fft_size}-point FFT · Δf ${a.bin_hz.toFixed(2)} Hz · ENBW ${a.enbw_hz.toFixed(2)} Hz · ${a.config.window} · ${a.config.averages} Welch segments · ${a.config.spectrum_source}`;
+    $('spectrumPeak').textContent=`Peak ${displayFrequency(a.peak_hz).toFixed(4)} ${frequencyUnit()} · ${a.peak_dbfs.toFixed(1)} ${unit}`;
+    }
+    $('frameIntegrity').textContent=`PSD #${incoming} · produced ${a.produced_seconds.toFixed(3)} s · min/max/mean ${a.min.toFixed(2)} / ${a.max.toFixed(2)} / ${a.mean.toFixed(2)} · NaN/Inf ${a.nan_count}/${a.inf_count} · hash ${a.checksum.toString(16)} · rejected ${rejectedFrames}`;
+    drawSpectrum();if(waterfallChanged)drawWaterfall();
   }
-  $('dcMagnitude').textContent=`DC magnitude √(mean I² + mean Q²): ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
-  $('histogramRails').textContent=`Clipping indicator (${a.histogram_min ?? -128} / ${a.histogram_max ?? 127}): I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
+  if(histogramChanged){
+    histogramSequence=histogramIncoming;
+    $('histogramInfo').textContent=a.histogram_count?`${pairs(a.histogram_count)} pairs · ${a.histogram_i.length} bins · ${a.config.histogram_source}`:'Histogram disabled / waiting';
+    for(const [id,t] of [['statsI',a.stats_i],['statsQ',a.stats_q]]){
+      const dl=document.createElement('dl');
+      for(const [label,value] of [['Mean',t.mean],['Std',t.std],['RMS',t.rms],['Min',t.min],['Max',t.max],['Clipping / rail count',t.clipping_count],['Zero count',t.zero_count]]){
+        const div=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=Number.isInteger(value)?pairs(value):value.toFixed(4);div.append(dt,dd);dl.append(div);
+      }$(id).replaceChildren(dl);
+    }
+    $('dcMagnitude').textContent=`DC magnitude √(mean I² + mean Q²): ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
+    $('histogramRails').textContent=`Clipping indicator (${a.histogram_min ?? -128} / ${a.histogram_max ?? 127}): I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
+    drawHistogram('histogramI',analysisSnapshot.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot.histogram_q,'#62a6ff');
+  }
   $('analysisCost').textContent=`Worker ${a.compute_ms.toFixed(2)} ms · ${a.sample_backend} · skipped bursts ${a.skipped_bursts} · contended blocks ${a.contention_blocks}`;
-  $('frameIntegrity').textContent=`PSD #${incoming} · produced ${a.produced_seconds.toFixed(3)} s · min/max/mean ${a.min.toFixed(2)} / ${a.max.toFixed(2)} / ${a.mean.toFixed(2)} · NaN/Inf ${a.nan_count}/${a.inf_count} · hash ${a.checksum.toString(16)} · rejected ${rejectedFrames}`;
-  drawAnalysis();
 }
 function historyRows(){return Math.max(32,Math.min(2048,Math.floor(Number($('waterfallRows').value)||128)));}
 function frequencyUnit(){return $('frequencyReference').value==='rf'?'MHz':'kHz';}
@@ -546,9 +635,14 @@ function surface(id){
   const d=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(w*d);canvas.height=Math.round(h*d);
   const ctx=canvas.getContext('2d');ctx.scale(d,d);ctx.fillStyle='#0c1520';ctx.fillRect(0,0,w,h);ctx.font='11px system-ui';return {ctx,w,h,left:52,right:w-18,top:16,bottom:h-32};
 }
-function range(colour=false){let lo=Number($(colour?'colourMin':'dbMin').value),hi=Number($(colour?'colourMax':'dbMax').value);if(!Number.isFinite(lo)||!Number.isFinite(hi)||lo>=hi)return [-100,0];return [Math.max(-250,lo),Math.min(100,hi)];}
+function range(colour=false){
+  const lo=Math.max(-250,Number($(colour?'colourMin':'dbMin').value)),hi=Math.min(100,Number($(colour?'colourMax':'dbMax').value));
+  if(!Number.isFinite(lo)||!Number.isFinite(hi)||lo>=hi)return [-100,0];
+  return [lo,hi];
+}
 function frequencyAxes(s){const {ctx,w,h,left,right}=s,[lo,hi]=frequencyRange();ctx.fillStyle='#8fa6ba';for(let j=0;j<=4;j++)ctx.fillText((lo+j*(hi-lo)/4).toFixed($('frequencyReference').value==='rf'?3:1),Math.min(w-58,Math.max(4,left+j*(right-left)/4-20)),h-10);ctx.fillText(frequencyUnit(),w-30,h-10);}
 function drawSpectrum(){
+  if(!(diagnosticMask()&1)||!plotEnabled('spectrum'))return;
   const s=surface('spectrum');if(!s)return;const [lo,hi]=range(),a=analysisSnapshot;
   const {ctx,left,right,top,bottom}=s,[flo,fhi]=frequencyRange();
   ctx.fillStyle='#8fa6ba';ctx.fillText(a?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin',6,11);
@@ -568,6 +662,7 @@ let waterfallRender={mode:'2d',rows:0,columns:0};
 const waterfallDefaultCamera={yaw:-24,pitch:34};
 let waterfallCamera={...waterfallDefaultCamera};
 function drawWaterfall(){
+  if(!(diagnosticMask()&1)||!plotEnabled('waterfall'))return;
   const mode=$('waterfallMode').value,threeD=mode==='3d';
   $('waterfall').setAttribute('aria-label',threeD?'3D spectrum waterfall: frequency, observation age and power; default view has newest observation at front. Drag or use arrow keys to rotate.':'Spectrum waterfall, newest observation at top');
   $('waterfall').classList.toggle('waterfall-rotatable',threeD);
@@ -670,6 +765,7 @@ function drawWaterfall3D(s){
   axes();waterfallRender={mode:'3d',rows,columns};
 }
 function drawHistogram(id,data,color){
+  if(!(diagnosticMask()&2))return;
   const s=surface(id);if(!s)return;const {ctx,w,h,left,right,top,bottom}=s;const percent=$('histScale').value==='percent',count=analysisSnapshot?.histogram_count||1;
   const values=(data||[]).map(v=>percent?100*v/count:v),max=Number($('histMax').value)>0?Number($('histMax').value):Math.max(1,...values);
   ctx.fillStyle='#8fa6ba';ctx.fillText(percent?'%':'count',4,11);
@@ -680,8 +776,8 @@ function drawHistogram(id,data,color){
 }
 function drawAnalysis(){drawSpectrum();drawWaterfall();drawHistogram('histogramI',analysisSnapshot?.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot?.histogram_q,'#62a6ff');}
 let plotDrawPending=false,waterfallDrawPending=false;
-function schedulePlotDraw(){if(plotDrawPending)return;plotDrawPending=true;requestAnimationFrame(()=>{plotDrawPending=false;drawAnalysis();});}
-function scheduleWaterfallDraw(){if(waterfallDrawPending)return;waterfallDrawPending=true;requestAnimationFrame(()=>{waterfallDrawPending=false;drawWaterfall();});}
+function schedulePlotDraw(){if(plotDrawPending||!diagnosticMask())return;plotDrawPending=true;requestAnimationFrame(()=>{plotDrawPending=false;drawAnalysis();});}
+function scheduleWaterfallDraw(){if(waterfallDrawPending||!(diagnosticMask()&1)||!plotEnabled('waterfall'))return;waterfallDrawPending=true;requestAnimationFrame(()=>{waterfallDrawPending=false;drawWaterfall();});}
 function setPlotHeight(id,height){
   height=Math.max(180,Math.min(720,Math.round(height/10)*10));
   $(`${id}Wrap`).style.height=`${height}px`;$(`${id}Height`).value=height;$(`${id}HeightValue`).value=`${height} px`;
@@ -760,7 +856,7 @@ $('apply').addEventListener('click', () => applyConfig()); $('validate').addEven
 $('start').addEventListener('click', () => command('receiver/start')); $('stop').addEventListener('click', () => command('receiver/stop'));
 $('recordStart').addEventListener('click', () => command('recording/start')); $('recordStop').addEventListener('click', () => command('recording/stop'));
 $('reloadFiles').addEventListener('click', refreshFiles); $('clearLog').addEventListener('click', () => $('events').replaceChildren());
-$('pausePlot').addEventListener('click', () => { paused = !paused; $('pausePlot').textContent = paused ? 'Resume plots' : 'Pause plots'; if (!paused && status)renderAnalysis(status.analysis);requestStatus(); });
+$('pausePlot').addEventListener('click', () => { paused = !paused; $('pausePlot').textContent = paused ? 'Resume plots' : 'Pause plots'; if (!paused && status)renderAnalysis(status.analysis,status.revision);requestStatus(); });
 $('useIni').addEventListener('click', () => { try { values = parseIni($('iniEditor').value); buildForm(); dirtyState(true); } catch (error) { notice(error.message, true); } });
 $('importIni').addEventListener('change', async event => { try { const file = event.target.files[0]; if (!file) return; if (file.size > 12000) throw new Error('INI file exceeds 12 kB.'); values = parseIni(await file.text()); buildForm(); dirtyState(true); notice('INI imported into draft. Validate and apply before starting.'); } catch (error) { notice(error.message, true); } finally { event.target.value = ''; } });
 $('exportIni').addEventListener('click', () => { const url = URL.createObjectURL(new Blob([toIni(values)], {type:'text/plain'})), link = document.createElement('a'); link.href = url; link.download = 'receiver.ini'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); });
@@ -791,12 +887,13 @@ $('deviceLimits').addEventListener('click', async () => {
 $('filePreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'file','replay.realtime':'true','replay.loop':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
 $('frequencyReference').addEventListener('change',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
 $('resetFrequency').addEventListener('click',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
-$('autoScale').addEventListener('click',()=>{if(!analysisSnapshot?.dbfs.length)return;const lo=Math.floor(Math.min(...analysisSnapshot.dbfs)/10)*10,hi=Math.ceil(Math.max(...analysisSnapshot.dbfs)/10)*10+10;for(const id of ['dbMin','colourMin'])$(id).value=lo;for(const id of ['dbMax','colourMax'])$(id).value=hi;drawAnalysis();});
-for(const [id,panel] of [['showSpectrum','spectrumPanel'],['showHistogram','histogramPanel']])$(id).addEventListener('change',()=>{$(panel).classList.toggle('hidden',!$(id).checked);requestStatus();});
+$('autoScale').addEventListener('click',()=>{if(!($('showSpectrum').checked||$('showWaterfall').checked)||!diagnosticEnabled('spectrum_enabled')||!analysisSnapshot?.dbfs.length)return;const lo=Math.floor(Math.min(...analysisSnapshot.dbfs)/10)*10,hi=Math.ceil(Math.max(...analysisSnapshot.dbfs)/10)*10+10;for(const id of ['dbMin','colourMin'])$(id).value=lo;for(const id of ['dbMax','colourMax'])$(id).value=hi;drawAnalysis();});
+for(const id of ['showSpectrum','showWaterfall'])$(id).addEventListener('change',changePlotEnabled);
+$('showHistogram').addEventListener('change',()=>{$('histogramPanel').classList.toggle('hidden',!$('showHistogram').checked);if($('showHistogram').checked&&!paused&&status)renderAnalysis(status.analysis,status.revision);requestStatus();});
 document.addEventListener('visibilitychange',requestStatus);
 $('hackrfPreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'hackrf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','hackrf.lna_gain_db':'16','hackrf.vga_gain_db':'20','hackrf.rf_amp':'false','hackrf.antenna_power':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
 $('exit').addEventListener('click', async () => { if (!confirm('Stop the receiver, finish recording and close the local NGene service?')) return; try { await api('shutdown', {}); quitting = true; notice('NGene is closing. Restart ngene --web to reconnect.'); } catch (error) { notice(error.message, true); } });
-setInterval(() => { if (waiting && performance.now() - lastRequest > 4000) socket?.close(); else if (performance.now() - lastRequest >= Number($('refresh').value)) requestStatus(); }, 10);
+setInterval(() => { if (waiting && performance.now() - lastRequest > 4000) socket?.close(); else if (statusRequestPending||performance.now() - lastRequest >= Number($('refresh').value)) requestStatus(); }, 10);
 
 const plotResizeObserver=new ResizeObserver(schedulePlotDraw);
 for(const id of ['spectrum','waterfall','histogramI','histogramQ'])plotResizeObserver.observe($(id));

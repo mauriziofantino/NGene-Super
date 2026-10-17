@@ -36,6 +36,8 @@ typedef struct {
     uint64_t revision;
     /** Local discontinuity generation used to reject incoherent temporal history. */
     uint64_t continuity;
+    /** Cancellation generation copied when this observation begins. */
+    int generation;
     /** Copied validated configuration; owned by this instance. */
     TNgAnalysisConfig config;
     /** Monotonic timestamp at which this observation was copied. */
@@ -70,6 +72,8 @@ struct TNgAnalysis {
     double nextCapture[2];
     /** Subscriber-interest expiry for each optional producer, in monotonic seconds. */
     double interestUntil[2];
+    /** Atomic cancellation generations checked between optional calculation stages. */
+    TNgAtomicInt generation[2];
     /** Slot index currently being filled by each producer; -1 means none. */
     int filling[2];
     /** Four owned input slots shared under mutex, two per diagnostic kind. */
@@ -312,6 +316,29 @@ static int32_t Shift15(int32_t x)
     return x >= 0 ? x / 32768 : -1 - ((-1 - x) / 32768);
 }
 
+/** @brief Return whether a leased observation still has an interested consumer. */
+static int BurstCurrent(TNgAnalysis *a, const TNgBurst *b)
+{
+    return NgAtomicGet(&a->stop) == 0 &&
+           NgAtomicGet(&a->generation[b->kind]) == b->generation;
+}
+
+/** @brief Cancel queued/partial work for one lane while holding its publication mutex. */
+static void CancelLane(TNgAnalysis *a, unsigned kind)
+{
+    int k;
+    int generation = NgAtomicGet(&a->generation[kind]);
+    NgAtomicSet(&a->generation[kind], generation == INT_MAX ? 0 : generation + 1);
+    a->filling[kind] = -1;
+    a->nextCapture[kind] = 0;
+    ++a->continuity[kind];
+    for (k = (int)kind * 2; k < (int)kind * 2 + 2; ++k) {
+        if (a->buffers[k].state != 3) {
+            a->buffers[k].state = 0;
+        }
+    }
+}
+
 /**
  * @brief Calculate one worker-owned diagnostic burst.
  *
@@ -323,8 +350,9 @@ static int32_t Shift15(int32_t x)
  * @param a Diagnostic instance with worker-only DSP workspace.
  * @param b Immutable complete burst leased to the worker.
  * @param s Receives this calculation result for later locked publication.
+ * @return Nonzero for a complete current observation; zero for cancellation or invalid input.
  */
-static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
+static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
 {
     const TNgAnalysisConfig *c = &b->config;
     size_t n = c->fftSize;
@@ -338,6 +366,9 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     TNgIqView native = {0};
     int adcLimit = b->format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
     int fftScale = b->format == NG_FORMAT_SC16_Q11 ? 8 : 128;
+    if (BurstCurrent(a, b) == 0) {
+        return 0;
+    }
     native.samples = (const TNgIq8 *)(const void *)b->data.native;
     native.format = b->format;
     native.meta.count = b->count;
@@ -367,10 +398,13 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             sums[0] = sums[1] = 0;
             squares[0] = squares[1] = 0;
             for (k = 0; k < c->histogramPairs; ++k) {
+                if (k % 1024 == 0 && BurstCurrent(a, b) == 0) {
+                    return 0;
+                }
                 for (j = 0; j < 2; ++j) {
                     int64_t v = NgIqComponent(&native, k, (unsigned)j);
                     if (v < -adcLimit || v >= adcLimit) {
-                        return;
+                        return 0;
                     }
                     sums[j] += v;
                     squares[j] += (uint64_t)(v * v);
@@ -381,6 +415,9 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         s->statsI.max = s->statsQ.max = -adcLimit;
         for (k = 0; k < c->histogramPairs; ++k) {
             int values[2];
+            if (k % 1024 == 0 && BurstCurrent(a, b) == 0) {
+                return 0;
+            }
             if (b->format == 0 || b->format == NG_FORMAT_CI8) {
                 values[0] = b->data.ci8[k].i;
                 values[1] = b->data.ci8[k].q;
@@ -420,9 +457,14 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
          * Recomputed per burst here only if its shape/size changes (worker cache). */
         static const double pi2 = 6.2831853071795864769;
         if (a->cachedSize != n || a->cachedWindow != c->window) {
+            /* Cancellation can leave coefficients partially overwritten. */
+            a->cachedSize = 0;
             for (k = 0; k < n; ++k) {
                 double x = pi2 * (double)k / (double)n;
                 double w = 1;
+                if (k % 1024 == 0 && BurstCurrent(a, b) == 0) {
+                    return 0;
+                }
                 if (c->window == NG_WINDOW_HANN) {
                     w = 0.5 - 0.5 * cos(x);
                 } else if (c->window == NG_WINDOW_HAMMING) {
@@ -445,6 +487,9 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         memset(a->power, 0, n * sizeof(a->power[0]));
         for (f = 0; f < c->averages; ++f) {
             size_t offset = f * (n * (100 - c->overlapPercent) / 100);
+            if (BurstCurrent(a, b) == 0) {
+                return 0;
+            }
             for (k = 0; k < n; ++k) {
                 int iValue, qValue;
                 if (b->format == 0 || b->format == NG_FORMAT_CI8) {
@@ -456,13 +501,16 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                 }
                 if (iValue < -adcLimit || iValue >= adcLimit || qValue < -adcLimit ||
                     qValue >= adcLimit) {
-                    return;
+                    return 0;
                 }
                 a->input[2 * k] = (int16_t)Shift15((int32_t)iValue * fftScale * a->window[k]);
                 a->input[2 * k + 1] = (int16_t)Shift15((int32_t)qValue * fftScale * a->window[k]);
             }
+            if (BurstCurrent(a, b) == 0) {
+                return 0;
+            }
             if (NgFftExecute(a->plan, n, a->input, a->output, &error) != NG_OK) {
-                return; /* Validated fixed workspace contract. */
+                return 0; /* Validated fixed workspace contract. */
             }
             NgPowerAccumulate(a->output, a->power, n);
         }
@@ -524,6 +572,7 @@ static void Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     s->producedSeconds = NgMonotonicSeconds();
     NgPsdCheck(s->spectrumDbfs, s->spectrumBins, &s->integrity);
     s->computeMs = (NgMonotonicSeconds() - start) * 1000;
+    return BurstCurrent(a, b);
 }
 
 /**
@@ -542,8 +591,22 @@ static void Worker(void *context)
     while (NgAtomicGet(&a->stop) == 0) {
         int index = -1;
         int k;
+        int calculated;
+        double now;
         NgMutexLock(&a->mutex);
+        now = NgMonotonicSeconds();
+        for (k = 0; k < 2; ++k) {
+            if (a->interestUntil[k] != 0 && now > a->interestUntil[k]) {
+                a->interestUntil[k] = 0;
+                CancelLane(a, (unsigned)k);
+            }
+        }
         for (k = 0; k < 4; ++k) {
+            if (a->buffers[k].state == 2 &&
+                (a->buffers[k].revision != a->revision ||
+                 now > a->interestUntil[a->buffers[k].kind])) {
+                a->buffers[k].state = 0;
+            }
             if (a->buffers[k].state == 2 &&
                 (index < 0 || a->buffers[k].captured > a->buffers[index].captured)) {
                 index = k;
@@ -562,16 +625,19 @@ static void Worker(void *context)
         if (index >= 0) {
             a->buffers[index].state = 3;
         }
-        if (index < 0) {
-            NgConditionWait(&a->ready, &a->mutex, 250);
+        if (index < 0 && NgAtomicGet(&a->stop) == 0) {
+            /* Producers and shutdown signal this condition; dormant plots need no polling. */
+            NgConditionWait(&a->ready, &a->mutex, UINT_MAX);
         }
         NgMutexUnlock(&a->mutex);
         if (index < 0) {
             continue;
         }
-        Calculate(a, &a->buffers[index], s);
+        calculated = Calculate(a, &a->buffers[index], s);
         NgMutexLock(&a->mutex);
-        if (s->revision == a->revision) {
+        if (calculated != 0 && BurstCurrent(a, &a->buffers[index]) != 0 &&
+            s->revision == a->revision &&
+            NgMonotonicSeconds() <= a->interestUntil[a->buffers[index].kind]) {
             s->sequence = ++a->sequence;
             s->skippedBursts = a->skipped;
             TNgAnalysisSnapshot *d = &a->snapshot;
@@ -666,6 +732,8 @@ int NgAnalysisCreate(uint32_t sampleRate, const TNgAnalysisConfig *config, TNgAn
     a->sampleRate = sampleRate;
     a->config = *config;
     a->revision = 1;
+    a->snapshot.revision = a->revision;
+    a->snapshot.config = *config;
     a->filling[0] = a->filling[1] = -1;
     if (NgThreadStart(&a->thread, Worker, a) != 0) {
         NgFftDestroy(a->plan);
@@ -718,20 +786,14 @@ void NgAnalysisDestroy(TNgAnalysis *analysis)
  */
 int NgAnalysisConfigure(TNgAnalysis *analysis, const TNgAnalysisConfig *config, TNgError *error)
 {
-    int k;
     if (NgAnalysisValidate(config, error) != NG_OK) {
         return NG_ERROR;
     }
     NgMutexLock(&analysis->mutex);
     analysis->config = *config;
     ++analysis->revision;
-    analysis->filling[0] = analysis->filling[1] = -1;
-    analysis->nextCapture[0] = analysis->nextCapture[1] = 0;
-    for (k = 0; k < 4; ++k) {
-        if (analysis->buffers[k].state != 3) {
-            analysis->buffers[k].state = 0;
-        }
-    }
+    CancelLane(analysis, 0);
+    CancelLane(analysis, 1);
     memset(&analysis->snapshot, 0, sizeof(analysis->snapshot));
     analysis->snapshot.revision = analysis->revision;
     analysis->snapshot.config = *config;
@@ -744,9 +806,9 @@ int NgAnalysisConfigure(TNgAnalysis *analysis, const TNgAnalysisConfig *config, 
  *
  * @details
  * Updates selected lane deadlines under the observer mutex. Mask bit 1 selects PSD and bit 2
- * histogram; zero deadlines disable the selected lanes. The controller renews analysis two-second
- * lease so independent interested clients keep producers active. Does not alter receiver
- * dispatch.
+ * histogram; expired/zero deadlines discard pending observations and cancel active work
+ * between bounded calculation stages. Renewing an expired lane starts a fresh observation.
+ * Does not alter receiver dispatch.
  *
  * Parameter analysis: Live diagnostic worker.
  * Parameter mask: Interest mask: 1 PSD, 2 histogram, 3 both.
@@ -756,12 +818,17 @@ int NgAnalysisConfigure(TNgAnalysis *analysis, const TNgAnalysisConfig *config, 
 void NgAnalysisInterest(TNgAnalysis *analysis, unsigned mask, double expiresSeconds)
 {
     unsigned kind;
+    double now;
     if (analysis == NULL) {
         return;
     }
     NgMutexLock(&analysis->mutex);
+    now = NgMonotonicSeconds();
     for (kind = 0; kind < 2; ++kind) {
         if (((mask) & ((1u) << (kind))) != 0) {
+            if (expiresSeconds <= now || analysis->interestUntil[kind] < now) {
+                CancelLane(analysis, kind);
+            }
             analysis->interestUntil[kind] = expiresSeconds;
         }
     }
@@ -810,7 +877,11 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
         int enabled =
             (kind) != 0 ? analysis->config.histogramEnabled : analysis->config.spectrumEnabled;
         int source = (kind) != 0 ? analysis->config.histogramPre : analysis->config.spectrumPre;
-        if (enabled == 0 || source != preConditioning || now > analysis->interestUntil[kind]) {
+        if (analysis->interestUntil[kind] != 0 && now > analysis->interestUntil[kind]) {
+            analysis->interestUntil[kind] = 0;
+            CancelLane(analysis, (unsigned)kind);
+        }
+        if (enabled == 0 || source != preConditioning || analysis->interestUntil[kind] == 0) {
             continue;
         }
         if (((view->meta.flags) & (NG_BLOCK_GAP)) != 0) {
@@ -856,6 +927,7 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
             b->epoch = view->meta.epoch;
             b->captured = now;
             b->continuity = analysis->continuity[kind];
+            b->generation = NgAtomicGet(&analysis->generation[kind]);
         }
         b = &analysis->buffers[analysis->filling[kind]];
         copy = b->required - b->count;

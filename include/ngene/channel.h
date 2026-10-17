@@ -26,9 +26,11 @@ typedef struct {
 /** @brief Replaceable synchronous processing operation for one receiver channel. */
 typedef struct {
     /** @brief Process the same common window supplied to every channel.
-     * @details Synchronous engine callback in every channel state. Workspace is per-channel;
-     * never retain samples. Handle gaps by invalidating coherent history. No I/O is allowed
-     * on this path. A next-state proposal is validated by the engine.
+     * @details Synchronous processing of one channel in every state. The scheduled engine
+     * may invoke different channels concurrently; each channel's windows remain ordered.
+     * Workspace must be per-channel or explicitly synchronized. Never retain samples or
+     * rely on callback order in parallel mode. Handle gaps by invalidating coherent history.
+     * No I/O is allowed on this path. A next-state proposal is validated by the engine.
      * @param context Private algorithm state, owned by this channel.
      * @param id Read-only constellation/satellite/signal identity.
      * @param state Current channel state.

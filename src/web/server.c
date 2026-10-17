@@ -49,6 +49,9 @@
         continue;                                                                                  \
     }
 
+/** @brief Forward declaration for bounded diagnostic subscriber state. */
+typedef struct TNgWebSession TNgWebSession;
+
 /** @brief Local HTTP service with one selected file or native SDR source. */
 typedef struct {
     /** Owned controller for the single configured file or SDR input. */
@@ -63,6 +66,8 @@ typedef struct {
     TNgAtomicInt quit;
     /** Number of open bounded telemetry connections. */
     unsigned websocketClients;
+    /** Live diagnostic subscriptions, protected by jsonMutex and bounded to three clients. */
+    TNgWebSession *sessions;
     /** NUL-terminated 32-byte random token encoded as hexadecimal. */
     char token[65];
     /** Expected numeric loopback host and port. */
@@ -281,21 +286,29 @@ static cJSON *ComponentJson(const TNgComponentStats *s)
  * @brief Serialize an owned PSD/histogram snapshot with integrity metadata.
  *
  * @details
- * Rechecks PSD integrity on copied storage; sends bins and metrics, never raw IQ.
+ * Rechecks PSD integrity and serializes arrays only for requested, enabled diagnostic lanes.
+ * Scalar metadata stays available even when arrays are omitted; never sends raw IQ.
  *
  * @param s Read-only by-value diagnostic snapshot.
+ * @param mask Requested diagnostic lanes: 1 PSD, 2 histogram, 3 both.
  *
  * @return New caller-owned cJSON object; release with cJSON_Delete or JsonReply.
  */
-static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s)
+static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s, unsigned mask)
 {
     cJSON *o = cJSON_CreateObject();
     cJSON *power = cJSON_CreateArray();
     cJSON *hi = cJSON_CreateArray();
     cJSON *hq = cJSON_CreateArray();
     size_t k;
-    TNgPsdIntegrity check;
-    NgPsdCheck(s->spectrumDbfs, s->spectrumBins, &check);
+    size_t spectrumBins = ((mask & 1u) != 0 && s->config.spectrumEnabled != 0)
+                              ? s->spectrumBins : 0;
+    unsigned histogramBins = ((mask & 2u) != 0 && s->config.histogramEnabled != 0)
+                                 ? s->histogramBins : 0;
+    TNgPsdIntegrity check = s->integrity;
+    if (spectrumBins != 0) {
+        NgPsdCheck(s->spectrumDbfs, spectrumBins, &check);
+    }
     Counter(o, "sequence", s->sequence);
     Counter(o, "sequence_id", s->psdSequence);
     Counter(o, "histogram_sequence", s->histogramSequence);
@@ -312,7 +325,7 @@ static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s)
     Number(o, "checksum", s->integrity.checksum);
     Number(o, "telemetry_checksum", check.checksum);
     cJSON_AddBoolToObject(o, "integrity_ok",
-                          !s->spectrumBins || (check.checksum == s->integrity.checksum &&
+                          !spectrumBins || (check.checksum == s->integrity.checksum &&
                                                !check.nanCount && !check.infCount));
     Number(o, "enbw_hz", s->enbwHz);
     cJSON_AddItemToObject(o, "stats_i", ComponentJson(&s->statsI));
@@ -340,10 +353,10 @@ static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s)
     Number(o, "clipped_q", s->clippedQ);
     String(o, "point", (s->config.spectrumPre) != 0 ? "pre_conditioning" : "post_conditioning");
     String(o, "backend", NgFftBackend());
-    for (k = 0; k < s->spectrumBins; ++k) {
+    for (k = 0; k < spectrumBins; ++k) {
         cJSON_AddItemToArray(power, cJSON_CreateNumber(s->spectrumDbfs[k]));
     }
-    for (k = 0; k < s->histogramBins; ++k) {
+    for (k = 0; k < histogramBins; ++k) {
         cJSON_AddItemToArray(hi, cJSON_CreateNumber(s->histogramI[k]));
         cJSON_AddItemToArray(hq, cJSON_CreateNumber(s->histogramQ[k]));
     }
@@ -460,10 +473,11 @@ static int ReadAnalysisConfig(cJSON *body, TNgAnalysisConfig *out, TNgError *err
  * Deep copy precedes JSON construction; counters are decimal strings.
  *
  * @param control Selected live receiver or file replay controller.
+ * @param mask Requested diagnostic arrays; metadata is always included.
  *
  * @return New caller-owned cJSON object; release with cJSON_Delete or JsonReply.
  */
-static cJSON *StatusJson(TNgControl *control)
+static cJSON *StatusJson(TNgControl *control, unsigned mask)
 {
     static const char *states[] = {"stopped", "starting", "running", "stopping", "error"};
     static const char *recordStates[] = {"off", "starting", "recording", "stopping"};
@@ -473,7 +487,7 @@ static cJSON *StatusJson(TNgControl *control)
     NgControlSnapshot(control, &status);
     /* Deliberate deep copy before telemetry. Snapshot arrays are values, not borrowed pointers. */
     telemetry = status.analysis;
-    cJSON_AddItemToObject(object, "analysis", AnalysisJson(&telemetry));
+    cJSON_AddItemToObject(object, "analysis", AnalysisJson(&telemetry, mask));
     Number(object, "hardware_frequency_hz", (double)status.hardwareFrequencyHz);
     Number(object, "signal_frequency_hz", (double)status.signalFrequencyHz);
     Number(object, "digital_if_hz", (double)status.digitalIfHz);
@@ -1051,6 +1065,11 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngStyleCss, ngStyleCssLength);
             return 200;
         }
+        if (strcmp(path, "/ngene-logo.svg") == 0) {
+            Headers(connection, 200, "image/svg+xml", ngLogoSvgLength);
+            mg_write(connection, ngLogoSvg, ngLogoSvgLength);
+            return 200;
+        }
         if (strcmp(path, "/api/v1/bootstrap") == 0) {
             reply = cJSON_CreateObject();
             String(reply, "token", server->token);
@@ -1066,7 +1085,7 @@ static int Handle(struct mg_connection *connection, void *context)
             return JsonReply(connection, 200, reply);
         }
         if (strcmp(path, "/api/v1/status") == 0) {
-            return JsonReply(connection, 200, StatusJson(control));
+            return JsonReply(connection, 200, StatusJson(control, 3u));
         }
         if (strcmp(path, "/api/v1/analysis/config") == 0) {
             return AnalysisConfigReply(control, connection);
@@ -1348,10 +1367,35 @@ static int Handle(struct mg_connection *connection, void *context)
 }
 
 /** @brief Per-connection rate state; no PSD or IQ buffers are retained. */
-typedef struct {
+struct TNgWebSession {
     /** Monotonic time of the most recent response on this connection. */
     double lastReply;
-} TNgWebSession;
+    /** Independent PSD/histogram request bits for this client. */
+    unsigned mask;
+    /** Next live session; protected by the server JSON mutex. */
+    TNgWebSession *next;
+};
+
+/** @brief Aggregate live consumer leases while holding the server JSON mutex. */
+static void UpdateDiagnosticInterest(TNgWebServer *server, double now)
+{
+    TNgWebSession *session;
+    double until[2] = {0, 0};
+    unsigned kind;
+    for (session = server->sessions; session != NULL; session = session->next) {
+        double expires = session->lastReply + 2.0;
+        if (expires > now) {
+            for (kind = 0; kind < 2; ++kind) {
+                if ((session->mask & (1u << kind)) != 0 && expires > until[kind]) {
+                    until[kind] = expires;
+                }
+            }
+        }
+    }
+    for (kind = 0; kind < 2; ++kind) {
+        NgControlDiagnosticInterestUntil(server->control, 1u << kind, until[kind]);
+    }
+}
 
 /**
  * @brief Authorize a WebSocket and allocate its bounded session state.
@@ -1387,6 +1431,8 @@ static int WsConnect(const struct mg_connection *connection, void *context)
         return 1;
     }
     ++server->websocketClients;
+    session->next = server->sessions;
+    server->sessions = session;
     NgMutexUnlock(&server->jsonMutex);
     mg_set_user_connection_data((struct mg_connection *)connection, session);
     return 0;
@@ -1407,8 +1453,16 @@ static void WsClose(const struct mg_connection *connection, void *context)
     TNgWebServer *server = context;
     TNgWebSession *session = mg_get_user_connection_data(connection);
     if (session != NULL) {
+        TNgWebSession **entry;
         NgMutexLock(&server->jsonMutex);
         --server->websocketClients;
+        for (entry = &server->sessions; *entry != NULL; entry = &(*entry)->next) {
+            if (*entry == session) {
+                *entry = session->next;
+                break;
+            }
+        }
+        UpdateDiagnosticInterest(server, NgMonotonicSeconds());
         NgMutexUnlock(&server->jsonMutex);
         free(session);
     }
@@ -1436,6 +1490,7 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
     TNgWebServer *server = context;
     cJSON *object;
     char *text;
+    unsigned mask;
     if (((bits) & (15)) == 8) {
         return 0;
     }
@@ -1446,20 +1501,25 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
         (length == 8 && (data[6] != ':' || data[7] < '0' || data[7] > '3'))) {
         return 0;
     }
+    mask = length == 8 ? (unsigned)(data[7] - '0') : 3u;
     {
         TNgWebSession *session = mg_get_user_connection_data(connection);
         double now = NgMonotonicSeconds();
         if (session == NULL) {
             return 0;
         }
+        NgMutexLock(&server->jsonMutex);
         if (now - session->lastReply < 0.02) {
+            NgMutexUnlock(&server->jsonMutex);
             return 0; /* Close abusive pacing, never leave an unanswered request. */
         }
         session->lastReply = now;
+        session->mask = mask;
+        UpdateDiagnosticInterest(server, now);
+        NgMutexUnlock(&server->jsonMutex);
     }
     TNgControl *control = server->control;
-    NgControlDiagnosticInterest(control, length == 8 ? (unsigned)(data[7] - '0') : 3u);
-    object = StatusJson(control);
+    object = StatusJson(control, mask);
     text = (object) != NULL ? cJSON_PrintUnformatted(object) : NULL;
     if (text != NULL) {
         mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_TEXT, text, strlen(text));

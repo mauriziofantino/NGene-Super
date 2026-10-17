@@ -152,6 +152,15 @@ int NgControlRequest(TNgControl *control, TNgCommand command, uint64_t revision,
  */
 void NgControlDiagnosticInterest(TNgControl *control, unsigned mask);
 /**
+ * @brief Replace selected diagnostic deadlines after aggregating interested clients.
+ * @details Thread-safe; callers aggregate independent subscriptions before replacing a lane.
+ * Zero revokes selected lanes immediately without changing receiver dispatch or recording.
+ * @param control Live controller.
+ * @param mask Selected lanes: 1 PSD, 2 histogram, 3 both.
+ * @param expiresSeconds Absolute monotonic lease deadline; zero revokes selected lanes.
+ */
+void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double expiresSeconds);
+/**
  * @brief Copy coherent lifecycle status and owned diagnostic data.
  *
  * @details

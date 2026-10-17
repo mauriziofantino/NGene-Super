@@ -41,48 +41,76 @@ range_invalid:
     ret
 NgFftInputInRange ENDP
 
-; @brief Fuse stages of width two and four, with signed32 sums and /2 at each stage.
+; In-register width-two/width-four codelet: input/output xmm0, scratch xmm1/xmm2.
+; xmm4 has word mask (0,0,0,-1,0,0,0,-1). Components stay in [-16384,16384].
+FFT_FIRST_TWO MACRO
+    ; A=(a,c,a,c), B=(b,d,b,d). S=(A&B)+((A^B)>>1), D=S-B.
+    ; Both identities retain floor rounding, including odd negative components.
+    pshufd xmm1, xmm0, 0ddh
+    pshufd xmm0, xmm0, 088h
+    movdqa xmm2, xmm0
+    pxor xmm2, xmm1
+    psraw xmm2, 1
+    pand xmm0, xmm1
+    paddw xmm0, xmm2
+    movdqa xmm2, xmm0
+    psubw xmm2, xmm1
+    punpckldq xmm0, xmm2
+    ; The low qword now contains the first pair; rotate the second pair.
+    pshufd xmm1, xmm0, 0eeh
+    pshuflw xmm1, xmm1, 0b4h
+    pxor xmm1, xmm4
+    psubw xmm1, xmm4
+    movdqa xmm2, xmm0
+    pxor xmm2, xmm1
+    psraw xmm2, 1
+    pand xmm0, xmm1
+    paddw xmm0, xmm2
+    movdqa xmm2, xmm0
+    psubw xmm2, xmm1
+    punpcklqdq xmm0, xmm2
+ENDM
+
+; Exact plan-generated Q14 coefficients for exp(-j*pi*k/4), k=0..3.
+ALIGN 16
+fft_eighth_twiddle_low DW 16384,0,0,16384,11585,11585,-11585,11585
+fft_eighth_twiddle_high DW 0,16384,-16384,0,-11585,11585,-11585,-11585
+
+; @brief Fuse the first three radix-two stages as an eight-sample register codelet.
 ; @param rcx Unaligned interleaved int16 workspace, already bit reversed.
-; @param rdx Number of complex samples, divisible by four and at least eight.
-; Leaf Win64 ABI: only r9/r10 and XMM0..3 are modified.
+; @param rdx Number of complex samples, divisible by eight and at least eight.
+; Every Q14 product and per-stage floor average agrees with the scalar stages.
+; Leaf Win64 ABI: only r9/r10 and XMM0..4 are modified; constants are read-only.
 NgFftFirstStages PROC
     mov r10, rcx
     mov r9, rdx
-    shr r9, 2
+    shr r9, 3
+    pcmpeqw xmm4, xmm4
+    psllq xmm4, 48
 first_stages_loop:
     movdqu xmm0, XMMWORD PTR [r10]
-    movdqa xmm1, xmm0
-    psraw xmm1, 15
-    movdqa xmm2, xmm0
-    punpckhwd xmm2, xmm1
-    punpcklwd xmm0, xmm1
-    pshufd xmm1, xmm0, 04eh
+    FFT_FIRST_TWO
     movdqa xmm3, xmm0
-    paddd xmm3, xmm1
-    psubd xmm0, xmm1
-    psrad xmm3, 1
-    psrad xmm0, 1
-    punpcklqdq xmm3, xmm0
-    pshufd xmm1, xmm2, 04eh
-    movdqa xmm0, xmm2
-    paddd xmm0, xmm1
-    psubd xmm2, xmm1
-    psrad xmm0, 1
-    psrad xmm2, 1
-    punpcklqdq xmm0, xmm2
-    pshufd xmm0, xmm0, 0b4h
-    pcmpeqd xmm2, xmm2
-    pslldq xmm2, 12
-    pxor xmm0, xmm2
-    psubd xmm0, xmm2
-    movdqa xmm1, xmm3
-    paddd xmm1, xmm0
-    psubd xmm3, xmm0
-    psrad xmm1, 1
-    psrad xmm3, 1
-    packssdw xmm1, xmm3
-    movdqu XMMWORD PTR [r10], xmm1
-    add r10, 16
+    movdqu xmm0, XMMWORD PTR [r10 + 16]
+    FFT_FIRST_TWO
+    ; Width eight: retain the Q14 floor before the final /2, including pi/4 rotations.
+    pshufd xmm1, xmm0, 0fah
+    pshufd xmm0, xmm0, 050h
+    pmaddwd xmm0, XMMWORD PTR [fft_eighth_twiddle_low]
+    pmaddwd xmm1, XMMWORD PTR [fft_eighth_twiddle_high]
+    psrad xmm0, 14
+    psrad xmm1, 14
+    packssdw xmm0, xmm1
+    movdqa xmm2, xmm3
+    pxor xmm2, xmm0
+    psraw xmm2, 1
+    pand xmm3, xmm0
+    paddw xmm3, xmm2
+    movdqa xmm2, xmm3
+    psubw xmm2, xmm0
+    movdqu XMMWORD PTR [r10], xmm3
+    movdqu XMMWORD PTR [r10 + 16], xmm2
+    add r10, 32
     dec r9
     jne first_stages_loop
     ret

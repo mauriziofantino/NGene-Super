@@ -1,5 +1,11 @@
-# AArch64 NEON
+# ARM NEON
 
-`fft_neon.S`: butterfly su interi per la FFT Q14. Due prodotti complessi in parallelo, intermedi signed32. Kernel leaf con registri volatili; simboli ELF/Mach-O. Nessun kernel ARM32 implementato.
+`fft_neon_intrinsics.c` è il kernel FFT di produzione su ARM64 e ARMv7 NEON a 32 bit:
+quattro butterfly per iterazione, codelet iniziale a otto punti e controllo SIMD del range.
+Conserva esattamente prodotti Q14 e floor per stadio, con workspace posseduto dal chiamante.
 
-`fft_neon.asm` conserva la stessa aritmetica in sintassi ARMASM64 per MSVC/Windows ARM64. Build predisposta e non ancora eseguita con il toolset Microsoft; vedere `docs/WINDOWS.md`. Le primitive di campioni in `src/dsp/sample_ops.c` usano intrinsics NEON e riferimento C.
+`fft_neon.S` e `fft_neon.asm` conservano il precedente kernel ARM64 a due butterfly come
+baseline dei confronti; non sono selezionati per il sorgente di produzione attuale.
+Le primitive in `../statistics/` e `../power/` usano NEON su ARM64 e C su ARM32.
+Per precisione, cross-compilazioni, emulazione e limiti delle misure native vedere
+[FFT_REVIEW.md](../../../docs/FFT_REVIEW.md).
