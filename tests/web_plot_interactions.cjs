@@ -6,7 +6,9 @@ const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
 const policy="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-ancestors 'none'; base-uri 'none'";
-const assets=new Map([['/',['index.html','text/html']],['/app.js',['app.js','text/javascript']],['/style.css',['style.css','text/css']],['/ngene-logo.svg',['ngene-logo.svg','image/svg+xml']]]);
+const assets=new Map([['/',['index.html','text/html']],['/app.js',['app.js','text/javascript']],['/workspace.js',['workspace.js','text/javascript']],['/receiver-config.js',['receiver-config.js','text/javascript']],['/style.css',['style.css','text/css']],['/ngene-logo.svg',['ngene-logo.svg','image/svg+xml']]]);
+let analysisRevision=1;
+const analysis={spectrum_enabled:true,histogram_enabled:true,units:'dbfs_bin',window:'hann',averages:1,spectrum_source:'post',histogram_source:'post'};
 const server=http.createServer((request,response)=>{
   response.setHeader('Content-Security-Policy',policy);
   const asset=assets.get(request.url);
@@ -14,6 +16,13 @@ const server=http.createServer((request,response)=>{
   response.setHeader('Content-Type','application/json');
   if(request.url==='/api/v1/bootstrap')response.end(JSON.stringify({token:'plot-fixture',os:'fixture',architecture:'browser',version:'test'}));
   else if(request.url==='/api/v1/config')response.end(JSON.stringify({revision:'1',ini:fs.readFileSync(path.join(root,'config','replay.ini'),'utf8')}));
+  else if(request.url==='/api/v1/analysis/config'&&request.method==='GET')response.end(JSON.stringify({revision:String(analysisRevision),analysis}));
+  else if(request.url==='/api/v1/analysis/config'&&request.method==='POST'){
+    let body='';request.on('data',chunk=>body+=chunk);request.on('end',()=>{
+      Object.assign(analysis,Object.fromEntries(Object.entries(JSON.parse(body)).filter(([key])=>key!=='revision')));analysisRevision++;
+      response.end(JSON.stringify({revision:String(analysisRevision),analysis}));
+    });
+  }
   else {response.statusCode=404;response.end('{}');}
 });
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -143,13 +152,16 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     await page.locator('#showSpectrum').uncheck();
     assert(await page.locator('#spectrumBody').isHidden()&&await page.locator('#waterfallBody').isVisible(),'Mobile spectrum enable also hid the waterfall');
     await page.locator('#showWaterfall').uncheck();
+    await until(()=>page.locator('#showWaterfall').isEnabled(),'FFT disable command did not settle');
     assert(await page.locator('#spectrumBody').isHidden()&&await page.locator('#waterfallBody').isHidden(),'Disabled mobile plots left stale images visible');
     assert(await page.locator('#showSpectrum').isVisible()&&await page.locator('#showWaterfall').isVisible(),'Mobile plot enables disappeared with their plots');
     assert((await page.locator('#spectrumPanel').boundingBox()).height<enabledHeight/2,'Disabled mobile plots retained their canvas layout space');
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Disabled mobile plot controls overflowed');
     if(process.env.NGENE_SCREENSHOTS)await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'plot-interactions-mobile-disabled.png')});
-    await page.locator('#showSpectrum').check();await page.locator('#showWaterfall').check();
-    assert.deepEqual((await snapshot()).history,original.history,'Mobile plot enables mutated paused PSD history');
+    await page.locator('#showSpectrum').check();
+    await until(()=>page.locator('#showWaterfall').isEnabled(),'FFT enable command did not settle');
+    await page.locator('#showWaterfall').check();
+    assert.deepEqual((await snapshot()).history,[],'A changed FFT configuration must clear history before fresh receiver data');
     assert.deepEqual(errors,[]);
     console.log('PASS: live plot sizing, mouse/keyboard resize, viewport expand/restore and focus, 3D depth-sorted orbit via mouse/touch/arrows/keyboard/reset, bounded tilt/mesh, mobile layout/2D scroll and unchanged paused PSD history under production CSP.');
   }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}

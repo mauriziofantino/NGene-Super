@@ -1060,6 +1060,16 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngAppJs, ngAppJsLength);
             return 200;
         }
+        if (strcmp(path, "/workspace.js") == 0) {
+            Headers(connection, 200, "text/javascript; charset=utf-8", ngWorkspaceJsLength);
+            mg_write(connection, ngWorkspaceJs, ngWorkspaceJsLength);
+            return 200;
+        }
+        if (strcmp(path, "/receiver-config.js") == 0) {
+            Headers(connection, 200, "text/javascript; charset=utf-8", ngReceiverConfigJsLength);
+            mg_write(connection, ngReceiverConfigJs, ngReceiverConfigJsLength);
+            return 200;
+        }
         if (strcmp(path, "/style.css") == 0) {
             Headers(connection, 200, "text/css; charset=utf-8", ngStyleCssLength);
             mg_write(connection, ngStyleCss, ngStyleCssLength);

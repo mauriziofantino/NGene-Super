@@ -1,8 +1,13 @@
+import {createReceiverWorkspace} from './workspace.js';
+import {createReceiverConfiguration} from './receiver-config.js';
+
 const selectedSession = 'receiver';
 const sessionPrefix = () => '';
 let deviceCaps = null;
+let receiverWorkspace = null, activeWorkspaceView = 'rf';
 /* NGene browser UI: presentation and commands only. No receiver/DSP implementation. */
 const $ = id => document.getElementById(id);
+const receiverConfiguration = createReceiverConfiguration($('gnssSettings'));
 const fields = [
   ['Frontend', 'frontend.type', 'Source', 'select', ['file', 'hackrf', 'rtlsdr', 'bladerf']],
   ['Frontend', 'frontend.serial', 'Device serial', 'text', null, '', 'Empty selects the only connected device of the selected type'],
@@ -165,8 +170,11 @@ function dirtyState(changed) {
   $('iniEditor').value = toIni(values); controls();
 }
 const settingsTopics = {
-  source: ['Input source', 'Choose the SDR, tuning and gains before starting.', 'Before start'],
-  receiver: ['Receiver & buffers', 'Set the shared stream, conditioning and buffering policy.', 'Before start'],
+  source: ['Front end', 'Choose the live SDR or recorded input, sample format, tuning and gains.', 'Before start'],
+  receiver: ['Receiver & signals', 'Review constellations and channel allocation, then configure the available execution, conditioning and buffer settings below.', 'Partly available'],
+  acquisition: ['Acquisition', 'Configure satellite search, detection, confirmation and fine acquisition for each signal family.', 'Module unavailable'],
+  tracking: ['Tracking', 'Configure coherent integration, code and carrier loops, lock criteria and correlators.', 'Module unavailable'],
+  navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
   recording: ['Capture to disk', 'Choose a name, receiver-side folder and pre/post capture point.', 'Before start'],
   analysis: ['Diagnostic processing', 'NGene computes PSD and histograms. Apply these settings during reception.', 'Runtime'],
   display: ['Plot appearance', 'Adjust axes, colours and history in this browser.', 'Display only'],
@@ -174,6 +182,7 @@ const settingsTopics = {
 };
 /** Show a bounded set of settings without changing the INI profile or diagnostics subscription. */
 function selectSettings(topic) {
+  if (!Object.hasOwn(settingsTopics, topic)) return;
   selectedSettings = topic;
   document.querySelectorAll('[data-settings]').forEach(button => { const active = button.dataset.settings === topic; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
   const [title, hint, mode] = settingsTopics[topic]; $('settingsTitle').textContent = title; $('settingsHint').textContent = hint; $('settingsMode').textContent = mode;
@@ -181,9 +190,12 @@ function selectSettings(topic) {
   const groups = {source: ['Frontend', 'HackRF', 'RTL-SDR', 'bladeRF', 'File replay'], receiver: ['Receiver', 'Buffers'], recording: ['Recording']};
   document.querySelectorAll('#fields [data-group]').forEach(group => group.classList.toggle('topic-hidden', !(groups[topic] || []).includes(group.dataset.group)));
   $('sourcePresets').classList.toggle('hidden', topic !== 'source');
+  receiverConfiguration.select(topic);
+  $('apply').disabled = !editable() || referenceSettingsOnly();
   for (const [id, key] of [['analysisSettings', 'analysis'], ['displaySettings', 'display'], ['profileSettings', 'profile']]) $(id).classList.toggle('hidden', topic !== key);
   updateSourceFields();
 }
+function referenceSettingsOnly() { return ['acquisition', 'tracking', 'navigation'].includes(selectedSettings); }
 function validateProfileFields() {
   refreshProfileErrors(true);
   const invalid = [...$('configForm').elements].find(input => profileErrors.has(input.name));
@@ -247,6 +259,7 @@ function controls() {
   for(const id of ['showSpectrum','showWaterfall'])$(id).disabled=commandPending||['starting','stopping'].includes(status?.state);
   for (const field of $('configForm').elements) field.disabled = !ready;
   for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
+  $('apply').disabled = !ready || referenceSettingsOnly();
   if (capabilities && !capabilities.hackrf) $('hackrfPreset').disabled = true;
   $('rtlPreset').disabled = !ready || !capabilities?.rtlsdr;
   $('bladePreset').disabled = !ready || !capabilities?.bladerf;
@@ -259,6 +272,7 @@ function controls() {
   $('recordStop').disabled = !running || commandPending || status.recording_state !== 'recording';
   $('exit').disabled = !connected() || httpBusy;
   for (const input of $('analysisForm').elements) input.disabled = !connected() || httpBusy || pendingCommand !== null || ['starting', 'stopping'].includes(status?.state);
+  receiverWorkspace?.update({status, capabilities, profile:savedValues, draft:values, revision, dirty, connected:connected(), editable:ready});
 }
 async function api(path, body) {
   const options = body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json', 'X-NGene-Token': token}, body: JSON.stringify(body)};
@@ -429,7 +443,7 @@ let analysisDirty=false, analysisSnapshot=null, analysisSequence='0', analysisRe
 let waterfallTime=-Infinity, skippedDisplay=0, rejectedFrames=0, histogramSequence='', analysisConfig=null;
 let analysisConfigRevision='0', plotConfigBusy=false, lastSpectrumComputation=null;
 let previousPlotSelection={spectrum:true,waterfall:true};
-function diagnosticVisibility(){return document.hidden||!$('configurationView').classList.contains('hidden')?0:(($('showSpectrum').checked||$('showWaterfall').checked)?1:0)|($('showHistogram').checked?2:0);}
+function diagnosticVisibility(){return document.hidden||activeWorkspaceView!=='rf'?0:(($('showSpectrum').checked||$('showWaterfall').checked)?1:0)|($('showHistogram').checked?2:0);}
 function diagnosticEnabled(name){const value=analysisConfig?.[name]??savedValues[`analysis.${name}`];return value!==false&&value!=='false';}
 function plotEnabled(id){return diagnosticEnabled('spectrum_enabled')&&$(id==='spectrum'?'showSpectrum':'showWaterfall').checked;}
 function syncPlotVisibility(){
@@ -528,13 +542,8 @@ function refreshAnalysisErrors(force = false) {
   return analysisErrors.size===0;
 }
 function showView(configuration) {
-  $('configurationView').classList.toggle('hidden',!configuration);$('observationView').classList.toggle('hidden',configuration);
-  $('showConfiguration').classList.toggle('active',configuration);$('showObservation').classList.toggle('active',!configuration);
-  $('showConfiguration').setAttribute('aria-pressed',String(configuration));$('showObservation').setAttribute('aria-pressed',String(!configuration));
-  requestStatus();requestAnimationFrame(drawAnalysis);
+  receiverWorkspace?.setView(typeof configuration === 'string' ? configuration : configuration ? 'setup' : 'rf');
 }
-$('showConfiguration').addEventListener('click',()=>showView(true));
-$('showObservation').addEventListener('click',()=>showView(false));
 $('analysisForm').addEventListener('submit',async event=>{
   event.preventDefault();
   if(!refreshAnalysisErrors(true)){ $(`analysis_${analysisErrors.keys().next().value}`).focus();return; }
@@ -897,6 +906,19 @@ setInterval(() => { if (waiting && performance.now() - lastRequest > 4000) socke
 
 const plotResizeObserver=new ResizeObserver(schedulePlotDraw);
 for(const id of ['spectrum','waterfall','histogramI','histogramQ'])plotResizeObserver.observe($(id));
+receiverWorkspace = createReceiverWorkspace({
+  onViewChange(view) {
+    activeWorkspaceView = view;
+    if (view !== 'rf') setPlotsExpanded(false);
+    requestStatus();
+    if (view === 'rf') requestAnimationFrame(drawAnalysis);
+  },
+  onOpenSettings(topic) { showView('setup'); selectSettings(topic); },
+  onBrowseReplay() {
+    if (!editable()) { notice('Stop the receiver before choosing another input file.', true); return; }
+    showView('setup'); selectSettings('source'); $('browseReplay').click();
+  }
+});
 connect();
 
 /* Read-only inspection for frame troubleshooting and browser regression tests. */

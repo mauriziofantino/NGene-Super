@@ -232,6 +232,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     await page.locator('#recordStop').click(); await recording('off'); await state('running');
     const first = await (await fetch(`${base}/api/v1/status`)).json();
     await page.waitForFunction(() => Number(document.getElementById('processed').textContent.replaceAll(',','')) > 20000);
+    await page.locator('[data-view="record"]').click();
     await page.locator('#reloadFiles').click();
     const captures = await (await fetch(`${base}/api/v1/files`)).json();
     const capture = captures.files.find(file=>file.name.endsWith('.cs8'));
@@ -276,6 +277,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
       assert.equal(bytes.length,Number(f.bytes));
       if(f.name.endsWith('.meta.ini'))assert(bytes.toString().includes('recording_point=pre_conditioning'));
     }
+    await page.locator('[data-view="record"]').click();
     await page.locator('#reloadFiles').click();
     await page.locator('#files a').first().waitFor();
     const downloadPromise = page.waitForEvent('download');

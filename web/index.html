@@ -1,29 +1,64 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NGene · Receiver console</title><link rel="icon" type="image/svg+xml" href="/ngene-logo.svg"><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#091321">
+  <title>NGene &#183; Receiver workspace</title>
+  <link rel="icon" type="image/svg+xml" href="/ngene-logo.svg">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
 <body>
-<header class="topbar"><a class="brand" href="/" aria-label="NGene home"><img class="brandmark" src="/ngene-logo.svg" alt="" width="48" height="48"><span>NGene<small>SOFTWARE DEFINED GNSS RECEIVER</small></span></a><div class="topmeta"><span class="local-badge">RECEIVER CONSOLE</span><span id="platform">Connecting…</span><span id="connection" class="connection">Offline</span><button id="exit" class="quiet">Exit service</button></div></header>
-<nav class="page-nav" aria-label="Console views"><button id="showObservation" class="active" aria-pressed="true">Observation</button><button id="showConfiguration" aria-pressed="false">Configuration</button><span>SHARED STREAM · NATIVE SDR · INTEGER DSP</span></nav>
-<div class="workspace"><main>
-<section class="session card">
-<div class="session-title"><div><span class="eyebrow">NGENE / CONTROL</span><h1>Receiver console</h1><p id="streamDescription" class="muted">Waiting for NGene</p></div><div class="state-stack"><span id="runState" class="state">Stopped</span><span id="revision" class="muted">No active configuration</span></div></div>
-<div class="controls"><button id="start" class="primary"><span aria-hidden="true">▶</span> Start receiver</button><button id="stop" class="secondary">■ Stop receiver</button><span class="control-divider"></span><button id="recordStart" class="record-button"><span class="rec-dot"></span> Start recording</button><button id="recordStop" class="secondary">Stop recording</button></div>
-<div id="notice" role="status" aria-live="polite" class="notice">The console is connecting to the local receiver.</div>
-</section>
-<div id="configurationView" class="hidden">
+<a class="skip-link" href="#receiverWorkspace">Skip to receiver workspace</a>
+<div class="receiver-app">
+  <aside class="workspace-sidebar" aria-label="Receiver workspace navigation">
+    <a class="brand workspace-brand" href="/" aria-label="NGene receiver home"><img class="brandmark" src="/ngene-logo.svg" alt="" width="42" height="42"><span>NGene<small>SOFTWARE GNSS RECEIVER</small></span></a>
+    <p class="workspace-side-title">RECEIVER WORKSPACE</p>
+    <nav class="workspace-nav" aria-label="Receiver views">
+      <button type="button" class="workspace-nav-item" data-view="journey" aria-controls="journeyView" aria-pressed="false"><span class="workspace-nav-number" aria-hidden="true">◎</span><span class="workspace-nav-name">Overview</span><span class="workspace-nav-dot" title="Receiver workflow" aria-hidden="true"></span></button>
+      <button type="button" id="showConfiguration" class="workspace-nav-item" data-view="setup" aria-controls="configurationView" aria-pressed="false"><span class="workspace-nav-number" aria-hidden="true">01</span><span class="workspace-nav-name">Receiver configuration</span><span class="workspace-nav-dot available" title="Receiver service view" aria-hidden="true"></span></button>
+      <button type="button" id="showObservation" class="workspace-nav-item active" data-view="rf" aria-controls="observationView" aria-pressed="true" aria-current="page"><span class="workspace-nav-number" aria-hidden="true">02</span><span class="workspace-nav-name">RF observation</span><span class="workspace-nav-dot available" title="Receiver service view" aria-hidden="true"></span></button>
+      <button type="button" class="workspace-nav-item" data-view="acquisition" aria-controls="acquisitionView" aria-pressed="false"><span class="workspace-nav-number" aria-hidden="true">03</span><span class="workspace-nav-name">Acquisition</span><span class="workspace-nav-dot" title="Waiting for receiver module" aria-hidden="true"></span></button>
+      <button type="button" class="workspace-nav-item" data-view="tracking" aria-controls="trackingView" aria-pressed="false"><span class="workspace-nav-number" aria-hidden="true">04</span><span class="workspace-nav-name">Tracking</span><span class="workspace-nav-dot" title="Waiting for receiver module" aria-hidden="true"></span></button>
+      <button type="button" class="workspace-nav-item" data-view="navigation" aria-controls="navigationView" aria-pressed="false"><span class="workspace-nav-number" aria-hidden="true">05</span><span class="workspace-nav-name">Navigation data</span><span class="workspace-nav-dot" title="Waiting for receiver module" aria-hidden="true"></span></button>
+      <button type="button" class="workspace-nav-item" data-view="pvt" aria-controls="pvtView" aria-pressed="false"><span class="workspace-nav-number" aria-hidden="true">06</span><span class="workspace-nav-name">PVT solution</span><span class="workspace-nav-dot" title="Waiting for receiver module" aria-hidden="true"></span></button>
+      <button type="button" class="workspace-nav-item" data-view="record" aria-controls="recordingView" aria-pressed="false"><span class="workspace-nav-number" aria-hidden="true">07</span><span class="workspace-nav-name">Recording & replay</span><span class="workspace-nav-dot available" title="Receiver service view" aria-hidden="true"></span></button>
+      <button type="button" class="workspace-nav-item" data-view="health" aria-controls="healthView" aria-pressed="false"><span class="workspace-nav-number" aria-hidden="true">08</span><span class="workspace-nav-name">System health</span><span class="workspace-nav-dot available" title="Receiver service view" aria-hidden="true"></span></button>
+    </nav>
+    <div class="workspace-side-bottom"><span class="workspace-side-pill">ONE RECEIVER &#183; SHARED I/Q</span><p>Configure, observe and follow the signal through the receiver.</p><span class="workspace-side-note">Native input &#183; Architecture-aware DSP</span></div>
+  </aside>
+  <div class="workspace-main">
+    <header class="topbar workspace-topbar"><div class="workspace-breadcrumb">RECEIVER STUDIO <span aria-hidden="true">/</span> <strong id="workspaceCrumb">RF observation</strong></div><div class="topmeta"><span id="platform">Connecting&#8230;</span><span id="connection" class="connection">Offline</span><button id="exit" class="quiet" type="button">Exit service</button></div></header>
+    <div class="workspace"><main id="receiverWorkspace" tabindex="-1">
+      <section class="session card" aria-labelledby="receiverSessionTitle">
+        <div class="session-title"><div><span class="eyebrow">RECEIVER SESSION</span><h2 id="receiverSessionTitle">Receiver control</h2><p id="streamDescription" class="muted">Waiting for NGene</p></div><div class="state-stack"><span id="runState" class="state">Stopped</span><span id="revision" class="muted">No active configuration</span></div></div>
+        <div class="controls"><button id="start" class="primary" type="button"><span aria-hidden="true">&#9654;</span> Start receiver</button><button id="stop" class="secondary" type="button"><span aria-hidden="true">&#9632;</span> Stop receiver</button><span class="control-divider"></span><button id="recordStart" class="record-button" type="button"><span class="rec-dot" aria-hidden="true"></span> Start recording</button><button id="recordStop" class="secondary" type="button">Stop recording</button></div>
+        <div id="notice" role="status" aria-live="polite" class="notice">The console is connecting to the local receiver.</div>
+      </section>
+<div id="journeyView" class="hidden" data-workspace-view="journey" role="region" aria-label="Overview"></div>
+<div id="acquisitionView" class="hidden" data-workspace-view="acquisition" role="region" aria-label="Acquisition"></div>
+<div id="trackingView" class="hidden" data-workspace-view="tracking" role="region" aria-label="Tracking"></div>
+<div id="navigationView" class="hidden" data-workspace-view="navigation" role="region" aria-label="Navigation data"></div>
+<div id="pvtView" class="hidden" data-workspace-view="pvt" role="region" aria-label="PVT solution"></div>
+<div id="configurationView" class="hidden" data-workspace-view="setup" role="region" aria-label="Receiver configuration">
 <section class="card configuration-shell">
-<div class="configuration-heading"><div><span class="eyebrow">NGENE / SETTINGS</span><h2>Receiver configuration</h2><p class="muted">Build your profile by topic. Receiver settings lock while running; diagnostics remain adjustable.</p></div><span id="configBadge" class="badge">Loading</span></div>
+<div class="configuration-heading"><div><span class="eyebrow">NGENE / SETTINGS</span><h2>Receiver configuration</h2><p class="muted">Configure the front end, signals, acquisition, tracking and navigation. Receiver settings lock while running; RF diagnostics remain adjustable.</p></div><span id="configBadge" class="badge">Loading</span></div>
 <nav class="settings-tabs" aria-label="Configuration sections">
-<button type="button" data-settings="source" aria-pressed="true" class="active">01 · Input source</button>
-<button type="button" data-settings="receiver" aria-pressed="false">02 · Receiver</button>
-<button type="button" data-settings="recording" aria-pressed="false">03 · Recording</button>
-<button type="button" data-settings="analysis" aria-pressed="false">04 · Diagnostics</button>
-<button type="button" data-settings="display" aria-pressed="false">05 · Display</button>
-<button type="button" data-settings="profile" aria-pressed="false">06 · Profile</button>
+<button type="button" data-settings="source" aria-pressed="true" class="active">01 · Front end</button>
+<button type="button" data-settings="receiver" aria-pressed="false">02 · Receiver &amp; signals</button>
+<button type="button" data-settings="acquisition" aria-pressed="false">03 · Acquisition</button>
+<button type="button" data-settings="tracking" aria-pressed="false">04 · Tracking</button>
+<button type="button" data-settings="navigation" aria-pressed="false">05 · Navigation &amp; PVT</button>
+<button type="button" data-settings="recording" aria-pressed="false">06 · Recording</button>
+<button type="button" data-settings="analysis" aria-pressed="false">07 · RF diagnostics</button>
+<button type="button" data-settings="display" aria-pressed="false">08 · Display</button>
+<button type="button" data-settings="profile" aria-pressed="false">09 · Profile</button>
 </nav>
-<div class="settings-context"><div><h3 id="settingsTitle">Input source</h3><p id="settingsHint" class="muted">Choose the SDR, tuning and gain before starting.</p></div><span id="settingsMode" class="badge">Before start</span></div>
+<div class="settings-context"><div><h3 id="settingsTitle">Front end</h3><p id="settingsHint" class="muted">Choose the input source, sample format, RF tuning and gain before starting.</p></div><span id="settingsMode" class="badge">Before start</span></div>
 <div class="settings-content">
 <div class="preset-row" id="sourcePresets"><button id="browseReplay">Browse I/Q files…</button><button id="filePreset">Recorded I/Q</button><button id="hackrfPreset">HackRF L1</button><button id="rtlPreset">RTL-SDR L1</button><button id="bladePreset">bladeRF L1</button><button id="deviceLimits">Query device limits</button></div>
+<div id="gnssSettings" class="hidden"></div>
 <form id="configForm"><div id="fields"></div></form>
 
 <section id="analysisSettings" class="hidden" aria-label="Runtime diagnostic settings"><form id="analysisForm"><div id="analysisFields" class="field-grid"></div><button id="applyAnalysis" class="primary wide" type="submit">Apply analysis settings</button></form><p id="analysisNotice" class="muted">Runtime changes stay in this session. Save the full profile while stopped to persist them.</p></section>
@@ -41,7 +76,9 @@
 </div>
 <div class="configuration-footer"><p id="configMessage" class="muted">Waiting for configuration…</p><button id="apply" class="primary">Apply &amp; save full profile</button></div>
 </section></div>
-<div id="observationView"><div class="diagnostic-toolbar"><label><input type="checkbox" id="showHistogram" checked> I/Q histograms</label><span id="frameIntegrity">Frame integrity: waiting</span></div><section class="metrics" aria-label="Live counters"><article class="metric card"><span>PROCESSED I/Q PAIRS</span><strong id="processed">0</strong><small id="windows">0 common windows</small></article><article class="metric card"><span>INPUT DELIVERY RATE</span><strong id="rate">—</strong><small id="elapsed">Elapsed 00:00</small></article><article class="metric card"><span>I/Q WRITTEN</span><strong id="written">0 B</strong><small id="recordState">Recording off</small></article><article class="metric card"><span>KNOWN INPUT LOSSES</span><strong id="dropped">0</strong><small id="gaps">0 gap events</small></article></section>
+<div id="observationView" data-workspace-view="rf" role="region" aria-labelledby="rfWorkspaceTitle">
+  <div class="workspace-hero"><div><span class="eyebrow">STAGE 02 / SIGNAL MONITOR</span><h1 id="rfWorkspaceTitle">RF observation and I/Q health</h1><p>Inspect the live spectrum, 2D or 3D waterfall and native I/Q distribution before following the signal through the receiver.</p></div><div class="workspace-actions"><button type="button" data-open-settings="analysis">Analysis settings</button><button type="button" class="quiet" data-open-settings="display">Display settings</button></div></div>
+<div class="diagnostic-toolbar"><label><input type="checkbox" id="showHistogram" checked> I/Q histograms</label><span id="frameIntegrity">Frame integrity: waiting</span></div><section class="metrics" aria-label="Live counters"><article class="metric card"><span>PROCESSED I/Q PAIRS</span><strong id="processed">0</strong><small id="windows">0 common windows</small></article><article class="metric card"><span>INPUT DELIVERY RATE</span><strong id="rate">—</strong><small id="elapsed">Elapsed 00:00</small></article><article class="metric card"><span>I/Q WRITTEN</span><strong id="written">0 B</strong><small id="recordState">Recording off</small></article><article class="metric card"><span>KNOWN INPUT LOSSES</span><strong id="dropped">0</strong><small id="gaps">0 gap events</small></article></section>
 <section id="spectrumPanel" class="card spectrum-card" aria-labelledby="plotsTitle">
 <div class="panel-heading"><div><span class="eyebrow">FREQUENCY DOMAIN</span><h2 id="plotsTitle">Spectrum &amp; waterfall</h2></div><div class="plot-controls"><span id="fftBackend" class="badge">Integer FFT</span><label>Refresh <select id="refresh"><option value="33">30 Hz</option><option value="50">20 Hz</option><option value="100">10 Hz</option><option value="250" selected>4 Hz</option><option value="500">2 Hz</option><option value="1000">1 Hz</option></select></label><button id="pausePlot" class="quiet">Pause plots</button><button id="expandPlots" class="quiet" type="button" aria-expanded="false" aria-controls="spectrumPanel">Expand plots</button></div></div>
 <p id="plotNotice" class="plot-disabled error hidden" role="alert"></p>
@@ -60,13 +97,19 @@
 <div id="waterfallResize" class="plot-resize" role="separator" tabindex="0" aria-label="Resize waterfall height" aria-controls="waterfallWrap" aria-orientation="horizontal" aria-valuemin="180" aria-valuemax="720" aria-valuenow="270" aria-valuetext="270 pixels"><span aria-hidden="true"></span></div>
 <div class="plot-footer"><span id="waterfallInfo">Newest observation at top · waiting for data</span><span id="colourLegend">Global colour scale</span></div></div></section></section>
 <section id="histogramPanel" class="card histogram-card"><div class="panel-heading"><div><span class="eyebrow">AMPLITUDE DISTRIBUTION</span><h2>I/Q histograms</h2></div><span id="histogramInfo" class="badge">Waiting</span></div><div class="histogram-grid"><div><h3><i class="i-line"></i>In-phase · I</h3><canvas id="histogramI" aria-label="Histogram of I sample amplitudes"></canvas></div><div><h3><i class="q-line"></i>Quadrature · Q</h3><canvas id="histogramQ" aria-label="Histogram of Q sample amplitudes"></canvas></div></div><div class="stats-grid"><div id="statsI"></div><div id="statsQ"></div></div><p id="dcMagnitude" class="table-note muted">DC magnitude: —</p><div class="plot-footer"><span id="histogramRails">ADC rail counts: —</span><span id="analysisCost">Worker: —</span></div></section>
-<div class="lower-grid"><section class="card"><div class="panel-heading"><h2>Stream health</h2><span id="health" class="badge">Idle</span></div><div class="health-body"><div class="bar-heading"><span>Frontend queue</span><span id="inputQueue">0 pairs</span></div><progress id="inputProgress" max="100" value="0"></progress><div class="bar-heading"><span>Recording queue</span><span id="recordQueue">0 pairs</span></div><progress id="recordProgress" max="100" value="0"></progress><dl><div><dt>Applied RF filter</dt><dd id="bandwidth">—</dd></div><div><dt>Ring high-water mark</dt><dd id="ringHigh">0 blocks</dd></div><div><dt>Queued pairs discarded at stop</dt><dd id="discarded">0</dd></div></dl></div></section>
-<section class="card"><div class="panel-heading"><h2>Recording session</h2><span id="recordBadge" class="badge">Off</span></div><div class="record-body"><span class="field-label">CURRENT / LAST SESSION</span><p id="sessionName" class="mono">No recording yet</p><div class="record-details"><div><span>Written pairs</span><strong id="sessionSamples">0</strong></div><div><span>Segments</span><strong id="segments">0</strong></div></div><span class="field-label">SAVED ON THE RECEIVER MACHINE</span><p id="outputDirectory" class="mono path">—</p><p class="muted">Stopping recording flushes its queue. Reception continues until you stop the receiver.</p></div></section></div>
+</div>
+<div id="recordingView" class="hidden" data-workspace-view="record" role="region" aria-label="Recording and replay">
+<section class="card"><div class="panel-heading"><h2>Recording session</h2><span id="recordBadge" class="badge">Off</span></div><div class="record-body"><span class="field-label">CURRENT / LAST SESSION</span><p id="sessionName" class="mono">No recording yet</p><div class="record-details"><div><span>Written pairs</span><strong id="sessionSamples">0</strong></div><div><span>Segments</span><strong id="segments">0</strong></div></div><span class="field-label">SAVED ON THE RECEIVER MACHINE</span><p id="outputDirectory" class="mono path">—</p><p class="muted">Stopping recording flushes its queue. Reception continues until you stop the receiver.</p></div></section>
 <section class="card files-card"><div class="panel-heading"><div><span class="eyebrow">STORAGE</span><h2>Capture files &amp; transfer</h2></div><button id="reloadFiles">Refresh files</button></div><p class="muted table-note">Files are stored on the receiver computer. Use <strong>Transfer</strong> to download a closed file to this browser’s computer; its destination follows your browser’s download settings.</p><div class="table-wrap"><table><thead><tr><th>File</th><th>Size</th><th>Status</th><th>To this computer</th><th>Replay</th><th>Manage</th></tr></thead><tbody id="files"><tr><td colspan="6" class="empty-table">No capture files loaded.</td></tr></tbody></table></div><p id="fileNote" class="muted table-note">Raw CI8 + sample index + capture metadata. Download becomes available after recording closes.</p></section>
+</div>
+<div id="healthView" class="hidden" data-workspace-view="health" role="region" aria-label="System health">
+<section class="card"><div class="panel-heading"><h2>Stream health</h2><span id="health" class="badge">Idle</span></div><div class="health-body"><div class="bar-heading"><span>Frontend queue</span><span id="inputQueue">0 pairs</span></div><progress id="inputProgress" max="100" value="0"></progress><div class="bar-heading"><span>Recording queue</span><span id="recordQueue">0 pairs</span></div><progress id="recordProgress" max="100" value="0"></progress><dl><div><dt>Applied RF filter</dt><dd id="bandwidth">—</dd></div><div><dt>Ring high-water mark</dt><dd id="ringHigh">0 blocks</dd></div><div><dt>Queued pairs discarded at stop</dt><dd id="discarded">0</dd></div></dl></div></section>
 <section class="card"><div class="panel-heading"><h2>Input integrity</h2><span class="badge">Common SDR diagnostics</span></div><p id="ingressStatus" class="muted">Ingress counters unavailable while stopped.</p><p id="deviceIntegrity" class="muted">Device continuity: unsupported / not yet measured. Hardware-only loss is not inferred from software counters.</p></section>
 <section class="card event-card"><div class="panel-heading"><h2>Browser event log</h2><button id="clearLog" class="quiet">Clear</button></div><ol id="events" aria-live="polite"></ol></section>
-<footer>NGene · Incremental receiver development <span id="version"></span><span>Acquisition, tracking and PVT are not attached in this increment.</span></footer>
-</div></main></div><dialog id="deleteFileDialog" aria-labelledby="deleteFileTitle">
+</div>
+<footer class="workspace-footer"><span>NGene &#183; Software defined GNSS receiver</span><span id="version"></span><span>Live data and module availability follow the connected receiver.</span></footer>
+</main></div></div></div>
+<dialog id="deleteFileDialog" aria-labelledby="deleteFileTitle">
 <form method="dialog"><span class="eyebrow">CAPTURE STORAGE</span><h2 id="deleteFileTitle">Delete this file?</h2><p>This permanently removes the selected file from the receiver computer. Related data and metadata files are kept.</p><strong id="deleteFileName" class="mono"></strong><p id="deleteFileDirectory" class="muted"></p><div class="dialog-actions"><button value="cancel" autofocus>Cancel</button><button id="confirmDeleteFile" value="delete" class="danger">Delete file</button></div></form></dialog><dialog id="replayFileDialog" aria-labelledby="replayFileTitle">
   <div class="picker-heading"><div><span class="eyebrow">RECEIVER STORAGE</span><h2 id="replayFileTitle">Choose recorded I/Q</h2></div><button id="pickerClose" type="button">Close</button></div>
   <div class="picker-body">
@@ -79,4 +122,6 @@
   </div>
   <div class="picker-actions"><button id="pickerUse" type="button" class="primary" disabled>Use selected file</button></div>
 </dialog>
-</body></html>
+
+</body>
+</html>
