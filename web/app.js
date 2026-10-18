@@ -1,5 +1,6 @@
 import {createReceiverWorkspace} from './workspace.js';
 import {createReceiverConfiguration} from './receiver-config.js';
+import {moduleParameters} from './module-parameters.js';
 
 const selectedSession = 'receiver';
 const sessionPrefix = () => '';
@@ -7,7 +8,7 @@ let deviceCaps = null;
 let receiverWorkspace = null, activeWorkspaceView = 'rf';
 /* NGene browser UI: presentation and commands only. No receiver/DSP implementation. */
 const $ = id => document.getElementById(id);
-const receiverConfiguration = createReceiverConfiguration($('gnssSettings'));
+let receiverConfiguration = null, moduleForm = null;
 const fields = [
   ['Frontend', 'frontend.type', 'Source', 'select', ['file', 'hackrf', 'rtlsdr', 'bladerf']],
   ['Frontend', 'frontend.serial', 'Device serial', 'text', null, '', 'Empty selects the only connected device of the selected type'],
@@ -109,14 +110,16 @@ function numericFieldError(input, title, required, integer) {
   return '';
 }
 function profileFieldError(input) {
-  if (input.type !== 'number') return '';
+  if (!moduleForm?.active(input.name, values)) return '';
+  if (input.type !== 'number') return moduleForm?.error(input.name, values) || '';
   const title = fields.find(field => field[1] === input.name)?.[2] || input.name;
-  const integer = input.name === 'receiver.run_seconds' ? false : ['rtlsdr.ppm','bladerf.gain_db'].includes(input.name) ? true : 'decimal';
+  const descriptor = moduleForm?.definitions.get(input.name);
+  const integer = descriptor ? (descriptor.integer ? 'decimal' : false) : input.name === 'receiver.run_seconds' ? false : ['rtlsdr.ppm','bladerf.gain_db'].includes(input.name) ? true : 'decimal';
   const message = numericFieldError(input, title, Object.hasOwn(values, input.name), integer);
   if (message) return message;
   const rate = Number(input.value);
   if (input.name === 'frontend.sample_rate_hz' && values['frontend.type'] === 'rtlsdr' && rate > 300000 && rate <= 900000) return 'RTL-SDR sample rate must be (225000,300000] or (900000,3200000] pairs/s.';
-  return '';
+  return moduleForm?.error(input.name, values) || '';
 }
 function refreshProfileErrors(force = false) {
   if (force) profileValidationRequested = true;
@@ -171,8 +174,8 @@ function dirtyState(changed) {
 }
 const settingsTopics = {
   source: ['Front end', 'Choose the live SDR or recorded input, sample format, tuning and gains.', 'Before start'],
-  receiver: ['Receiver & signals', 'Review constellations and channel allocation, then configure the available execution, conditioning and buffer settings below.', 'Partly available'],
-  acquisition: ['Acquisition', 'Configure satellite search, detection, confirmation and fine acquisition for each signal family.', 'Module unavailable'],
+  receiver: ['Receiver & signals', 'Select GPS searches and PRNs, then configure execution, conditioning and buffers. Other constellations remain unavailable.', 'Before start'],
+  acquisition: ['Acquisition', 'Configure GPS L1 C/A coarse acquisition, Doppler/code refinement and optional confirmation. Coherent processing follows the NGene 1 ms baseline.', 'GPS available'],
   tracking: ['Tracking', 'Configure coherent integration, code and carrier loops, lock criteria and correlators.', 'Module unavailable'],
   navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
   recording: ['Capture to disk', 'Choose a name, receiver-side folder and pre/post capture point.', 'Before start'],
@@ -186,42 +189,51 @@ function selectSettings(topic) {
   selectedSettings = topic;
   document.querySelectorAll('[data-settings]').forEach(button => { const active = button.dataset.settings === topic; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
   const [title, hint, mode] = settingsTopics[topic]; $('settingsTitle').textContent = title; $('settingsHint').textContent = hint; $('settingsMode').textContent = mode;
-  $('configForm').classList.toggle('hidden', !['source', 'receiver', 'recording'].includes(topic));
-  const groups = {source: ['Frontend', 'HackRF', 'RTL-SDR', 'bladeRF', 'File replay'], receiver: ['Receiver', 'Buffers'], recording: ['Recording']};
-  document.querySelectorAll('#fields [data-group]').forEach(group => group.classList.toggle('topic-hidden', !(groups[topic] || []).includes(group.dataset.group)));
+  $('configForm').classList.toggle('hidden', !['source', 'receiver', 'acquisition', 'recording'].includes(topic) && ![...(moduleForm?.groups.values() || [])].some(g => g.topic === topic));
+  const groups = {source: ['Frontend', 'HackRF', 'RTL-SDR', 'bladeRF', 'File replay'], receiver: ['Receiver', 'Buffers', 'GPS receiver'], acquisition: ['GPS acquisition', 'Acquisition refinement'], recording: ['Recording']};
+  document.querySelectorAll('#fields [data-group]').forEach(group => group.classList.toggle('topic-hidden', !(groups[topic] || []).includes(group.dataset.group) && moduleForm?.groups.get(group.dataset.group)?.topic !== topic));
   $('sourcePresets').classList.toggle('hidden', topic !== 'source');
-  receiverConfiguration.select(topic);
+  receiverConfiguration?.select(topic);
   $('apply').disabled = !editable() || referenceSettingsOnly();
   for (const [id, key] of [['analysisSettings', 'analysis'], ['displaySettings', 'display'], ['profileSettings', 'profile']]) $(id).classList.toggle('hidden', topic !== key);
   updateSourceFields();
 }
-function referenceSettingsOnly() { return ['acquisition', 'tracking', 'navigation'].includes(selectedSettings); }
+function referenceSettingsOnly() { return ['tracking', 'navigation'].includes(selectedSettings) && ![...(moduleForm?.groups.values() || [])].some(g => g.topic === selectedSettings); }
 function validateProfileFields() {
   refreshProfileErrors(true);
   const invalid = [...$('configForm').elements].find(input => profileErrors.has(input.name));
   if (!invalid) return true;
   const group = invalid.closest('[data-group]')?.dataset.group;
-  selectSettings(group === 'Recording' ? 'recording' : ['Receiver', 'Buffers'].includes(group) ? 'receiver' : 'source');
+  selectSettings(moduleForm?.groups.get(group)?.topic || (group === 'Recording' ? 'recording' : ['GPS acquisition','Acquisition refinement'].includes(group) ? 'acquisition' : ['Receiver', 'Buffers','GPS receiver'].includes(group) ? 'receiver' : 'source'));
   invalid.focus(); return false;
 }
 function buildForm() {
+  moduleForm?.defaults(values);
   $('configForm').noValidate = true;
   const holder = $('fields'); holder.replaceChildren(); let group = '', grid;
   for (const [section, key, label, type, options, unit, hint] of fields) {
     if (section !== group) {
       const fieldset = document.createElement('fieldset'), legend = document.createElement('legend');
       fieldset.className = 'config-group'; fieldset.dataset.group = section; legend.textContent = section;
-      grid = document.createElement('div'); grid.className = 'field-grid'; fieldset.append(legend, grid); holder.append(fieldset); group = section;
+      grid = document.createElement('div'); grid.className = 'field-grid'; fieldset.append(legend);
+      const description = moduleForm?.groups.get(section)?.note;
+      if (description) { const p = document.createElement('p'); p.className = 'muted'; p.textContent = description; fieldset.append(p); }
+      fieldset.append(grid); holder.append(fieldset); group = section;
     }
     const wrapper = document.createElement('label'), title = document.createElement('span'), units = document.createElement('span');
     wrapper.className = `field${['frontend.serial', 'frontend.center_frequency_hz', 'recording.prefix', 'recording.directory', 'recording.point', 'recording.enabled', 'buffer.overflow_policy', 'replay.path'].includes(key) ? ' full' : ''}`;
     title.textContent = label; units.className = 'unit'; units.textContent = unit || ''; title.append(units); wrapper.append(title);
     const nativeBandwidth = key === 'hackrf.bandwidth_hz' && values['frontend.type'] !== 'hackrf';
     const input = document.createElement(type === 'select' && !nativeBandwidth ? 'select' : 'input'); input.name = key;
-    if (type === 'select' && !nativeBandwidth) for (const option of (key === 'rtlsdr.gain_tenths_db' ? (deviceCaps?.tuner_gains_tenths_db || [values[key] || '0']) : options)) { const element = document.createElement('option'); element.value = option; element.textContent = option === 'true' ? 'On' : option === 'false' ? 'Off' : option === 'record' ? 'Record only' : option === 'capture' ? 'Capture' : option; input.append(element); }
+    if (type === 'select' && !nativeBandwidth) for (const option of (key === 'rtlsdr.gain_tenths_db' ? (deviceCaps?.tuner_gains_tenths_db || [values[key] || '0']) : options)) { const element = document.createElement('option'); element.value = typeof option === 'object' ? option.value : option; element.textContent = typeof option === 'object' ? option.label : option === 'true' ? 'On' : option === 'false' ? 'Off' : option === 'record' ? 'Record only' : option === 'capture' ? 'Capture' : option; input.append(element); }
     else { input.type = nativeBandwidth ? 'number' : type; if(input.type==='number'){input.step='any';input.min='0'; if(key==='conditioning.dc_shift'){input.min='4';input.max='24';input.step='1';} if(key==='frontend.sample_rate_hz'){input.min='1';input.max='20000000';input.step='1';} if(key.endsWith('frequency_hz')){input.max='6000000000';input.step='1';} } input.inputMode = type === 'number' ? 'decimal' : 'text'; input.autocomplete = 'off'; }
     const limits = {'conditioning.dc_shift':[4,24], 'buffer.window_samples':[1,1048576], 'buffer.ingress_blocks':[2,4096], 'buffer.ring_blocks':[2,4096], 'recording.queue_blocks':[2,4096], 'receiver.idle_timeout_ms':[100,3600000], 'receiver.run_seconds':[0,31536000], 'rtlsdr.ppm':[-1000,1000], 'bladerf.gain_db':[-100,100]};
     if (input.type === 'number') { input.step = key === 'receiver.run_seconds' ? 'any' : '1'; if (limits[key]) [input.min,input.max] = limits[key]; }
+    const descriptor = moduleForm?.definitions.get(key);
+    if (descriptor && input.type === 'number') {
+      input.step = descriptor.integer ? '1' : 'any';
+      input.min = descriptor.min ?? ''; input.max = descriptor.max ?? '';
+    }
     input.id = `config_${key.replaceAll('.', '_')}`;
     input.value = values[key] ?? ''; input.addEventListener('input', () => {
       values[key] = input.value.trim();
@@ -265,6 +277,7 @@ function controls() {
   $('bladePreset').disabled = !ready || !capabilities?.bladerf;
   updateSourceFields();
   const sourceSelect=document.querySelector('[name="frontend.type"]'); if(sourceSelect){for(const option of sourceSelect.options)option.disabled=option.value!=='file' && !capabilities?.[option.value];}
+  moduleForm?.update($('configForm'), values, ready);
   $('validate').disabled = !connected() || httpBusy;
   $('start').disabled = !ready || dirty || (values['frontend.type']==='file' && !values['replay.path']);
   $('stop').disabled = !connected() || !['running', 'starting'].includes(status?.state) || httpBusy;
@@ -413,6 +426,11 @@ async function connect() {
   try {
     capabilities = await api('bootstrap'); token = capabilities.token;
     $('platform').textContent = `${capabilities.os} / ${capabilities.architecture}`; $('version').textContent = `v${capabilities.version}`;
+    if (!moduleForm) {
+      moduleForm = moduleParameters(await api('module-schema'));
+      fields.push(...moduleForm.fields);
+      receiverConfiguration = createReceiverConfiguration($('gnssSettings'), moduleForm.references);
+    }
     await loadConfig();
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/v1/events?token=${encodeURIComponent(token)}`);
     socket.onopen = () => { lastResponse=-Infinity; $('connection').textContent = 'Connected'; $('connection').classList.add('online'); waiting = false; log('Connected to NGene.'); requestStatus(); refreshFiles(); };

@@ -81,6 +81,10 @@ typedef struct {
  * or record-only runs. Workers and result storage are created before frontend start and joined
  * before return; no per-window allocation or CPU pinning is performed. The OS places workers
  * on cores, while idle workers dynamically claim channel jobs. All channels complete a window
+ * in two waves: tracking/holdover/fast reacquisition, then acquisition. Optional load callbacks
+ * run before either wave and can restrict acquisition admission without skipping tracking input.
+ * This cooperative priority is not a hard real-time deadline or OS thread-priority guarantee.
+ * All callbacks complete
  * before its ring lease is released or the next window begins. Channel workspace must be
  * private or explicitly synchronized; never rely on callback order in parallel mode. Every
  * channel runs once in parallel mode even if another fails, then the first error in registration

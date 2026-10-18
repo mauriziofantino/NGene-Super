@@ -74,6 +74,7 @@ typedef struct {
     char host[64];
     /** Expected localhost host and port. */
     char localhost[64];
+    cJSON *moduleSchema;
 } TNgWebServer;
 
 /**
@@ -488,6 +489,51 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     /* Deliberate deep copy before telemetry. Snapshot arrays are values, not borrowed pointers. */
     telemetry = status.analysis;
     cJSON_AddItemToObject(object, "analysis", AnalysisJson(&telemetry, mask));
+    {
+        cJSON *acquisition = cJSON_CreateObject();
+        cJSON *satellites = cJSON_CreateArray();
+        unsigned i;
+        cJSON_AddBoolToObject(acquisition, "enabled", status.acquisition.enabled);
+        Number(acquisition, "channel_count", status.acquisition.channelCount);
+        Number(acquisition, "search_limit", status.acquisition.searchLimit);
+        Number(acquisition, "tracking_channels", (double)status.acquisition.trackingChannels);
+        Counter(acquisition, "deferred_windows", status.acquisition.deferredWindows);
+        Number(acquisition, "fft_size", (double)status.acquisition.fftSize);
+        Number(acquisition, "coherent_ms", 1);
+        Number(acquisition, "noncoherent_sums", status.acquisition.nonCoherentSums);
+        Number(acquisition, "attempted_prn_mask", status.acquisition.attemptedPrnMask);
+        Number(acquisition, "acquired_prn_mask", status.acquisition.acquiredPrnMask);
+        Counter(acquisition, "cycles", status.acquisition.cycles);
+        Counter(acquisition, "resets", status.acquisition.resets);
+        for (i = 0; i < 32; ++i) {
+            const TNgAcquisitionResult *result = &status.acquisition.satellites[i];
+            cJSON *satellite;
+            if (result->prn == 0) continue;
+            satellite = cJSON_CreateObject();
+            Number(satellite, "prn", result->prn);
+            String(satellite, "phase", NgAcquisitionPhaseName(result->phase));
+            Counter(satellite, "sequence", result->sequence);
+            Counter(satellite, "epoch", result->epoch);
+            Counter(satellite, "reference_sample", result->referenceSample);
+            Counter(satellite, "processed_samples", result->processedSamples);
+            Number(satellite, "doppler_hz", result->dopplerHz);
+            Number(satellite, "carrier_hz", result->carrierHz);
+            Number(satellite, "code_rate_hz", result->codeRateHz);
+            Number(satellite, "code_delay_samples", result->codeDelaySamples);
+            Number(satellite, "code_phase_chips", result->codePhaseChips);
+            Number(satellite, "metric", result->metric);
+            Number(satellite, "threshold", result->threshold);
+            Number(satellite, "noncoherent_sums", result->nonCoherentSums);
+            Number(satellite, "confirmation_trials", result->confirmationTrials);
+            Number(satellite, "confirmation_hits", result->confirmationHits);
+            String(satellite, "confirmation_method", result->confirmation == NG_ACQ_CONFIRM_NONE ? "none" : "m_of_n");
+            Number(satellite, "doppler_index", (double)result->dopplerIndex);
+            Number(satellite, "doppler_count", (double)result->dopplerCount);
+            cJSON_AddItemToArray(satellites, satellite);
+        }
+        cJSON_AddItemToObject(acquisition, "satellites", satellites);
+        cJSON_AddItemToObject(object, "acquisition", acquisition);
+    }
     Number(object, "hardware_frequency_hz", (double)status.hardwareFrequencyHz);
     Number(object, "signal_frequency_hz", (double)status.signalFrequencyHz);
     Number(object, "digital_if_hz", (double)status.digitalIfHz);
@@ -1070,6 +1116,13 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngReceiverConfigJs, ngReceiverConfigJsLength);
             return 200;
         }
+        if (strcmp(path, "/module-parameters.js") == 0) {
+            Headers(connection, 200, "text/javascript; charset=utf-8", ngModuleParametersJsLength);
+            mg_write(connection, ngModuleParametersJs, ngModuleParametersJsLength);
+            return 200;
+        }
+        if (strcmp(path, "/api/v1/module-schema") == 0)
+            return JsonReply(connection, 200, cJSON_Duplicate(server->moduleSchema, 1));
         if (strcmp(path, "/style.css") == 0) {
             Headers(connection, 200, "text/css; charset=utf-8", ngStyleCssLength);
             mg_write(connection, ngStyleCss, ngStyleCssLength);
@@ -1091,6 +1144,7 @@ static int Handle(struct mg_connection *connection, void *context)
             cJSON_AddBoolToObject(reply, "bladerf", NgFrontendAvailable(NG_FRONTEND_BLADERF));
             cJSON_AddBoolToObject(reply, "single_source", 1);
             cJSON_AddBoolToObject(reply, "periodogram", 1);
+            cJSON_AddBoolToObject(reply, "gps_acquisition", 1);
             String(reply, "fft_backend", NgFftBackend());
             return JsonReply(connection, 200, reply);
         }
@@ -1558,6 +1612,37 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
  * Result: NG_OK on clean shutdown; NG_ERROR on configuration, bind, thread or startup
  * failures.
  */
+/* Read a descriptor once before listener startup. No disk reads on signal callbacks.
+ * An explicit override fails closed; an invalid file never silently changes the form. */
+static cJSON *LoadModuleSchema(TNgError *error)
+{
+    const char *path = getenv("NGENE_MODULE_SCHEMA");
+    cJSON *schema;
+    if (path && *path) {
+        FILE *file = fopen(path, "rb");
+        char *text;
+        size_t count;
+        if (!file) { NgFail(error, "Cannot open NGENE_MODULE_SCHEMA"); return NULL; }
+        text = malloc(262145);
+        if (!text) { fclose(file); NgFail(error, "Cannot allocate module descriptor"); return NULL; }
+        count = fread(text, 1, 262144, file);
+        if (ferror(file) || count == 262144) {
+            fclose(file); free(text); NgFail(error, "Module descriptor read failed or exceeds 256 KiB"); return NULL;
+        }
+        fclose(file);
+        text[count] = '\0';
+        schema = cJSON_ParseWithOpts(text, NULL, 1);
+        free(text);
+    } else schema = cJSON_ParseWithLength((const char *)ngModuleParametersJson, ngModuleParametersJsonLength);
+    if (!schema || !cJSON_IsObject(schema) ||
+        cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(schema, "version")) != 1 ||
+        !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(schema, "modules")) ||
+        !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(schema, "references"))) {
+        cJSON_Delete(schema); NgFail(error, "Invalid version-1 module descriptor"); return NULL;
+    }
+    return schema;
+}
+
 int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory,
              TNgStopRequested stop, void *stopContext, TNgError *error)
 {
@@ -1591,10 +1676,17 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
         NgMutexDestroy(&server.jsonMutex);
         return NgFail(error, "Cannot initialize file ownership guard");
     }
+    server.moduleSchema = LoadModuleSchema(error);
+    if (!server.moduleSchema) {
+        NgMutexDestroy(&server.commandMutex);
+        NgMutexDestroy(&server.jsonMutex);
+        return NG_ERROR;
+    }
     for (k = 0; k < sizeof(random); ++k) {
         snprintf(server.token + 2 * k, 3, "%02x", random[k]);
     }
     if (NgControlCreate(config, outputDirectory, &server.control, error) != NG_OK) {
+        cJSON_Delete(server.moduleSchema);
         NgMutexDestroy(&server.commandMutex);
         NgMutexDestroy(&server.jsonMutex);
         return NG_ERROR;
@@ -1605,6 +1697,7 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     mg_init_library(0);
     server.http = mg_start(NULL, &server, options);
     if (server.http == NULL) {
+        cJSON_Delete(server.moduleSchema);
         NgControlDestroy(server.control);
         NgMutexDestroy(&server.commandMutex);
         NgMutexDestroy(&server.jsonMutex);
@@ -1623,6 +1716,7 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     }
     NgAtomicSet(&server.quit, 1);
     mg_stop(server.http);
+    cJSON_Delete(server.moduleSchema);
     NgControlDestroy(server.control);
     mg_exit_library();
     NgMutexDestroy(&server.commandMutex);

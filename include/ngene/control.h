@@ -1,6 +1,7 @@
 /** @file control.h @brief Thread-safe lifecycle control, independent of HTTP and GUI. */
 #ifndef NGENE_CONTROL_H
 #define NGENE_CONTROL_H
+#include "ngene/acquisition_receiver.h"
 #include "ngene/receiver.h"
 
 /** @brief Opaque owned TNgControl handle; release with the matching destroy operation. */
@@ -39,6 +40,8 @@ typedef struct {
     TNgRecordingStats recording;
     /** Optional diagnostic settings or an owned diagnostic snapshot. */
     TNgAnalysisSnapshot analysis;
+    /** GPS acquisition stages and confirmed results; independent of optional RF plots. */
+    TNgAcquisitionReceiverStatus acquisition;
     /** Cumulative written pairs including completed capture sessions. */
     uint64_t totalWrittenSamples;
     /** Baseband filter bandwidth applied by the source, in hertz. */

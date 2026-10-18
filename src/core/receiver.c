@@ -158,15 +158,17 @@ int NgReceiverRunScheduled(const TNgConfig *config, TNgFrontend *frontend,
     if (NgSampleBytes(frontend->info.format) == 0 || frontend->info.sampleRateHz == 0) {
         return NgFail(error, "Frontend format/rate does not match increment-1 contract");
     }
-    if (channelCount != 0 && frontend->info.format != NG_FORMAT_CI8) {
-        return NgFail(error, "Current channel API expects CI8; native multibit channel kernels are "
-                             "a later increment");
-    }
     for (k = 0; k < channelCount; ++k) {
         size_t j;
         if (channels[k].ops == NULL || channels[k].ops->process == NULL ||
             NgChannelTransitionValid(channels[k].state, channels[k].state) == 0) {
             return NgFail(error, "Invalid channel registration");
+        }
+        if ((channels[k].ops->nativeFormats != 0 &&
+             (channels[k].ops->nativeFormats & (1u << frontend->info.format)) == 0) ||
+            (channels[k].ops->nativeFormats == 0 && frontend->info.format != NG_FORMAT_CI8)) {
+            return NgFail(error, "Channel %u does not support the native frontend sample format",
+                          channels[k].id.instanceId);
         }
         for (j = 0; j < k; ++j) {
             if (channels[j].id.instanceId == channels[k].id.instanceId) {

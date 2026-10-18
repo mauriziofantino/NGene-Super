@@ -5,6 +5,7 @@
 #include "ngene/capture.h"
 #include "ngene/build.h"
 #include "ngene/dsp/fft.h"
+#include "ngene/acquisition_receiver.h"
 #ifdef NGENE_HAVE_WEB
 #include "ngene/web.h"
 #endif
@@ -215,7 +216,9 @@ int main(int argc, char **argv)
            NGENE_VERSION, NGENE_OS, NGENE_ARCH, frontend.info.sourceName,
            NgSampleFormatName(frontend.info.format), frontend.info.sampleRateHz,
            frontend.info.centerFrequencyHz, frontend.info.bandwidthHz, config.windowSamples);
-    puts("Capture core active; GNSS algorithms are not yet attached.");
+    puts(config.acquisition.enabled && !config.recordOnly
+             ? "GPS L1 C/A acquisition enabled; tracking is not attached."
+             : "I/Q capture core active; GPS acquisition disabled.");
     if (config.dcRemoval != 0 &&
         NgConditionerDcCreateFormat(config.windowSamples, config.dcShift, frontend.info.format,
                                     &conditioner, &error) != NG_OK) {
@@ -225,8 +228,35 @@ int main(int argc, char **argv)
     }
     printf("signal=%" PRIu64 " Hz digital_IF=%" PRId64 " Hz conditioning=%s\n",
            frontend.info.signalFrequencyHz, frontend.info.digitalIfHz, conditioner.name);
-    result =
-        NgReceiverRun(&config, &frontend, &conditioner, NULL, 0, ShouldStop, NULL, &stats, &error);
+    {
+        TNgAcquisitionReceiver *acquisition = NULL;
+        TNgAcquisitionReceiverStatus acquisitionStatus;
+        TNgChannel *channels;
+        TNgReceiverExecution execution;
+        size_t count = 0;
+        unsigned i;
+        result = config.recordOnly ? NG_OK :
+            NgAcquisitionReceiverCreate(&config.acquisition, &frontend.info, &acquisition, &error);
+        channels = NgAcquisitionReceiverChannels(acquisition, &count);
+        execution = NgAcquisitionReceiverExecution(acquisition);
+        if (result == NG_OK) {
+            result = NgReceiverRunScheduled(&config, &frontend, &conditioner, channels, count,
+                                            ShouldStop, NULL, &stats, &execution, NULL, &error);
+        } else {
+            memset(&stats, 0, sizeof(stats));
+        }
+        NgAcquisitionReceiverRead(acquisition, &acquisitionStatus);
+        for (i = 0; i < 32; ++i) {
+            const TNgAcquisitionResult *acquired = &acquisitionStatus.satellites[i];
+            if (acquired->phase == NG_ACQ_ACQUIRED) {
+                printf("GPS PRN %u acquired: doppler=%.3f Hz delay=%.3f samples epoch=%" PRIu64
+                       " reference_sample=%" PRIu64 " metric=%.9g threshold=%.9g\n",
+                       acquired->prn, acquired->dopplerHz, acquired->codeDelaySamples,
+                       acquired->epoch, acquired->referenceSample, acquired->metric, acquired->threshold);
+            }
+        }
+        NgAcquisitionReceiverDestroy(acquisition);
+    }
     printf("windows=%" PRIu64 " processed_pairs=%" PRIu64 " written_pairs=%" PRIu64 " gaps=%" PRIu64
            " known_input_drops=%" PRIu64 " queued_discarded_at_stop=%" PRIu64
            " wall_seconds=%.6f\n",

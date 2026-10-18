@@ -17,7 +17,8 @@ typedef struct {
     uint32_t instanceId;
     /** Constellation identifier supplied by the channel allocator. */
     uint32_t constellation;
-    /** Satellite/PRN identifier supplied by the channel allocator. */
+    /** Satellite/PRN identifier supplied by the channel allocator; zero while unassigned.
+     * A scanning module may update its own registration during its ordered callback. */
     uint32_t satellite;
     /** Signal identifier for the selected satellite. */
     uint32_t signal;
@@ -41,6 +42,14 @@ typedef struct {
      */
     int (*process)(void *context, const TNgChannelId *id, TNgChannelState state,
                    const TNgIqView *window, TNgChannelState *next, TNgError *error);
+    /** Optional supported-format bitset (1u << TNgSampleFormat). Zero preserves the original
+     * CI8-only contract. Declare additional formats only when the callback reads them natively. */
+    unsigned nativeFormats;
+    /** Optional load notification, called on the receiver thread before this window's
+     * callbacks, with no channel callback active. Counts TRACKING, HOLDOVER and fast
+     * reacquisition registrations. Acquisition modules can reduce admitted searches;
+     * tracking still receives every sample. No I/O or allocation here. */
+    void (*setTrackingLoad)(void *context, size_t trackingChannels);
 } TNgChannelOps;
 
 /** @brief Channel identity, lifecycle and independently owned algorithm context. */

@@ -85,6 +85,8 @@ typedef struct {
     TNgReceiverStats stats;
     /** Final diagnostic, accessed after receiver-thread join. */
     TNgError error;
+    size_t reportedLoad;
+    unsigned loadNotifications;
 } TNgSchedulerFixture;
 
 /** @brief Reset the owned source before one run.
@@ -278,7 +280,7 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
 }
 
 /** @brief Shared immutable channel operations; mutable state belongs to the fixture. */
-static const TNgChannelOps channelOps = {Process};
+static const TNgChannelOps channelOps = {Process, 0};
 
 /** @brief Verify that the receiver-thread hook runs only after the entire window joins.
  * @param context Borrowed synchronized fixture.
@@ -473,8 +475,55 @@ static void TestInvalidExecution(void)
 /** @brief Run deterministic scheduler contracts without RF hardware or timing ratios.
  * @return Zero after every contract succeeds; failed assertions terminate with a diagnostic.
  */
+static void PriorityLoad(void *context, size_t trackingChannels)
+{
+    TNgSchedulerFixture *fixture = context;
+    CHECK(fixture->activeCount == 0);
+    fixture->reportedLoad = trackingChannels;
+    ++fixture->loadNotifications;
+}
+
+static int PriorityProcess(void *context, const TNgChannelId *id, TNgChannelState state,
+                           const TNgIqView *window, TNgChannelState *next, TNgError *error)
+{
+    TNgSchedulerFixture *fixture = context;
+    unsigned frame;
+    (void)error;
+    NgMutexLock(&fixture->mutex);
+    frame = fixture->calls[id->instanceId];
+    CheckWindow(window, frame);
+    CHECK(fixture->reportedLoad == 2);
+    CHECK(fixture->loadNotifications == 3 * (frame + 1));
+    if (id->instanceId == 0) {
+        CHECK(fixture->calls[1] == frame + 1);
+        CHECK(fixture->calls[2] == frame + 1);
+    }
+    ++fixture->calls[id->instanceId];
+    *next = state;
+    NgMutexUnlock(&fixture->mutex);
+    return NG_OK;
+}
+
+static void TestTrackingPriority(void)
+{
+    static const TNgChannelOps ops = {PriorityProcess, 0, PriorityLoad};
+    size_t workers, channel;
+    for (workers = 1; workers <= 3; workers += 2) {
+        TNgSchedulerFixture fixture;
+        Initialize(&fixture, NG_TEST_SERIAL, 3, workers);
+        fixture.channels[1].state = NG_CHANNEL_TRACKING;
+        fixture.channels[2].state = NG_CHANNEL_HOLDOVER;
+        for (channel = 0; channel < 3; ++channel) fixture.channels[channel].ops = &ops;
+        RunScheduled(&fixture);
+        CHECK(fixture.result == NG_OK && fixture.hookCalls == 5);
+        for (channel = 0; channel < 3; ++channel) CHECK(fixture.calls[channel] == 5);
+        Destroy(&fixture);
+    }
+}
+
 int main(void)
 {
+    TestTrackingPriority();
     TestInvalidExecution();
     TestSerialCompatibility();
     TestParallelWindows();

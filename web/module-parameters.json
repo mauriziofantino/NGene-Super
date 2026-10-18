@@ -1,0 +1,1039 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "id": "gps_l1_ca_ngene",
+      "groups": [
+        {
+          "id": "gps_receiver",
+          "topic": "receiver",
+          "title": "GPS receiver",
+          "fields": [
+            {
+              "key": "acquisition.enabled",
+              "label": "GPS L1 C/A acquisition",
+              "type": "select",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Off"
+                },
+                {
+                  "value": "true",
+                  "label": "On"
+                }
+              ],
+              "hint": "Starts with the receiver; Galileo acquisition and tracking are not integrated."
+            },
+            {
+              "key": "acquisition.gps_channels",
+              "label": "Concurrent GPS searches",
+              "type": "number",
+              "unit": "channels",
+              "hint": "Independent acquisition contexts; OS schedules up to four workers.",
+              "min": 1,
+              "max": 32,
+              "integer": true
+            },
+            {
+              "key": "acquisition.gps_prn_mask",
+              "label": "GPS PRN selection mask",
+              "type": "number",
+              "hint": "4294967295 selects PRNs 1–32. Bit 0 selects PRN 1, bit 31 selects PRN 32.",
+              "min": 0,
+              "max": 4294967295,
+              "integer": true
+            }
+          ]
+        },
+        {
+          "id": "gps_methods",
+          "topic": "acquisition",
+          "title": "Acquisition strategy",
+          "note": "Search, detection and confirmation are independent choices. This build uses NGene compressed FFT correlation with 1 ms coherent periods. Detection probability depends on signal strength and integration; it is not an independent setting.",
+          "fields": [
+            {
+              "key": "acquisition.search_method",
+              "label": "Coarse search",
+              "type": "select",
+              "default": "ngene_fft",
+              "options": [
+                {
+                  "value": "ngene_fft",
+                  "label": "NGene compressed FFT"
+                }
+              ],
+              "hint": "FFT correlates code delays in parallel; Doppler bins are searched sequentially. Other search engines require a registered receiver module."
+            },
+            {
+              "key": "acquisition.detector",
+              "label": "Coarse detector",
+              "type": "select",
+              "default": "pfa",
+              "options": [
+                {
+                  "value": "pfa",
+                  "label": "Threshold from false-alarm probability"
+                }
+              ],
+              "hint": "Bayesian detectors are not implemented in this build."
+            }
+          ]
+        },
+        {
+          "id": "gps_coarse",
+          "topic": "acquisition",
+          "title": "GPS acquisition",
+          "fields": [
+            {
+              "key": "acquisition.fft_size",
+              "label": "Maximum coarse FFT size",
+              "type": "select",
+              "options": [
+                {
+                  "value": "8",
+                  "label": "8"
+                },
+                {
+                  "value": "16",
+                  "label": "16"
+                },
+                {
+                  "value": "32",
+                  "label": "32"
+                },
+                {
+                  "value": "64",
+                  "label": "64"
+                },
+                {
+                  "value": "128",
+                  "label": "128"
+                },
+                {
+                  "value": "256",
+                  "label": "256"
+                },
+                {
+                  "value": "512",
+                  "label": "512"
+                },
+                {
+                  "value": "1024",
+                  "label": "1024"
+                },
+                {
+                  "value": "2048",
+                  "label": "2048"
+                },
+                {
+                  "value": "4096",
+                  "label": "4096"
+                },
+                {
+                  "value": "8192",
+                  "label": "8192"
+                },
+                {
+                  "value": "16384",
+                  "label": "16384"
+                }
+              ],
+              "unit": "points",
+              "hint": "NGene accumulation/compression; automatically reduced when fewer input samples are available."
+            },
+            {
+              "key": "acquisition.doppler_max_hz",
+              "label": "Doppler search half-width",
+              "type": "number",
+              "unit": "Hz",
+              "min": 0,
+              "max": 100000,
+              "integer": false
+            },
+            {
+              "key": "acquisition.doppler_step_hz",
+              "label": "Doppler search step",
+              "type": "number",
+              "unit": "Hz",
+              "min": 0,
+              "integer": false,
+              "exclusiveMin": true
+            },
+            {
+              "key": "acquisition.code_step_chips",
+              "label": "Supplementary code delay step",
+              "type": "number",
+              "unit": "chip",
+              "min": 0,
+              "max": 1023,
+              "integer": false,
+              "exclusiveMin": true
+            },
+            {
+              "key": "acquisition.false_alarm_probability",
+              "label": "False alarm probability per cell",
+              "type": "number",
+              "min": 1e-15,
+              "max": 1,
+              "integer": false,
+              "exclusiveMax": true,
+              "hint": "Nominal probability for one tested cell under the white-noise reference model, not for the full PRN/Doppler search or arbitrary interference."
+            },
+            {
+              "key": "acquisition.noncoherent_sums",
+              "label": "Maximum noncoherent sums",
+              "type": "number",
+              "unit": "1 ms periods",
+              "min": 1,
+              "max": 1024,
+              "integer": true
+            }
+          ]
+        },
+        {
+          "id": "gps_refinement",
+          "topic": "acquisition",
+          "title": "Acquisition refinement",
+          "fields": [
+            {
+              "key": "acquisition.refinement_doppler_span_hz",
+              "label": "Doppler refinement half-width",
+              "type": "number",
+              "unit": "Hz",
+              "min": 0,
+              "max": 100000,
+              "integer": false
+            },
+            {
+              "key": "acquisition.refinement_doppler_step_hz",
+              "label": "Doppler refinement step",
+              "type": "number",
+              "unit": "Hz",
+              "min": 0,
+              "integer": false,
+              "exclusiveMin": true
+            },
+            {
+              "key": "acquisition.refinement_code_span_chips",
+              "label": "Code refinement half-width",
+              "type": "number",
+              "unit": "chip",
+              "min": 0,
+              "max": 16,
+              "integer": false
+            },
+            {
+              "key": "acquisition.refinement_code_step_samples",
+              "label": "Code refinement step",
+              "type": "number",
+              "unit": "samples",
+              "min": 1,
+              "max": 4294967295,
+              "integer": true
+            }
+          ]
+        },
+        {
+          "id": "gps_confirmation",
+          "topic": "acquisition",
+          "title": "Optional confirmation",
+          "note": "None accepts the coarse detection after Doppler/code refinement. M-of-N checks fresh signal periods. TONG is not implemented.",
+          "fields": [
+            {
+              "key": "acquisition.confirmation",
+              "label": "Confirmation method",
+              "type": "select",
+              "default": "m_of_n",
+              "options": [
+                {
+                  "value": "none",
+                  "label": "None"
+                },
+                {
+                  "value": "m_of_n",
+                  "label": "M-of-N"
+                }
+              ]
+            },
+            {
+              "key": "acquisition.confirmation_attempts",
+              "label": "Confirmation attempts (N)",
+              "type": "number",
+              "min": 1,
+              "max": 1024,
+              "integer": true,
+              "visibleWhen": {
+                "acquisition.confirmation": "m_of_n"
+              }
+            },
+            {
+              "key": "acquisition.confirmation_successes",
+              "label": "Required confirmation successes (M)",
+              "type": "number",
+              "min": 1,
+              "max": 1024,
+              "integer": true,
+              "visibleWhen": {
+                "acquisition.confirmation": "m_of_n"
+              }
+            }
+          ]
+        }
+      ],
+      "rules": [
+        {
+          "keys": [
+            "acquisition.confirmation_successes",
+            "acquisition.confirmation_attempts"
+          ],
+          "when": {
+            "acquisition.confirmation": "m_of_n"
+          },
+          "kind": "lessEqual",
+          "left": "acquisition.confirmation_successes",
+          "right": "acquisition.confirmation_attempts",
+          "message": "Confirmation requires M successes to be no greater than N attempts."
+        },
+        {
+          "keys": [
+            "acquisition.code_step_chips"
+          ],
+          "kind": "ratioLess",
+          "numerator": 1023,
+          "denominator": "acquisition.code_step_chips",
+          "limit": 65536,
+          "message": "The delay grid must have fewer than 65536 positions."
+        },
+        {
+          "keys": [
+            "acquisition.doppler_max_hz",
+            "acquisition.doppler_step_hz"
+          ],
+          "kind": "ratioLess",
+          "numerator": "acquisition.doppler_max_hz",
+          "scale": 2,
+          "denominator": "acquisition.doppler_step_hz",
+          "limit": 65536,
+          "message": "The Doppler grid must have fewer than 65536 positions."
+        },
+        {
+          "keys": [
+            "acquisition.refinement_doppler_span_hz",
+            "acquisition.refinement_doppler_step_hz"
+          ],
+          "kind": "ratioLess",
+          "numerator": "acquisition.refinement_doppler_span_hz",
+          "scale": 2,
+          "denominator": "acquisition.refinement_doppler_step_hz",
+          "limit": 65536,
+          "message": "The Doppler grid must have fewer than 65536 positions."
+        },
+        {
+          "keys": [
+            "frontend.sample_rate_hz"
+          ],
+          "when": {
+            "acquisition.enabled": "true"
+          },
+          "kind": "minimum",
+          "key": "frontend.sample_rate_hz",
+          "value": 1023000,
+          "message": "GPS acquisition requires at least 1023000 complex samples/s."
+        },
+        {
+          "keys": [
+            "acquisition.gps_prn_mask"
+          ],
+          "when": {
+            "acquisition.enabled": "true"
+          },
+          "kind": "minimum",
+          "key": "acquisition.gps_prn_mask",
+          "value": 1,
+          "message": "Select at least one GPS PRN while acquisition is enabled."
+        }
+      ]
+    }
+  ],
+  "references": {
+    "receiver": [
+      {
+        "title": "Constellations & channel allocation",
+        "fields": [
+          {
+            "key": "Number of supported Galileo channels",
+            "label": "Galileo channels",
+            "value": "8",
+            "unit": "channels",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Number of supported EGNOS channels",
+            "label": "SBAS / EGNOS channels",
+            "value": "1",
+            "unit": "channel",
+            "hint": "The original receiver supports at most one EGNOS channel.",
+            "options": null
+          }
+        ],
+        "note": "GPS acquisition uses the operational channel and PRN settings below. Galileo and EGNOS modules are not integrated."
+      },
+      {
+        "title": "Signal selection & receiver clock",
+        "fields": [
+          {
+            "key": "Automatic Configuration",
+            "label": "PRN allocation",
+            "value": "1",
+            "unit": "",
+            "hint": "Manual allocation uses the original PRN_List.conf signal list.",
+            "options": [
+              [
+                "1",
+                "Automatic PRN search"
+              ],
+              [
+                "0",
+                "Manual PRN list"
+              ]
+            ]
+          },
+          {
+            "key": "Enable all Galileo PRNs",
+            "label": "Search all Galileo PRNs",
+            "value": "1",
+            "unit": "",
+            "hint": "When disabled, the original receiver uses its configured Galileo PRN list.",
+            "options": [
+              [
+                "0",
+                "Disabled"
+              ],
+              [
+                "1",
+                "Enabled"
+              ]
+            ]
+          },
+          {
+            "key": "Receiver clock emulation",
+            "label": "Use host clock as receiver time",
+            "value": "0",
+            "unit": "",
+            "hint": "The original receiver disables clock emulation during file replay.",
+            "options": [
+              [
+                "0",
+                "Disabled"
+              ],
+              [
+                "1",
+                "Enabled"
+              ]
+            ]
+          },
+          {
+            "key": "Receiver clock error",
+            "label": "Maximum host-clock error",
+            "value": "120",
+            "unit": "s",
+            "hint": "",
+            "options": null
+          }
+        ],
+        "note": ""
+      }
+    ],
+    "acquisition": [
+      {
+        "title": "Galileo",
+        "fields": [
+          {
+            "key": "Galileo false detection probability",
+            "label": "False detection probability",
+            "value": "1e-9",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo Maximum Doppler Frequency (Hz)",
+            "label": "Doppler search half-width",
+            "value": "5000",
+            "unit": "Hz",
+            "hint": "Search from −this value to +this value around the expected signal.",
+            "options": null
+          },
+          {
+            "key": "Galileo Doppler Frequency step (Hz)",
+            "label": "Doppler search step",
+            "value": "87",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo Code delay step (Chip)",
+            "label": "Code delay step",
+            "value": "0.25",
+            "unit": "chip",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo non coherent sums (code periods)",
+            "label": "Noncoherent accumulation",
+            "value": "8",
+            "unit": "code periods",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo CN N - number of attempts",
+            "label": "Confirmation attempts (N)",
+            "value": "4",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo CN M - number of required successes",
+            "label": "Required successes (M)",
+            "value": "3",
+            "unit": "",
+            "hint": "",
+            "options": null
+          }
+        ],
+        "note": ""
+      },
+      {
+        "title": "EGNOS",
+        "fields": [
+          {
+            "key": "EGNOS false detection probability",
+            "label": "False detection probability",
+            "value": "1e-9",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "EGNOS Maximum Doppler Frequency (Hz)",
+            "label": "Doppler search half-width",
+            "value": "4000",
+            "unit": "Hz",
+            "hint": "Search from −this value to +this value around the expected signal.",
+            "options": null
+          },
+          {
+            "key": "EGNOS Doppler Frequency step (Hz)",
+            "label": "Doppler search step",
+            "value": "250",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "EGNOS Code delay step (Chip)",
+            "label": "Code delay step",
+            "value": "0.25",
+            "unit": "chip",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "EGNOS non coherent sums (code periods)",
+            "label": "Noncoherent accumulation",
+            "value": "1",
+            "unit": "code periods",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "EGNOS CN N - number of attempts",
+            "label": "Confirmation attempts (N)",
+            "value": "4",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "EGNOS CN M - number of required successes",
+            "label": "Required successes (M)",
+            "value": "3",
+            "unit": "",
+            "hint": "",
+            "options": null
+          }
+        ],
+        "note": ""
+      }
+    ],
+    "tracking": [
+      {
+        "title": "GPS tracking loops",
+        "fields": [
+          {
+            "key": "GPS userIntperiod",
+            "label": "Coherent integration period",
+            "value": "1",
+            "unit": "ms",
+            "hint": "",
+            "options": [
+              [
+                "1",
+                "1"
+              ],
+              [
+                "2",
+                "2"
+              ],
+              [
+                "4",
+                "4"
+              ],
+              [
+                "5",
+                "5"
+              ],
+              [
+                "10",
+                "10"
+              ],
+              [
+                "20",
+                "20"
+              ]
+            ]
+          },
+          {
+            "key": "GPS DLLbandwidth",
+            "label": "DLL bandwidth",
+            "value": "2",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "GPS DLLgain",
+            "label": "DLL gain",
+            "value": "1",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "GPS FLLbandwidth",
+            "label": "FLL bandwidth",
+            "value": "15",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "GPS FLLgain",
+            "label": "FLL gain",
+            "value": "1",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "GPS PLLbandwidth",
+            "label": "PLL bandwidth",
+            "value": "15",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "GPS PLLgain",
+            "label": "PLL gain",
+            "value": "1",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "GPS spacing",
+            "label": "Early–late spacing",
+            "value": "0.8",
+            "unit": "chip",
+            "hint": "Total distance between Early and Late; original range is greater than 0 and at most 2 chips.",
+            "options": null
+          }
+        ],
+        "note": ""
+      },
+      {
+        "title": "Galileo tracking loops",
+        "fields": [
+          {
+            "key": "Galileo DLLbandwidth",
+            "label": "DLL bandwidth",
+            "value": "2",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo DLLgain",
+            "label": "DLL gain",
+            "value": "1",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo FLLbandwidth",
+            "label": "FLL bandwidth",
+            "value": "15",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo FLLgain",
+            "label": "FLL gain",
+            "value": "1",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo PLLbandwidth",
+            "label": "PLL bandwidth",
+            "value": "15",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo PLLgain",
+            "label": "PLL gain",
+            "value": "1",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Galileo spacing",
+            "label": "Early–late spacing",
+            "value": "0.4",
+            "unit": "chip",
+            "hint": "Total distance between Early and Late; original range is greater than 0 and at most 2 chips.",
+            "options": null
+          }
+        ],
+        "note": "The original Galileo tracking integration period is fixed at 4 ms."
+      },
+      {
+        "title": "Lock and integration control",
+        "fields": [
+          {
+            "key": "CN0 cutoff",
+            "label": "C/N₀ cutoff",
+            "value": "30",
+            "unit": "dB-Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "FLLPLLChoiceFilter Length",
+            "label": "FLL / PLL decision filter length",
+            "value": "20",
+            "unit": "updates",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "FLLPLLChoiceFilterUpdateTime",
+            "label": "FLL / PLL decision interval",
+            "value": "100",
+            "unit": "ms",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "PLLFLLthreshold",
+            "label": "FLL / PLL transition threshold",
+            "value": "1",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "changePeriodCtrlLength",
+            "label": "Integration transition checks",
+            "value": "5",
+            "unit": "transitions",
+            "hint": "Checks valid data transitions before switching to the requested integration period.",
+            "options": null
+          },
+          {
+            "key": "EGNOS userIntperiod",
+            "label": "EGNOS integration period",
+            "value": "1",
+            "unit": "ms",
+            "hint": "EGNOS reuses the GPS tracking loop parameters.",
+            "options": null
+          }
+        ],
+        "note": ""
+      },
+      {
+        "title": "Additional correlators",
+        "fields": [
+          {
+            "key": "Multiple Correlators Flag",
+            "label": "Enable multiple correlators",
+            "value": "0",
+            "unit": "",
+            "hint": "",
+            "options": [
+              [
+                "0",
+                "Disabled"
+              ],
+              [
+                "1",
+                "Enabled"
+              ]
+            ]
+          },
+          {
+            "key": "Number Of Multiple Correlators",
+            "label": "Number of correlators",
+            "value": "5",
+            "unit": "",
+            "hint": "The original parser uses an odd count of at least three.",
+            "options": null
+          },
+          {
+            "key": "Multiple Correlators GPS Spacing",
+            "label": "GPS correlator spacing",
+            "value": "4",
+            "unit": "samples",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Multiple Correlators Galileo Spacing",
+            "label": "Galileo correlator spacing",
+            "value": "2",
+            "unit": "samples",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Multiple Correlators EGNOS Spacing",
+            "label": "EGNOS correlator spacing",
+            "value": "4",
+            "unit": "samples",
+            "hint": "",
+            "options": null
+          }
+        ],
+        "note": ""
+      }
+    ],
+    "navigation": [
+      {
+        "title": "Navigation time",
+        "fields": [
+          {
+            "key": "GPS WN correction",
+            "label": "GPS week-number rollover correction",
+            "value": "2048",
+            "unit": "weeks",
+            "hint": "Original NavigationMessages.conf reference; choose the rollover epoch for the recorded or live signal when decoding is integrated.",
+            "options": null
+          },
+          {
+            "key": "Default Leap Seconds",
+            "label": "Fallback leap seconds",
+            "value": "18",
+            "unit": "s",
+            "hint": "Original reference value used until valid navigation time data is available.",
+            "options": null
+          }
+        ],
+        "note": ""
+      },
+      {
+        "title": "Navigation solution",
+        "fields": [
+          {
+            "key": "PVT rate",
+            "label": "Solution / pseudorange rate",
+            "value": "1",
+            "unit": "Hz",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "PVT method",
+            "label": "PVT method",
+            "value": "0",
+            "unit": "",
+            "hint": "",
+            "options": [
+              [
+                "0",
+                "Least squares (LMS)"
+              ],
+              [
+                "1",
+                "Kalman filter"
+              ]
+            ]
+          },
+          {
+            "key": "Max GDOP",
+            "label": "Maximum GDOP",
+            "value": "30",
+            "unit": "",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "CSM filter length",
+            "label": "Carrier-smoothing filter length",
+            "value": "32",
+            "unit": "",
+            "hint": "0 disables carrier smoothing.",
+            "options": null
+          },
+          {
+            "key": "Static Receiver",
+            "label": "Static receiver",
+            "value": "1",
+            "unit": "",
+            "hint": "Disable for a moving receiver.",
+            "options": [
+              [
+                "0",
+                "Disabled"
+              ],
+              [
+                "1",
+                "Enabled"
+              ]
+            ]
+          }
+        ],
+        "note": ""
+      },
+      {
+        "title": "Satellite selection & corrections",
+        "fields": [
+          {
+            "key": "Use elevation mask",
+            "label": "Use elevation mask",
+            "value": "1",
+            "unit": "",
+            "hint": "",
+            "options": [
+              [
+                "0",
+                "Disabled"
+              ],
+              [
+                "1",
+                "Enabled"
+              ]
+            ]
+          },
+          {
+            "key": "Elevation mask",
+            "label": "Minimum elevation",
+            "value": "5",
+            "unit": "degrees",
+            "hint": "",
+            "options": null
+          },
+          {
+            "key": "Use urban canyon mask",
+            "label": "Use urban canyon mask",
+            "value": "0",
+            "unit": "",
+            "hint": "The original configuration recommends disabling the elevation mask when using the urban canyon mask.",
+            "options": [
+              [
+                "0",
+                "Disabled"
+              ],
+              [
+                "1",
+                "Enabled"
+              ]
+            ]
+          },
+          {
+            "key": "Use EGNOS",
+            "label": "Apply EGNOS corrections",
+            "value": "1",
+            "unit": "",
+            "hint": "",
+            "options": [
+              [
+                "0",
+                "Disabled"
+              ],
+              [
+                "1",
+                "Enabled"
+              ]
+            ]
+          },
+          {
+            "key": "Not Authenticated Sats in PVT",
+            "label": "OSNMA satellite selection",
+            "value": "2",
+            "unit": "",
+            "hint": "",
+            "options": [
+              [
+                "0",
+                "Require authentication"
+              ],
+              [
+                "1",
+                "Exclude failed authentication"
+              ],
+              [
+                "2",
+                "No authentication-based exclusion"
+              ]
+            ]
+          },
+          {
+            "key": "Enable RedCED in PVT",
+            "label": "Galileo reduced ephemerides (RedCED)",
+            "value": "0",
+            "unit": "",
+            "hint": "",
+            "options": [
+              [
+                "0",
+                "Disabled"
+              ],
+              [
+                "1",
+                "Use when full CED is unavailable"
+              ],
+              [
+                "2",
+                "RedCED only"
+              ]
+            ]
+          }
+        ],
+        "note": ""
+      }
+    ]
+  }
+}

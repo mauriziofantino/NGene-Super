@@ -400,9 +400,12 @@ static int Observe(void *context, const TNgChannelId *id, TNgChannelState state,
     CHECK(frame < 5);
     CHECK(view->meta.firstSample == first[frame]);
     CHECK(view->meta.count == counts[frame]);
-    if (channel == 0) {
+    /* Tracking may run before acquisition. Whichever channel enters first records
+     * the lease; the second must see the identical pointer for this window. */
+    if (o->calls[1u - channel] == frame) {
         o->firstPointer = view->samples;
     } else {
+        CHECK(o->calls[1u - channel] == frame + 1);
         CHECK(view->samples == o->firstPointer);
     }
     CHECK(((view->meta.flags & NG_BLOCK_PARTIAL) != 0) == (frame == 2 || frame == 4));
@@ -436,7 +439,7 @@ static void TestEngine(void)
         &mock,
         {100000, 1575420000, 0, NG_FORMAT_CI8, "mock", "test", NULL, 1575420000, 0}};
     TNgConditioner conditioner = NgConditionerBypass();
-    const TNgChannelOps ops = {Observe};
+    const TNgChannelOps ops = {Observe, 0};
     TNgChannel channels[2] = {{{0, 0, 1, 0}, NG_CHANNEL_ACQUISITION, &ops, &observed},
                               {{1, 0, 2, 0}, NG_CHANNEL_TRACKING, &ops, &observed}};
     NgConfigDefaults(&c);

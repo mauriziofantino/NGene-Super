@@ -44,6 +44,8 @@ struct TNgControl {
     TNgRecorder *recorder;
     /** Owned optional diagnostic worker; destroyed after the receiver stops. */
     TNgAnalysis *analysis;
+    /** Run-owned module adapter; publication/lifetime protected by mutex. */
+    TNgAcquisitionReceiver *acquisition;
     /** Cumulative pairs from completed recording sessions. */
     uint64_t completedWritten;
     /** Copied rate/RF metadata; identity strings point into controller-owned storage. */
@@ -396,6 +398,10 @@ static void ReceiverWorker(void *context)
     TNgControl *c = context;
     TNgFrontend source;
     TNgConditioner conditioner = NgConditionerBypass();
+    TNgAcquisitionReceiver *acquisition = NULL;
+    TNgChannel *channels = NULL;
+    size_t channelCount = 0;
+    TNgReceiverExecution execution = {1};
     TNgReceiverHooks hooks = {c, 1, Started, Block, Progress, RawBlock};
     memset(&source, 0, sizeof(source));
     memset(&c->finalStats, 0, sizeof(c->finalStats));
@@ -426,10 +432,27 @@ static void ReceiverWorker(void *context)
             c->workerResult = OpenRecording(c, &c->workerError);
         }
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
-            c->workerResult =
-                NgReceiverRunEx(&c->runConfig, &source, &conditioner, NULL, 0, StopRequested, c,
-                                &c->finalStats, &hooks, &c->workerError);
+            if (!c->runConfig.recordOnly) {
+                c->workerResult = NgAcquisitionReceiverCreate(&c->runConfig.acquisition, &source.info,
+                                                              &acquisition, &c->workerError);
+            }
+            channels = NgAcquisitionReceiverChannels(acquisition, &channelCount);
+            execution = NgAcquisitionReceiverExecution(acquisition);
+            NgMutexLock(&c->mutex);
+            c->acquisition = acquisition;
+            NgMutexUnlock(&c->mutex);
         }
+        if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
+            c->workerResult =
+                NgReceiverRunScheduled(&c->runConfig, &source, &conditioner, channels, channelCount,
+                                      StopRequested, c, &c->finalStats, &execution, &hooks,
+                                      &c->workerError);
+        }
+        NgMutexLock(&c->mutex);
+        NgAcquisitionReceiverRead(acquisition, &c->status.acquisition);
+        c->acquisition = NULL;
+        NgMutexUnlock(&c->mutex);
+        NgAcquisitionReceiverDestroy(acquisition);
         NgFrontendDestroy(&source);
     }
     NgConditionerDcDestroy(&conditioner);
@@ -761,6 +784,7 @@ int NgControlRequest(TNgControl *control, TNgCommand command, uint64_t revision,
             control->status.recordingState =
                 (control->config.recordingEnabled) != 0 ? NG_REC_STARTING : NG_REC_OFF;
             memset(&control->status.analysis, 0, sizeof(control->status.analysis));
+            memset(&control->status.acquisition, 0, sizeof(control->status.acquisition));
             memset(&control->status.receiver, 0, sizeof(control->status.receiver));
             memset(&control->status.recording, 0, sizeof(control->status.recording));
             control->status.actualBandwidthHz = 0;
@@ -810,6 +834,9 @@ void NgControlSnapshot(TNgControl *control, TNgControlStatus *status)
     NgMutexLock(&control->mutex);
     if (control->analysis != NULL) {
         NgAnalysisRead(control->analysis, &control->status.analysis);
+    }
+    if (control->acquisition != NULL) {
+        NgAcquisitionReceiverRead(control->acquisition, &control->status.acquisition);
     }
     *status = control->status;
     NgMutexUnlock(&control->mutex);

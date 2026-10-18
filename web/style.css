@@ -335,3 +335,5 @@ td a{color:#80dce4}
 .files-card .table-wrap>table{min-width:720px;table-layout:auto}
 .files-card th:first-child,.files-card td:first-child{min-width:220px;max-width:360px;overflow-wrap:anywhere}
 .files-card th:not(:first-child),.files-card td:not(:first-child){white-space:nowrap}
+
+.field[hidden]{display:none!important}.config-group>.muted{margin:0 0 14px;max-width:85ch}

@@ -29,7 +29,7 @@ find_package(Threads REQUIRED)
 if(APPLE)
     add_compile_definitions(_DARWIN_C_SOURCE)
 endif()
-add_library(ngene_base STATIC src/core/error.c)
+add_library(ngene_base STATIC src/core/error.c src/stream/format.c)
 target_include_directories(ngene_base PUBLIC include)
 add_library(NGene::Base ALIAS ngene_base)
 
@@ -39,7 +39,8 @@ target_link_libraries(ngene_platform PUBLIC ngene_base Threads::Threads)
 add_library(NGene::Platform ALIAS ngene_platform)
 
 add_library(ngene_dsp STATIC src/dsp/fft/fft.c src/dsp/sample_backend.c
-    src/dsp/statistics/moments.c src/dsp/power/power.c)
+    src/dsp/statistics/moments.c src/dsp/power/power.c
+    src/dsp/gps_ca.c src/dsp/nco.c src/dsp/acquisition_math.c)
 target_include_directories(ngene_dsp PUBLIC include PRIVATE src)
 target_link_libraries(ngene_dsp PUBLIC ngene_base)
 add_library(NGene::Dsp ALIAS ngene_dsp)
@@ -47,9 +48,9 @@ add_library(NGene::Dsp ALIAS ngene_dsp)
 add_library(ngene_core
     src/core/receiver.c src/core/channel_dispatch.c src/core/stream_info.c src/config/config.c
     src/stream/ring.c
-    src/frontend/frontend.c src/frontend/file.c src/frontend/ingress.c src/stream/format.c
+    src/frontend/frontend.c src/frontend/file.c src/frontend/ingress.c
     src/conditioning/bypass.c src/conditioning/dc.c src/recording/recording.c src/recording/metadata.c
-    src/analysis/analysis.c)
+    src/analysis/analysis.c src/acquisition/acquisition.c src/core/acquisition_receiver.c)
 target_include_directories(ngene_core PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated" PRIVATE src)
 target_link_libraries(ngene_core PUBLIC ngene_platform ngene_dsp)
 add_library(NGene::Engine ALIAS ngene_core)
@@ -206,6 +207,11 @@ if(NGENE_BUILD_TESTS)
     target_link_libraries(ngene_engine_scheduler_tests PRIVATE ngene_core)
     add_test(NAME engine_channel_scheduler COMMAND ngene_engine_scheduler_tests)
     set_tests_properties(engine_channel_scheduler PROPERTIES TIMEOUT 30)
+    add_executable(ngene_acquisition_tests tests/test_acquisition.c)
+    target_include_directories(ngene_acquisition_tests PRIVATE src)
+    target_link_libraries(ngene_acquisition_tests PRIVATE ngene_core)
+    add_test(NAME gps_acquisition_contract COMMAND ngene_acquisition_tests)
+    set_tests_properties(gps_acquisition_contract PROPERTIES TIMEOUT 60)
     if(NGENE_ARCH STREQUAL "x86" AND NOT NGENE_FFT_REFERENCE)
         # Re-run the full contract with a missing-SSE2 probe and aborting SIMD stubs.
         # The real FFT object in ngene_dsp stays unreferenced by this executable.
@@ -301,7 +307,7 @@ if(MSVC)
 endif()
 include(InstallRequiredSystemLibraries)
 include(RuntimeDependencies)
-foreach(runtime ngene_sdr_tests ngene ngene_replay_tests ngene_tests ngene_sample_tests ngene_analysis_tests ngene_fft_tests ngene_fft_fallback_tests ngene_engine_scheduler_tests ngene_control_tests)
+foreach(runtime ngene_sdr_tests ngene ngene_replay_tests ngene_tests ngene_sample_tests ngene_analysis_tests ngene_fft_tests ngene_fft_fallback_tests ngene_engine_scheduler_tests ngene_acquisition_tests ngene_control_tests)
     if(TARGET ${runtime})
         ngene_stage_runtime(${runtime})
     endif()
