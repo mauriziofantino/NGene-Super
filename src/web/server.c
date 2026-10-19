@@ -2,6 +2,7 @@
 #include "ngene/web.h"
 #include "ngene/capture.h"
 #include "ngene/control.h"
+#include "ngene/calibration.h"
 #include "ngene/build.h"
 #include "ngene/dsp/fft.h"
 #include "ngene/dsp/sample_ops.h"
@@ -1311,7 +1312,69 @@ static int Handle(struct mg_connection *connection, void *context)
             }
         }
     }
-    if (strcmp(path, "/api/v1/frontend/capabilities") == 0) {
+    if (strcmp(path, "/api/v1/frontend/calibrate") == 0) {
+        TNgControlStatus status;
+        TNgConfig config = {0};
+        TNgGainCalibration calibration = {0};
+        TNgError error = {{0}};
+        cJSON *ini = cJSON_GetObjectItemCaseSensitive(body, "ini");
+        uint64_t revision;
+        FILE *input = NULL;
+        NgMutexLock(&server->commandMutex);
+        NgControlSnapshot(control, &status);
+        if (!cJSON_IsString(ini) || !ParseRevision(body, &revision)) {
+            code = Failure(connection, 400, "Expected source profile and revision");
+        } else if (status.state != NG_STOPPED && status.state != NG_FAILED) {
+            code = Failure(connection, 409, "Stop the receiver before calibrating gains");
+        } else if (status.revision != revision || status.commandId != status.completedCommandId) {
+            code = Failure(connection, 409, "Receiver profile or command changed; reload before calibration");
+        } else if ((input = tmpfile()) == NULL) {
+            code = Failure(connection, 500, "Cannot prepare calibration profile");
+        } else {
+            int result = NG_ERROR;
+            if (fwrite(ini->valuestring, 1, strlen(ini->valuestring), input) ==
+                    strlen(ini->valuestring) && fseek(input, 0, SEEK_SET) == 0)
+                result = NgConfigRead(input, &config, &error);
+            fclose(input);
+            if (result == NG_OK) result = NgGainCalibrate(&config, &calibration, &error);
+            if (result != NG_OK) {
+                code = Failure(connection, 400, error.message[0] ? error.message : "SDR calibration failed");
+            } else {
+                NgControlSnapshot(control, &status);
+                if (status.revision != revision) {
+                    code = Failure(connection, 409, "Receiver profile changed during calibration");
+                } else {
+                    size_t index;
+                    cJSON *gains = cJSON_CreateArray();
+                    reply = cJSON_CreateObject();
+                    cJSON_AddBoolToObject(reply, "accepted", calibration.accepted);
+                    Number(reply, "tested", calibration.tested);
+                    Number(reply, "rms_fraction", calibration.quality.rmsFraction);
+                    Number(reply, "clipped_fraction", calibration.quality.clippedFraction);
+                    Number(reply, "gaussian_error", calibration.quality.gaussianError);
+                    Number(reply, "dc_fraction", calibration.quality.dcFraction);
+                    Number(reply, "iq_imbalance", calibration.quality.iqImbalance);
+                    Number(reply, "lna_gain_db", calibration.selected.lnaGainDb);
+                    Number(reply, "vga_gain_db", calibration.selected.vgaGainDb);
+                    cJSON_AddBoolToObject(reply, "rf_amp", calibration.selected.rfAmp);
+                    Number(reply, "rtl_gain_tenths_db", calibration.selected.rtlGainTenthsDb);
+                    Number(reply, "blade_gain_db", calibration.selected.bladeGainDb);
+                    Number(reply, "sample_rate_min_hz", calibration.capabilities.sampleRateMinHz);
+                    Number(reply, "sample_rate_max_hz", calibration.capabilities.sampleRateMaxHz);
+                    Number(reply, "frequency_min_hz", (double)calibration.capabilities.frequencyMinHz);
+                    Number(reply, "frequency_max_hz", (double)calibration.capabilities.frequencyMaxHz);
+                    Number(reply, "gain_min_db", calibration.capabilities.gainMinDb);
+                    Number(reply, "gain_max_db", calibration.capabilities.gainMaxDb);
+                    Number(reply, "gain_step_db", calibration.capabilities.gainStepDb);
+                    for (index = 0; index < calibration.capabilities.tunerGainCount; ++index)
+                        cJSON_AddItemToArray(gains, cJSON_CreateNumber(calibration.capabilities.tunerGains[index]));
+                    cJSON_AddItemToObject(reply, "tuner_gains_tenths_db", gains);
+                    code = JsonReply(connection, 200, reply);
+                }
+            }
+        }
+        NgMutexUnlock(&server->commandMutex);
+    } else if (strcmp(path, "/api/v1/frontend/capabilities") == 0) {
         TNgControlStatus status;
         TNgConfig config = {0};
         TNgFrontendCaps caps = {0};

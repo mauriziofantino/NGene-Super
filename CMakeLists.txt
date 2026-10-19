@@ -48,7 +48,7 @@ add_library(NGene::Dsp ALIAS ngene_dsp)
 add_library(ngene_core
     src/core/receiver.c src/core/channel_dispatch.c src/core/stream_info.c src/config/config.c
     src/stream/ring.c
-    src/frontend/frontend.c src/frontend/file.c src/frontend/ingress.c
+    src/frontend/frontend.c src/frontend/file.c src/frontend/ingress.c src/frontend/calibration.c
     src/conditioning/bypass.c src/conditioning/dc.c src/recording/recording.c src/recording/metadata.c
     src/analysis/analysis.c src/acquisition/acquisition.c src/core/acquisition_receiver.c)
 target_include_directories(ngene_core PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated" PRIVATE src)

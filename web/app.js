@@ -110,6 +110,11 @@ function numericFieldError(input, title, required, integer) {
   return '';
 }
 function profileFieldError(input) {
+  const source = values['frontend.type'];
+  const sourceFields = {'hackrf.':'hackrf', 'rtlsdr.':'rtlsdr', 'bladerf.':'bladerf', 'replay.':'file'};
+  for (const [prefix, kind] of Object.entries(sourceFields))
+    if (input.name.startsWith(prefix) && source !== kind) return '';
+  if (input.name === 'rtlsdr.gain_tenths_db' && values['rtlsdr.auto_gain'] !== 'false') return '';
   if (!moduleForm?.active(input.name, values)) return '';
   if (input.type !== 'number') return moduleForm?.error(input.name, values) || '';
   const title = fields.find(field => field[1] === input.name)?.[2] || input.name;
@@ -125,7 +130,7 @@ function refreshProfileErrors(force = false) {
   if (force) profileValidationRequested = true;
   for (const input of $('configForm').elements) {
     if (!input.name) continue;
-    if (profileValidationRequested || profileTouched.has(input.name)) {
+    if (profileValidationRequested || profileTouched.has(input.name) || profileErrors.has(input.name)) {
       const message = profileFieldError(input);
       if (message) profileErrors.set(input.name, message); else profileErrors.delete(input.name);
     }
@@ -193,6 +198,7 @@ function selectSettings(topic) {
   const groups = {source: ['Frontend', 'HackRF', 'RTL-SDR', 'bladeRF', 'File replay'], receiver: ['Receiver', 'Buffers', 'GPS receiver'], acquisition: ['GPS acquisition', 'Acquisition refinement'], recording: ['Recording']};
   document.querySelectorAll('#fields [data-group]').forEach(group => group.classList.toggle('topic-hidden', !(groups[topic] || []).includes(group.dataset.group) && moduleForm?.groups.get(group.dataset.group)?.topic !== topic));
   $('sourcePresets').classList.toggle('hidden', topic !== 'source');
+  $('calibrationStatus').classList.toggle('hidden', topic !== 'source');
   receiverConfiguration?.select(topic);
   $('apply').disabled = !editable() || referenceSettingsOnly();
   for (const [id, key] of [['analysisSettings', 'analysis'], ['displaySettings', 'display'], ['profileSettings', 'profile']]) $(id).classList.toggle('hidden', topic !== key);
@@ -225,7 +231,15 @@ function buildForm() {
     title.textContent = label; units.className = 'unit'; units.textContent = unit || ''; title.append(units); wrapper.append(title);
     const nativeBandwidth = key === 'hackrf.bandwidth_hz' && values['frontend.type'] !== 'hackrf';
     const input = document.createElement(type === 'select' && !nativeBandwidth ? 'select' : 'input'); input.name = key;
-    if (type === 'select' && !nativeBandwidth) for (const option of (key === 'rtlsdr.gain_tenths_db' ? (deviceCaps?.tuner_gains_tenths_db || [values[key] || '0']) : options)) { const element = document.createElement('option'); element.value = typeof option === 'object' ? option.value : option; element.textContent = typeof option === 'object' ? option.label : option === 'true' ? 'On' : option === 'false' ? 'Off' : option === 'record' ? 'Record only' : option === 'capture' ? 'Capture' : option; input.append(element); }
+    if (type === 'select' && !nativeBandwidth) {
+      const choices = key === 'rtlsdr.gain_tenths_db' ? (deviceCaps?.tuner_gains_tenths_db || [values[key] || '0']) : options;
+      if (key === 'rtlsdr.gain_tenths_db' && values['rtlsdr.auto_gain'] !== 'false' &&
+          !choices.some(option => String(option) === String(values[key]))) {
+        const unused = document.createElement('option');
+        unused.value = values[key] || '0'; unused.textContent = 'Automatic (manual gain unused)'; input.append(unused);
+      }
+      for (const option of choices) { const element = document.createElement('option'); element.value = typeof option === 'object' ? option.value : option; element.textContent = typeof option === 'object' ? option.label : option === 'true' ? 'On' : option === 'false' ? 'Off' : option === 'record' ? 'Record only' : option === 'capture' ? 'Capture' : option; input.append(element); }
+    }
     else { input.type = nativeBandwidth ? 'number' : type; if(input.type==='number'){input.step='any';input.min='0'; if(key==='conditioning.dc_shift'){input.min='4';input.max='24';input.step='1';} if(key==='frontend.sample_rate_hz'){input.min='1';input.max='20000000';input.step='1';} if(key.endsWith('frequency_hz')){input.max='6000000000';input.step='1';} } input.inputMode = type === 'number' ? 'decimal' : 'text'; input.autocomplete = 'off'; }
     const limits = {'conditioning.dc_shift':[4,24], 'buffer.window_samples':[1,1048576], 'buffer.ingress_blocks':[2,4096], 'buffer.ring_blocks':[2,4096], 'recording.queue_blocks':[2,4096], 'receiver.idle_timeout_ms':[100,3600000], 'receiver.run_seconds':[0,31536000], 'rtlsdr.ppm':[-1000,1000], 'bladerf.gain_db':[-100,100]};
     if (input.type === 'number') { input.step = key === 'receiver.run_seconds' ? 'any' : '1'; if (limits[key]) [input.min,input.max] = limits[key]; }
@@ -237,6 +251,13 @@ function buildForm() {
     input.id = `config_${key.replaceAll('.', '_')}`;
     input.value = values[key] ?? ''; input.addEventListener('input', () => {
       values[key] = input.value.trim();
+      if (key === 'rtlsdr.auto_gain' && input.value === 'false' && deviceCaps?.source === 'rtlsdr') {
+        const gains = deviceCaps.tuner_gains_tenths_db || [];
+        if (gains.length && !gains.some(gain => String(gain) === values['rtlsdr.gain_tenths_db'])) {
+          values['rtlsdr.gain_tenths_db'] = String(gains[0]);
+          buildForm();
+        }
+      }
       if (key === 'frontend.type') profileTouched.add('frontend.sample_rate_hz');
       dirtyState(true); updateSourceFields(); refreshProfileErrors();
     });
@@ -253,9 +274,14 @@ function updateSourceFields() {
   const rate=document.querySelector('[name="frontend.sample_rate_hz"]');
   if(rate) { rate.min=caps?.sample_rate_min_hz || (source==='hackrf'?2000000:source==='rtlsdr'?225001:1); rate.max=caps?.sample_rate_max_hz || (source==='hackrf'?20000000:source==='rtlsdr'?3200000:61440000); }
   const gain=document.querySelector('[name="bladerf.gain_db"]');
-  if(gain){gain.min=caps?.gain_min_db??-100;gain.max=caps?.gain_max_db??100;gain.step=caps?.gain_step_db||1;gain.disabled=!editable()||source==='bladerf'&&!caps;}
+  if(gain){
+    gain.min=source==='bladerf' && caps ? caps.gain_min_db : -100;
+    gain.max=source==='bladerf' && caps ? caps.gain_max_db : 100;
+    gain.step=source==='bladerf' && caps ? caps.gain_step_db : 1;
+    gain.disabled=!editable()||source!=='bladerf'||!caps;
+  }
   const rtlGain=document.querySelector('[name="rtlsdr.gain_tenths_db"]');
-  if(rtlGain)rtlGain.disabled=!editable()||values['rtlsdr.auto_gain']!=='false'||!caps;
+  if(rtlGain)rtlGain.disabled=!editable()||source!=='rtlsdr'||values['rtlsdr.auto_gain']!=='false'||!caps;
   const ppm=document.querySelector('[name="rtlsdr.ppm"]');if(ppm){ppm.min=-1000;ppm.max=1000;ppm.step=1;}
   const tuning=document.querySelector('[name="frontend.center_frequency_hz"]');
   if(tuning){tuning.min=caps?.frequency_min_hz||0;tuning.max=caps?.frequency_max_hz||(source==='rtlsdr'?4294967295:6000000000);}
@@ -271,6 +297,7 @@ function controls() {
   for(const id of ['showSpectrum','showWaterfall'])$(id).disabled=commandPending||['starting','stopping'].includes(status?.state);
   for (const field of $('configForm').elements) field.disabled = !ready;
   for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
+  $('calibrateGains').disabled = !ready || values['frontend.type'] === 'file' || !capabilities?.[values['frontend.type']];
   $('apply').disabled = !ready || referenceSettingsOnly();
   if (capabilities && !capabilities.hackrf) $('hackrfPreset').disabled = true;
   $('rtlPreset').disabled = !ready || !capabilities?.rtlsdr;
@@ -899,6 +926,36 @@ $('bladePreset').addEventListener('click', () => {
   buildForm(); dirtyState(true);
 });
 let capabilityRequestId = 0;
+$('calibrateGains').addEventListener('click', async () => {
+  if (!editable() || values['frontend.type'] === 'file' || !validateProfileFields()) return;
+  const keys = ['frontend.type', 'frontend.serial', 'frontend.sample_rate_hz', 'frontend.center_frequency_hz', 'bladerf.format'];
+  const requested = keys.map(key => values[key] || '');
+  const current = () => keys.every((key,index) => (values[key] || '') === requested[index]);
+  httpBusy = true; controls();
+  $('calibrationStatus').textContent = 'Sampling live I/Q and comparing device gain settings…';
+  try {
+    const result = await api('frontend/calibrate', {revision, ini: toIni(values)});
+    if (!current()) throw new Error('Source settings changed during calibration.');
+    if (!result.accepted) {
+      $('calibrationStatus').textContent = `No reliable gain setting found in ${result.tested} measurements. Check the antenna, interference and I/Q level; settings were kept.`;
+      notice('Gain calibration could not find a clean input distribution.', true);
+      return;
+    }
+    const source = values['frontend.type'];
+    if (source === 'hackrf') Object.assign(values, {'hackrf.lna_gain_db':String(result.lna_gain_db), 'hackrf.vga_gain_db':String(result.vga_gain_db), 'hackrf.rf_amp':String(result.rf_amp)});
+    if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':'false', 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db)});
+    if (source === 'bladerf') values['bladerf.gain_db'] = String(result.blade_gain_db);
+    deviceCaps = source === 'hackrf' ? null :
+      {...result, source, serial:requested[1], tuning:requested[3], precision:requested[4]};
+    buildForm(); dirtyState(true);
+    const level = (result.rms_fraction * 100).toFixed(1);
+    $('calibrationStatus').textContent = `Suggested gains from ${result.tested} measurements · I/Q RMS ${level}% of ADC range · ${(result.clipped_fraction * 100).toFixed(3)}% near clipping. Apply & save to keep them.`;
+    notice('Gain calibration completed. Review and save the suggested receiver profile.');
+  } catch (error) {
+    $('calibrationStatus').textContent = error.message;
+    notice(error.message, true);
+  } finally { httpBusy = false; controls(); }
+});
 $('deviceLimits').addEventListener('click', async () => {
   if (!editable() || !validateProfileFields()) return;
   const requestId = ++capabilityRequestId;

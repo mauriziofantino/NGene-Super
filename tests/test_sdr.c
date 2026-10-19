@@ -4,6 +4,7 @@
 #include "ngene/receiver.h"
 #include "ngene/capture.h"
 #include "ngene/analysis.h"
+#include "ngene/calibration.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -418,6 +419,44 @@ static void BenchmarkRing(void)
 /** @brief Run native format, integrity and pipeline regressions on this host.
  * @return Zero after all assertions; a failed contract terminates with nonzero status.
  */
+static void TestGainQuality(void)
+{
+    unsigned char samples[8192 * 4];
+    TNgIqView view = {0};
+    TNgGainQuality quality;
+    TNgError error = {{0}};
+    uint32_t state = 1729;
+    size_t k;
+    TNgSampleFormat format;
+    view.samples = (const TNgIq8 *)(const void *)samples;
+    view.meta.count = 8192;
+    for (format = NG_FORMAT_CI8; format <= NG_FORMAT_SC16_Q11;
+         format = (TNgSampleFormat)(format + 1)) {
+        int scale = format == NG_FORMAT_SC16_Q11 ? 16 : 1;
+        view.format = format;
+        for (k = 0; k < 8192; ++k) {
+            int sumI = 0, sumQ = 0;
+            unsigned j;
+            for (j = 0; j < 12; ++j) {
+                state = state * 1664525u + 1013904223u;
+                sumI += (int)(state >> 28);
+                state = state * 1664525u + 1013904223u;
+                sumQ += (int)(state >> 28);
+            }
+            NgIqStore(samples, format, k, 0, (sumI - 90) * 2 * scale);
+            NgIqStore(samples, format, k, 1, (sumQ - 90) * 2 * scale);
+        }
+        CHECK(NgGainAnalyze(&view, &quality, &error) == NG_OK && quality.acceptable);
+        for (k = 0; k < 8192; ++k) {
+            int peak = format == NG_FORMAT_SC16_Q11 ? 2047 : 127;
+            NgIqStore(samples, format, k, 0, k % 2 ? peak : -peak);
+            NgIqStore(samples, format, k, 1, k % 2 ? -peak : peak);
+        }
+        CHECK(NgGainAnalyze(&view, &quality, &error) == NG_OK && !quality.acceptable &&
+              quality.clippedFraction > 0.9);
+    }
+}
+
 int main(int argc, char **argv)
 {
     TNgSampleFormat format;
@@ -426,6 +465,7 @@ int main(int argc, char **argv)
         return 0;
     }
     TestUnknownDeviceGap();
+    TestGainQuality();
     for (format = NG_FORMAT_CI8; format <= NG_FORMAT_SC16_Q11;
          format = (TNgSampleFormat)(format + 1)) {
         TestIngress(format);

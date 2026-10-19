@@ -280,7 +280,7 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
 }
 
 /** @brief Shared immutable channel operations; mutable state belongs to the fixture. */
-static const TNgChannelOps channelOps = {Process, 0};
+static const TNgChannelOps channelOps = {Process, 0, 0};
 
 /** @brief Verify that the receiver-thread hook runs only after the entire window joins.
  * @param context Borrowed synchronized fixture.
