@@ -37,4 +37,9 @@ TNgReceiverExecution NgAcquisitionReceiverExecution(const TNgAcquisitionReceiver
 /** Thread-safe snapshot; NULL receiver produces disabled/empty status. */
 void NgAcquisitionReceiverRead(TNgAcquisitionReceiver *receiver,
                              TNgAcquisitionReceiverStatus *status);
+/** Copy one bounded measured CAF by GPS PRN, or the newest measured PRN when
+ * prn is zero. The result is empty when disabled or not yet measured.
+ */
+void NgAcquisitionReceiverReadCaf(TNgAcquisitionReceiver *receiver, unsigned prn,
+                                 TNgAcquisitionCaf *caf);
 #endif

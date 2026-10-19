@@ -26,6 +26,8 @@ struct TNgAcquisitionPlan {
     size_t dopplerRefinementCount;
     size_t codeRefinementCount;
     double codeRefinementSpanSamples;
+    /** Immutable native-delay to display-cell map for floor/ceil frames. */
+    uint8_t *cafColumns[2];
 };
 
 struct TNgAcquisition {
@@ -35,11 +37,13 @@ struct TNgAcquisition {
     double *power;
     double *accumulatedPower;
     TNgAcquisitionResult result;
+    TNgAcquisitionCaf caf;
     size_t frameCount;
     size_t frameTarget;
     size_t skipSamples;
     unsigned frameRemainder;
     uint64_t frameFirst;
+    uint64_t coarseStartSample;
     uint64_t expectedSample;
     int continuityValid;
     unsigned coarseSums;
@@ -68,6 +72,33 @@ static double Wrap(double value, double period)
     if (result < 0.0) result += period;
     /* Adding a sub-ULP negative remainder to period can round to period. */
     return result >= period ? 0.0 : result;
+}
+
+static void ClearCaf(TNgAcquisition *context)
+{
+    const TNgAcquisitionPlan *plan = context->plan;
+    TNgAcquisitionCaf *caf = &context->caf;
+    size_t row, column;
+    memset(caf, 0, sizeof(*caf));
+    caf->prn = context->result.prn;
+    caf->fftSize = plan->fftSize;
+    caf->nonCoherentSums = context->coarseSums;
+    caf->codeBins = plan->fftSize < NG_ACQ_CAF_MAX_BINS ? plan->fftSize : NG_ACQ_CAF_MAX_BINS;
+    caf->dopplerBins = plan->dopplerCount < NG_ACQ_CAF_MAX_BINS ?
+        plan->dopplerCount : NG_ACQ_CAF_MAX_BINS;
+    caf->totalDopplerBins = plan->dopplerCount;
+    for (column = 0; column < caf->codeBins; ++column)
+        caf->codeDelaySamples[column] = ((double)column + 0.5) *
+            (double)plan->stream.sampleRateHz / (1000.0 * (double)caf->codeBins);
+    for (row = 0; row < caf->dopplerBins; ++row) {
+        size_t lo = (row * plan->dopplerCount + caf->dopplerBins - 1u) / caf->dopplerBins;
+        size_t hi = ((row + 1u) * plan->dopplerCount + caf->dopplerBins - 1u) /
+            caf->dopplerBins - 1u;
+        caf->dopplerHz[row] = -plan->config.dopplerMaxHz +
+            ((double)lo + (double)hi) * 0.5 * plan->config.dopplerStepHz;
+    }
+    for (column = 0; column < NG_ACQ_CAF_MAX_BINS * NG_ACQ_CAF_MAX_BINS; ++column)
+        caf->power[column] = -1.0f;
 }
 
 static int FinitePositive(double value)
@@ -184,6 +215,35 @@ int NgAcquisitionPlanCreate(const TNgAcquisitionConfig *config,
     plan->delayStep = (size_t) floor((double) streamInfo->sampleRateHz *
         config->codeStepChips / NG_GPS_CA_RATE_HZ + 0.5);
     if (!plan->delayStep) plan->delayCount = 1;
+    {
+        unsigned variant, variants = plan->frameCapacity == minimumFrame ? 1u : 2u;
+        size_t codeBins = plan->fftSize < NG_ACQ_CAF_MAX_BINS ?
+            plan->fftSize : NG_ACQ_CAF_MAX_BINS;
+        if (plan->delayCount > SIZE_MAX / plan->fftSize) {
+            NgAcquisitionPlanDestroy(plan);
+            return NgFail(error, "Acquisition CAF delay map exceeds addressable memory");
+        }
+        for (variant = 0; variant < variants; ++variant) {
+            size_t frameCount = minimumFrame + variant;
+            uint64_t periodUnits = (uint64_t)frameCount * (uint64_t)plan->fftSize;
+            size_t delay, index;
+            plan->cafColumns[variant] = malloc(plan->delayCount * plan->fftSize);
+            if (plan->cafColumns[variant] == NULL) {
+                NgAcquisitionPlanDestroy(plan);
+                return NgFail(error, "Cannot allocate bounded acquisition CAF delay map");
+            }
+            for (delay = 0; delay < plan->delayCount; ++delay) {
+                uint64_t shiftUnits = ((uint64_t)delay * (uint64_t)plan->delayStep %
+                    (uint64_t)frameCount) * (uint64_t)plan->fftSize;
+                for (index = 0; index < plan->fftSize; ++index) {
+                    uint64_t units = (uint64_t)index * (uint64_t)frameCount + shiftUnits;
+                    if (units >= periodUnits) units -= periodUnits;
+                    plan->cafColumns[variant][delay * plan->fftSize + index] =
+                        (uint8_t)(units * (uint64_t)codeBins / periodUnits);
+                }
+            }
+        }
+    }
     plan->dopplerRefinementCount = GridCount(config->refinementDopplerSpanHz,
                                             config->refinementDopplerStepHz);
     plan->codeRefinementSpanSamples = floor(config->refinementCodeSpanChips *
@@ -207,6 +267,8 @@ void NgAcquisitionPlanDestroy(TNgAcquisitionPlan *plan)
 {
     if (!plan) return;
     NgAcqMathDestroy(plan->math);
+    free(plan->cafColumns[0]);
+    free(plan->cafColumns[1]);
     free(plan);
 }
 
@@ -263,6 +325,7 @@ static void ClearSearch(TNgAcquisition *context, int countReset)
     context->frameTarget = 0;
     context->skipSamples = 0;
     context->frameRemainder = 0;
+    context->coarseStartSample = 0;
     context->continuityValid = 0;
     context->sumsDone = 0;
     context->delayIndex = 0;
@@ -279,6 +342,7 @@ static void ClearSearch(TNgAcquisition *context, int countReset)
     context->originOffset = 0.0;
     context->codeRateHz = NG_GPS_CA_RATE_HZ;
     memset(context->accumulatedPower, 0, context->plan->fftSize * sizeof(double));
+    ClearCaf(context);
 }
 
 int NgAcquisitionAssign(TNgAcquisition *context, unsigned prn,
@@ -312,6 +376,16 @@ void NgAcquisitionReset(TNgAcquisition *context)
 void NgAcquisitionSnapshot(const TNgAcquisition *context, TNgAcquisitionResult *result)
 {
     if (context && result) *result = context->result;
+}
+
+void NgAcquisitionCafSnapshot(const TNgAcquisition *context, TNgAcquisitionCaf *caf)
+{
+    if (context && caf) *caf = context->caf;
+}
+
+uint64_t NgAcquisitionCafSequence(const TNgAcquisition *context)
+{
+    return context ? context->caf.sequence : 0;
 }
 
 const char *NgAcquisitionPhaseName(TNgAcquisitionPhase phase)
@@ -380,6 +454,7 @@ static int CoarseFrame(TNgAcquisition *context, const TNgIqView *view, TNgError 
         return NG_OK;
     }
     doppler = -plan->config.dopplerMaxHz + (double) result->dopplerIndex * plan->config.dopplerStepHz;
+    if (context->sumsDone == 0) context->coarseStartSample = view->meta.firstSample;
     if (NgAcqMathCorrelateCentered(plan->math, context->workspace, result->prn, view,
             NgCarrierFromDoppler(&plan->stream, doppler), 0.0,
             context->delayIndex * plan->delayStep, context->power, error) != NG_OK)
@@ -388,6 +463,26 @@ static int CoarseFrame(TNgAcquisition *context, const TNgIqView *view, TNgError 
         context->accumulatedPower[index] += context->power[index];
     ++context->sumsDone;
     if (context->sumsDone < context->coarseSums) return NG_OK;
+    {
+        TNgAcquisitionCaf *caf = &context->caf;
+        size_t row = result->dopplerIndex * caf->dopplerBins / plan->dopplerCount;
+        unsigned variant = view->meta.count == plan->frameCapacity &&
+            plan->frameCapacity != plan->stream.sampleRateHz / 1000u ? 1u : 0u;
+        const uint8_t *columns = plan->cafColumns[variant] + context->delayIndex * plan->fftSize;
+        for (index = 0; index < plan->fftSize; ++index) {
+            size_t cell = row * caf->codeBins + columns[index];
+            float power;
+            if (!isfinite(context->accumulatedPower[index]) || context->accumulatedPower[index] < 0.0)
+                continue;
+            power = (float)context->accumulatedPower[index];
+            if (caf->power[cell] < power) caf->power[cell] = power;
+            if ((double)caf->power[cell] > caf->maxPower) caf->maxPower = caf->power[cell];
+        }
+        caf->available = 1;
+        caf->epoch = view->meta.epoch;
+        caf->referenceSample = context->coarseStartSample;
+        caf->sequence = result->sequence + 1u;
+    }
     {
         size_t peakIndex = 0;
         double peak, background = 0.0, threshold, score;
@@ -427,8 +522,10 @@ static int CoarseFrame(TNgAcquisition *context, const TNgIqView *view, TNgError 
     if (++context->delayIndex >= plan->delayCount) {
         context->delayIndex = 0;
         ++result->dopplerIndex;
+        context->caf.completedDopplerBins = result->dopplerIndex;
     }
     if (result->dopplerIndex < plan->dopplerCount) return NG_OK;
+    context->caf.complete = 1;
     if (context->coarseMaximum > result->threshold && context->coarseMaximum > 0.0) {
         context->codeRateHz = NG_GPS_CA_RATE_HZ * (1.0 + result->dopplerHz / ACQ_L1_HZ);
         StartRefinement(context, NG_ACQ_DOPPLER_REFINEMENT);

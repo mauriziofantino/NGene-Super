@@ -73,6 +73,32 @@ typedef struct {
     uint64_t resetCount;
 } TNgAcquisitionResult;
 
+/** Bounded display copy of actual coarse-search powers. Each published cell is
+ * the maximum measured noncoherent power in its Doppler/delay tile; -1 means
+ * that tile has not been measured. Doppler hypotheses are searched on successive
+ * input frames, so a partial surface is not an instantaneous RF snapshot.
+ * Axis entries give tile centers (not interpolated peak coordinates).
+ */
+#define NG_ACQ_CAF_MAX_BINS 64u
+typedef struct {
+    int available;
+    unsigned prn;
+    uint64_t sequence;
+    uint64_t epoch;
+    uint64_t referenceSample;
+    unsigned nonCoherentSums;
+    size_t fftSize;
+    size_t codeBins;
+    size_t dopplerBins;
+    size_t completedDopplerBins;
+    size_t totalDopplerBins;
+    int complete;
+    double maxPower;
+    double codeDelaySamples[NG_ACQ_CAF_MAX_BINS];
+    double dopplerHz[NG_ACQ_CAF_MAX_BINS];
+    float power[NG_ACQ_CAF_MAX_BINS * NG_ACQ_CAF_MAX_BINS];
+} TNgAcquisitionCaf;
+
 typedef struct TNgAcquisitionPlan TNgAcquisitionPlan;
 typedef struct TNgAcquisition TNgAcquisition;
 
@@ -107,6 +133,10 @@ int NgAcquisitionProcess(TNgAcquisition *context, const TNgIqView *input,
                          TNgAcquisitionResult *result, TNgError *error);
 void NgAcquisitionSnapshot(const TNgAcquisition *context,
                            TNgAcquisitionResult *result);
+/** Owner-thread copy; call only when this context is not concurrently processing. */
+void NgAcquisitionCafSnapshot(const TNgAcquisition *context, TNgAcquisitionCaf *caf);
+/** Cheap change indicator for copying a display CAF after a completed coarse dwell. */
+uint64_t NgAcquisitionCafSequence(const TNgAcquisition *context);
 /** Clear a search and its partial frame while preserving the assigned PRN. */
 void NgAcquisitionReset(TNgAcquisition *context);
 const char *NgAcquisitionPhaseName(TNgAcquisitionPhase phase);

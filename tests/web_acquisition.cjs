@@ -106,6 +106,17 @@ function circularDistance(a, b, period) {
       assert(response.ok, `POST ${route}: ${response.status} ${JSON.stringify(result)}`);
       return result;
     };
+    const stopReceiver = async () => {
+      if ((await get('status')).state === 'running') {
+        try { await post('receiver/stop', {revision:(await get('config')).revision}); }
+        catch (error) {
+          /* A finite replay can reach EOF between the state read and Stop. */
+          if (!/POST receiver\/stop: 409/.test(String(error))) throw error;
+        }
+      }
+      await until(async () => (await get('status')).state === 'stopped',
+        'finite replay or Stop reaches the stopped state');
+    };
     await post('config', {revision:(await get('config')).revision, ini:`
 [receiver]
 mode=capture
@@ -273,14 +284,57 @@ refinement_code_step_samples=1
     assert.equal(BigInt(status.analysis.histogram_sequence), 0n, 'Disabled histograms remain stopped');
     assert.equal((await get('analysis/config')).analysis.spectrum_enabled, false,
       'GPS acquisition does not enable spectrum computation');
+    const caf = await until(async () => {
+      const response = await get('acquisition/caf?prn=3');
+      return response.available && response.complete && response;
+    }, 'receiver publishes a measured complete GPS cross ambiguity sweep');
+    assert.equal(caf.prn, 3);
+    assert.equal(caf.source, 'coarse_fft');
+    assert.equal(caf.aggregation, 'max');
+    assert(caf.code_bins > 1 && caf.code_bins <= 64);
+    assert(caf.doppler_bins > 1 && caf.doppler_bins <= 64);
+    assert.equal(caf.code_delay_samples.length, caf.code_bins);
+    assert.equal(caf.doppler_hz.length, caf.doppler_bins);
+    assert.equal(caf.power.length, caf.code_bins * caf.doppler_bins);
+    assert.equal(caf.completed_doppler_bins, caf.total_doppler_bins);
+    const measured = caf.power.map((power, index) => ({power, index}))
+      .filter(cell => Number.isFinite(cell.power));
+    assert(measured.length > caf.doppler_bins, 'CAF contains actual measured correlation cells');
+    const strongest = measured.reduce((a, b) => a.power >= b.power ? a : b);
+    assert(strongest.power > 0 && Number.isFinite(caf.max_power));
+    assert(Math.abs(strongest.power - caf.max_power) <= 1e-9 * caf.max_power,
+      'Published maximum matches a cell in the measured CAF');
+    const peakDoppler = caf.doppler_hz[Math.floor(strongest.index / caf.code_bins)];
+    const peakDelay = caf.code_delay_samples[strongest.index % caf.code_bins];
+    assert(Math.abs(peakDoppler - fixture.doppler) <= 500,
+      `Measured CAF peak Doppler ${peakDoppler} Hz differs from injected ${fixture.doppler} Hz`);
+    assert(circularDistance(peakDelay, fixture.delay, 2046) <= 40,
+      `Measured CAF peak delay ${peakDelay} differs from injected ${fixture.delay}`);
     await until(() => page.locator('#acquisitionResults').textContent().then(text => /GPS 3/.test(text) && /acquired/.test(text)),
       'real acquired result reaches the UI table');
+    await until(() => page.locator('#cafPlot').getAttribute('aria-label').then(label =>
+      /GPS 3.*2D.*cross ambiguity/i.test(label || '')),
+      '2D measured CAF is presented in the acquisition workspace');
+    await page.locator('#cafPrnSelect').selectOption('3');
+    await until(() => page.locator('#cafPlot').getAttribute('aria-label').then(label =>
+      /GPS 3.*2D.*cross ambiguity/i.test(label || '')),
+      'selecting GPS PRN 3 reloads its measured CAF');
+    await page.locator('[data-caf-mode="3d"]').click();
+    await until(() => page.locator('#cafPlot').getAttribute('aria-label').then(label =>
+      /GPS 3.*3D.*cross ambiguity/i.test(label || '')),
+      'same measured CAF is rendered in 3D');
+    assert.equal(await page.locator('[data-caf-mode="3d"]').getAttribute('aria-pressed'), 'true');
+    if (process.env.NGENE_ACQUISITION_SCREENSHOTS) {
+      fs.mkdirSync(process.env.NGENE_ACQUISITION_SCREENSHOTS, {recursive:true});
+      await page.screenshot({path:path.join(process.env.NGENE_ACQUISITION_SCREENSHOTS, 'gps-acquisition-caf-3d.png'), fullPage:true});
+    }
+    await page.locator('[data-caf-mode="2d"]').click();
     await until(() => page.locator('#coarseSearchSpace circle.search-space-point').count().then(count => count === 1),
       'real acquired candidate is plotted in the coarse code/Doppler search space');
     assert.equal(await page.locator('#refinementSearchSpace svg').count(), 1,
       'The configured refinement search space is visible');
-    assert.match(await page.locator('#searchSpaceSummary').textContent(), /Doppler bins.*code cells.*Search-cell power is not included/i,
-      'The UI reports configured grid dimensions and distinguishes geometry from measured cell power');
+    assert.match(await page.locator('#searchSpaceSummary').textContent(), /Doppler bins.*code cells.*configured geometry.*measured correlation power/i,
+      'The UI distinguishes configured grid geometry from measured cell power');
     assert.match(await page.locator('#coarseSearchSpace circle.search-space-point title').textContent(), /GPS 3.*acquired/i);
     assert.match(await page.locator('#acquisitionView').textContent(), /ready for tracking/i);
     assert.equal((await page.locator('#acquisitionResults tr').count()), 1, 'No synthetic satellite rows appear');
@@ -290,8 +344,10 @@ refinement_code_step_samples=1
       fs.mkdirSync(process.env.NGENE_ACQUISITION_SCREENSHOTS, {recursive:true});
       await page.screenshot({path:path.join(process.env.NGENE_ACQUISITION_SCREENSHOTS, 'gps-acquisition-prn3-real-replay.png'), fullPage:true});
     }
-    await post('receiver/stop', {revision:(await get('config')).revision});
-    await until(async () => (await get('status')).state === 'stopped', 'receiver stopped cleanly');
+    await stopReceiver();
+    const archivedCaf = await get('acquisition/caf?prn=3');
+    assert(archivedCaf.available && archivedCaf.complete && archivedCaf.prn === 3,
+      'measured GPS CAF remains inspectable after finite replay or Stop');
     await until(() => page.locator('#runState').textContent().then(text => /^stopped$/i.test(text)),
       'stopped receiver state reaches the browser');
     assert.equal(fs.statSync(input).size, fixture.data.length, 'The private input fixture is unchanged');
@@ -317,8 +373,7 @@ refinement_code_step_samples=1
     assert(withoutConfirmation.metric > withoutConfirmation.threshold && withoutConfirmation.threshold > 0);
     assert(BigInt(withoutConfirmation.processed_samples) < BigInt(satellite.processed_samples));
     await until(() => page.locator('#acquisitionResults').textContent().then(t => /Not requested/.test(t)), 'UI reports no confirmation');
-    await post('receiver/stop', {revision:(await get('config')).revision});
-    await until(async () => (await get('status')).state === 'stopped', 'second replay stopped');
+    await stopReceiver();
     await page.setViewportSize({width:390, height:844});
     const geometry = await page.evaluate(() => ({width:innerWidth, scrollWidth:document.documentElement.scrollWidth}));
     assert(geometry.scrollWidth <= geometry.width + 1,

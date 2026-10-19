@@ -229,6 +229,133 @@ static double CircularDistance(double a, double b, double period)
     return difference > period / 2.0 ? period - difference : difference;
 }
 
+/** The display matrix must contain measured coarse powers at the right delay
+ * cells, rather than a reconstructed peak-shaped image. Compare its first
+ * Doppler row against two independent direct DSP calls (both compression shifts).
+ */
+static void TestMeasuredCafCells(void)
+{
+    TSignal signal = SignalCreate(2046000, NG_FORMAT_CI8, 3, 509.0, 350.0, 24000,
+                                  35.0, 6.0, 20);
+    TNgAcquisitionConfig config = TestConfig(3);
+    TNgAcquisitionPlan *plan = NULL;
+    TNgAcquisition *context = NULL;
+    TNgAcqMathPlan *math = NULL;
+    TNgAcqMathWorkspace *workspace = NULL;
+    TNgAcquisitionResult result;
+    TNgAcquisitionCaf caf;
+    TNgError error = {{0}};
+    double power[1024];
+    float expected[NG_ACQ_CAF_MAX_BINS];
+    size_t frame, index, column;
+    CHECK(NgAcquisitionPlanCreate(&config, &signal.stream, &plan, &error) == NG_OK);
+    CHECK(NgAcquisitionCreate(plan, &context, &error) == NG_OK);
+    CHECK(NgAcquisitionAssign(context, 3, 1, &error) == NG_OK);
+    CHECK(NgAcqMathCreate(signal.stream.sampleRateHz, 1024, config.gpsPrnMask,
+                          &math, &error) == NG_OK);
+    CHECK(NgAcqMathWorkspaceCreate(math, &workspace, &error) == NG_OK);
+    NgAcquisitionCafSnapshot(context, &caf);
+    CHECK(!caf.available && caf.codeBins == 64 && caf.dopplerBins == 5);
+    for (column = 0; column < caf.codeBins; ++column) expected[column] = -1.0f;
+    ProcessRange(context, &signal, 0, 2046, 7, 0, &result); /* Legacy noise warmup. */
+    NgAcquisitionCafSnapshot(context, &caf);
+    CHECK(!caf.available && NgAcquisitionCafSequence(context) == 0);
+    for (frame = 0; frame < 2; ++frame) {
+        TNgIqView view;
+        size_t first = (frame + 1u) * 2046u;
+        memset(&view, 0, sizeof(view));
+        view.samples = (const TNgIq8 *)signal.samples + first;
+        view.format = signal.stream.format;
+        view.meta.epoch = 7;
+        view.meta.firstSample = first;
+        view.meta.count = 2046;
+        CHECK(NgAcqMathCorrelateCentered(math, workspace, 3, &view,
+                NgCarrierFromDoppler(&signal.stream, -1000.0), 0.0, frame,
+                power, &error) == NG_OK);
+        for (index = 0; index < 1024; ++index) {
+            size_t units = index * 2046u + frame * 1024u;
+            float measured = (float)power[index];
+            if (units >= 2046u * 1024u) units -= 2046u * 1024u;
+            column = units * 64u / (2046u * 1024u);
+            if (measured > expected[column]) expected[column] = measured;
+        }
+        ProcessRange(context, &signal, first, 2046, 7, 0, &result);
+        NgAcquisitionCafSnapshot(context, &caf);
+        CHECK(caf.available && caf.prn == 3 && caf.epoch == 7);
+        CHECK(caf.sequence == NgAcquisitionCafSequence(context));
+        CHECK(caf.completedDopplerBins == frame);
+    }
+    CHECK(caf.completedDopplerBins == 1 && !caf.complete);
+    CHECK(caf.totalDopplerBins == 5 && caf.nonCoherentSums == 1 && caf.fftSize == 1024);
+    CHECK(caf.referenceSample == 4092 && caf.dopplerHz[0] == -1000.0);
+    for (column = 0; column < caf.codeBins; ++column) {
+        CHECK(fabs(caf.power[column] - expected[column]) <=
+              1e-5 + 1e-5 * fabs(expected[column]));
+        CHECK(caf.power[caf.codeBins + column] < 0.0f); /* Unmeasured row. */
+        CHECK(fabs(caf.codeDelaySamples[column] -
+                   ((double)column + 0.5) * 2046.0 / 64.0) < 1e-9);
+    }
+    CHECK(caf.maxPower > 0.0);
+    NgAcqMathWorkspaceDestroy(workspace);
+    NgAcqMathDestroy(math);
+    NgAcquisitionDestroy(context);
+    NgAcquisitionPlanDestroy(plan);
+    SignalDestroy(&signal);
+}
+
+/** More than 64 actual Doppler hypotheses are max pooled without losing the
+ * injected GPS peak; epoch resets remove the previous surface immediately.
+ */
+static void TestCafDecimationAndReset(void)
+{
+    TSignal signal = SignalCreate(2046000, NG_FORMAT_CI8, 7, 731.0, 650.0, 0,
+                                  55.0, 3.0, 100);
+    TNgAcquisitionConfig config = TestConfig(7);
+    TNgAcquisitionPlan *plan = NULL;
+    TNgAcquisition *context = NULL;
+    TNgAcquisitionResult result;
+    TNgAcquisitionCaf caf;
+    TNgError error = {{0}};
+    size_t row, column, peakRow = 0, peakColumn = 0;
+    double maximum = -1.0;
+    config.dopplerMaxHz = 4000.0;
+    config.dopplerStepHz = 100.0; /* 81 raw Doppler bins into at most 64 rows. */
+    config.codeStepChips = 2.0;   /* One compression origin per Doppler bin. */
+    CHECK(NgAcquisitionPlanCreate(&config, &signal.stream, &plan, &error) == NG_OK);
+    CHECK(NgAcquisitionCreate(plan, &context, &error) == NG_OK);
+    CHECK(NgAcquisitionAssign(context, 7, 1, &error) == NG_OK);
+    ProcessRange(context, &signal, 0, 82u * 2046u, 7, 0, &result);
+    NgAcquisitionCafSnapshot(context, &caf);
+    CHECK(caf.available && caf.complete && caf.prn == 7 && caf.epoch == 7);
+    CHECK(caf.dopplerBins == 64 && caf.codeBins == 64);
+    CHECK(caf.completedDopplerBins == 81 && caf.totalDopplerBins == 81);
+    for (row = 0; row < caf.dopplerBins; ++row)
+        for (column = 0; column < caf.codeBins; ++column) {
+            double value = caf.power[row * caf.codeBins + column];
+            CHECK(value >= 0.0 && isfinite(value));
+            if (value > maximum) {
+                maximum = value;
+                peakRow = row;
+                peakColumn = column;
+            }
+        }
+    CHECK(maximum == caf.maxPower);
+    CHECK(fabs(caf.dopplerHz[peakRow] - 650.0) <= 150.0);
+    CHECK(CircularDistance(caf.codeDelaySamples[peakColumn], 731.0, 2046.0) <= 20.0);
+    NgAcquisitionReset(context);
+    NgAcquisitionCafSnapshot(context, &caf);
+    CHECK(!caf.available && !caf.complete && caf.power[0] < 0.0f);
+    ProcessRange(context, &signal, 0, 2046, 8, NG_BLOCK_GAP, &result);
+    NgAcquisitionCafSnapshot(context, &caf);
+    CHECK(!caf.available);
+    ProcessRange(context, &signal, 2046, 2046, 8, 0, &result);
+    NgAcquisitionCafSnapshot(context, &caf);
+    CHECK(caf.available && caf.epoch == 8 && !caf.complete);
+    NgAcquisitionDestroy(context);
+    NgAcquisitionPlanDestroy(plan);
+    SignalDestroy(&signal);
+}
+
 static void CheckEstimate(const TNgAcquisitionResult *result, const TSignal *signal,
                           unsigned prn, double delaySamples, double dopplerHz)
 {
@@ -782,6 +909,7 @@ static void TestReceiverAdapter(void)
     TNgAcquisitionConfig config = TestConfig(3);
     TNgAcquisitionReceiver *receiver = NULL;
     TNgAcquisitionReceiverStatus status;
+    TNgAcquisitionCaf caf;
     TNgChannel *channels;
     TNgError error = {{0}};
     size_t count = 99, first, slot;
@@ -791,6 +919,8 @@ static void TestReceiverAdapter(void)
     CHECK(NgAcquisitionReceiverChannels(receiver, &count) == NULL && count == 0);
     NgAcquisitionReceiverRead(receiver, &status);
     CHECK(status.enabled == 0 && status.channelCount == 0 && status.acquiredPrnMask == 0);
+    NgAcquisitionReceiverReadCaf(receiver, 3, &caf);
+    CHECK(!caf.available);
     NgAcquisitionReceiverDestroy(receiver);
     config.enabled = 1;
     config.gpsPrnMask = (UINT32_C(1) << 0) | (UINT32_C(1) << 2) | (UINT32_C(1) << 4);
@@ -839,6 +969,8 @@ static void TestReceiverAdapter(void)
     CHECK(status.acquiredPrnMask == (UINT32_C(1) << 2));
     CHECK((status.attemptedPrnMask & ~config.gpsPrnMask) == 0);
     CheckEstimate(&status.satellites[2], &signal, 3, 509.0, 350.0);
+    NgAcquisitionReceiverReadCaf(receiver, 3, &caf);
+    CHECK(caf.available && caf.prn == 3 && caf.complete && caf.epoch == 7);
     for (slot = 0; slot < 32; ++slot)
         CHECK(status.satellites[slot].prn == 0 || status.satellites[slot].prn == slot + 1);
     /* A marker with the same epoch/start as the last data window is still a
@@ -859,6 +991,8 @@ static void TestReceiverAdapter(void)
         NgAcquisitionReceiverRead(receiver, &status);
         CHECK(status.acquiredPrnMask == 0 && status.resets == 1);
         CHECK(status.satellites[2].phase != NG_ACQ_ACQUIRED);
+        NgAcquisitionReceiverReadCaf(receiver, 3, &caf);
+        CHECK(!caf.available);
     }
     {
         TNgIqView view;
@@ -1347,6 +1481,8 @@ int main(void)
     TestConfigurationRoundTrip();
     TestInvalidConfiguration();
     TestChunkInvariance();
+    TestMeasuredCafCells();
+    TestCafDecimationAndReset();
     TestNativeFormatAndFrequency(NG_FORMAT_CI8, -650.0, 0);
     TestNativeFormatAndFrequency(NG_FORMAT_CU8, 350.0, 24000);
     TestNativeFormatAndFrequency(NG_FORMAT_SC16_Q11, -350.0, -16000);

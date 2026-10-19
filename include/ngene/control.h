@@ -174,6 +174,12 @@ void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double
  * @param status Receives a by-value status snapshot.
  */
 void NgControlSnapshot(TNgControl *control, TNgControlStatus *status);
+/** Copy a measured GPS coarse CAF from the active run or the most recent run.
+ * prn=0 selects its latest measured PRN; other values select GPS PRN 1..32.
+ * No live sample or DSP storage crosses the control boundary.
+ */
+void NgControlAcquisitionCafSnapshot(TNgControl *control, unsigned prn,
+                                     TNgAcquisitionCaf *caf);
 /**
  * @brief Copy the current receiver configuration and revision.
  *

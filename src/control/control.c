@@ -46,6 +46,9 @@ struct TNgControl {
     TNgAnalysis *analysis;
     /** Run-owned module adapter; publication/lifetime protected by mutex. */
     TNgAcquisitionReceiver *acquisition;
+    /** Bounded measured surfaces retained after replay EOF or manual stop. */
+    TNgAcquisitionCaf *cafArchive;
+    unsigned cafArchiveLatestPrn;
     /** Cumulative pairs from completed recording sessions. */
     uint64_t completedWritten;
     /** Copied rate/RF metadata; identity strings point into controller-owned storage. */
@@ -450,6 +453,14 @@ static void ReceiverWorker(void *context)
         }
         NgMutexLock(&c->mutex);
         NgAcquisitionReceiverRead(acquisition, &c->status.acquisition);
+        if (acquisition != NULL && c->cafArchive != NULL) {
+            TNgAcquisitionCaf newest;
+            unsigned prn;
+            NgAcquisitionReceiverReadCaf(acquisition, 0, &newest);
+            c->cafArchiveLatestPrn = newest.available ? newest.prn : 0;
+            for (prn = 1; prn <= 32u; ++prn)
+                NgAcquisitionReceiverReadCaf(acquisition, prn, &c->cafArchive[prn - 1u]);
+        }
         c->acquisition = NULL;
         NgMutexUnlock(&c->mutex);
         NgAcquisitionReceiverDestroy(acquisition);
@@ -726,6 +737,7 @@ void NgControlDestroy(TNgControl *control)
     NgThreadJoin(control->manager);
     NgMutexDestroy(&control->recorderMutex);
     NgMutexDestroy(&control->mutex);
+    free(control->cafArchive);
     free(control);
 }
 
@@ -776,6 +788,16 @@ int NgControlRequest(TNgControl *control, TNgCommand command, uint64_t revision,
                 NgMutexUnlock(&control->mutex);
                 return NgFail(error, "Choose a replay file before starting the receiver");
             }
+            if (control->config.acquisition.enabled != 0 && control->cafArchive == NULL) {
+                control->cafArchive = calloc(32u, sizeof(*control->cafArchive));
+                if (control->cafArchive == NULL) {
+                    NgMutexUnlock(&control->mutex);
+                    return NgFail(error, "Cannot allocate GPS CAF history");
+                }
+            }
+            if (control->cafArchive != NULL)
+                memset(control->cafArchive, 0, 32u * sizeof(*control->cafArchive));
+            control->cafArchiveLatestPrn = 0;
             NgAtomicSet(&control->stop, 0);
             control->runConfig = control->config;
             control->status.activeRevision = revision;
@@ -839,6 +861,22 @@ void NgControlSnapshot(TNgControl *control, TNgControlStatus *status)
         NgAcquisitionReceiverRead(control->acquisition, &control->status.acquisition);
     }
     *status = control->status;
+    NgMutexUnlock(&control->mutex);
+}
+
+void NgControlAcquisitionCafSnapshot(TNgControl *control, unsigned prn,
+                                     TNgAcquisitionCaf *caf)
+{
+    if (caf == NULL) return;
+    memset(caf, 0, sizeof(*caf));
+    if (control == NULL || prn > 32u) return;
+    NgMutexLock(&control->mutex);
+    if (control->acquisition != NULL) {
+        NgAcquisitionReceiverReadCaf(control->acquisition, prn, caf);
+    } else if (control->cafArchive != NULL) {
+        if (prn == 0) prn = control->cafArchiveLatestPrn;
+        if (prn != 0) *caf = control->cafArchive[prn - 1u];
+    }
     NgMutexUnlock(&control->mutex);
 }
 

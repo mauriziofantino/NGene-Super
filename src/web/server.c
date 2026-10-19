@@ -596,6 +596,49 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     return object;
 }
 
+/** Serialize only an explicitly requested, bounded coarse GPS search surface.
+ * The axis tiles contain maxima of measured powers, with null for unvisited
+ * cells; successive Doppler rows use successive native-I/Q frames.
+ */
+static cJSON *AcquisitionCafJson(TNgControl *control, unsigned prn)
+{
+    TNgAcquisitionCaf caf;
+    cJSON *object = cJSON_CreateObject();
+    cJSON *delays, *dopplers, *powers;
+    size_t i;
+    NgControlAcquisitionCafSnapshot(control, prn, &caf);
+    cJSON_AddBoolToObject(object, "available", caf.available);
+    if (!caf.available) return object;
+    Number(object, "prn", caf.prn);
+    Counter(object, "sequence", caf.sequence);
+    Counter(object, "epoch", caf.epoch);
+    Counter(object, "reference_sample", caf.referenceSample);
+    Number(object, "code_bins", (double)caf.codeBins);
+    Number(object, "doppler_bins", (double)caf.dopplerBins);
+    Number(object, "completed_doppler_bins", (double)caf.completedDopplerBins);
+    Number(object, "total_doppler_bins", (double)caf.totalDopplerBins);
+    cJSON_AddBoolToObject(object, "complete", caf.complete);
+    Number(object, "noncoherent_sums", caf.nonCoherentSums);
+    Number(object, "fft_size", (double)caf.fftSize);
+    Number(object, "max_power", caf.maxPower);
+    String(object, "source", "coarse_fft");
+    String(object, "aggregation", "max");
+    delays = cJSON_CreateArray();
+    dopplers = cJSON_CreateArray();
+    powers = cJSON_CreateArray();
+    for (i = 0; i < caf.codeBins; ++i)
+        cJSON_AddItemToArray(delays, cJSON_CreateNumber(caf.codeDelaySamples[i]));
+    for (i = 0; i < caf.dopplerBins; ++i)
+        cJSON_AddItemToArray(dopplers, cJSON_CreateNumber(caf.dopplerHz[i]));
+    for (i = 0; i < caf.dopplerBins * caf.codeBins; ++i)
+        cJSON_AddItemToArray(powers, caf.power[i] >= 0.0f ?
+                             cJSON_CreateNumber(caf.power[i]) : cJSON_CreateNull());
+    cJSON_AddItemToObject(object, "code_delay_samples", delays);
+    cJSON_AddItemToObject(object, "doppler_hz", dopplers);
+    cJSON_AddItemToObject(object, "power", powers);
+    return object;
+}
+
 /**
  * @brief Serialize a profile into a bounded text buffer.
  *
@@ -1150,6 +1193,21 @@ static int Handle(struct mg_connection *connection, void *context)
         }
         if (strcmp(path, "/api/v1/status") == 0) {
             return JsonReply(connection, 200, StatusJson(control, 3u));
+        }
+        if (strcmp(path, "/api/v1/acquisition/caf") == 0) {
+            unsigned prn = 0;
+            const char *query = request->query_string;
+            if (query != NULL && query[0] != '\0') {
+                char *end;
+                unsigned long parsed;
+                if (strncmp(query, "prn=", 4) != 0 || query[4] < '1' || query[4] > '9')
+                    return Failure(connection, 400, "Expected GPS PRN 1..32");
+                parsed = strtoul(query + 4, &end, 10);
+                if (*end != '\0' || parsed < 1ul || parsed > 32ul)
+                    return Failure(connection, 400, "Expected GPS PRN 1..32");
+                prn = (unsigned)parsed;
+            }
+            return JsonReply(connection, 200, AcquisitionCafJson(control, prn));
         }
         if (strcmp(path, "/api/v1/analysis/config") == 0) {
             return AnalysisConfigReply(control, connection);

@@ -932,6 +932,7 @@ receiverWorkspace = createReceiverWorkspace({
     if (view === 'rf') requestAnimationFrame(drawAnalysis);
   },
   onOpenSettings(topic) { showView('setup'); selectSettings(topic); },
+  onFetchCaf(prn) { return api(`acquisition/caf${prn ? `?prn=${encodeURIComponent(prn)}` : ''}`); },
   onBrowseReplay() {
     if (!editable()) { notice('Stop the receiver before choosing another input file.', true); return; }
     showView('setup'); selectSettings('source'); $('browseReplay').click();

@@ -11,6 +11,7 @@ typedef struct {
     unsigned index;
     unsigned prn;
     int needsAssignment;
+    uint64_t lastCafSequence;
 } TNgAcquisitionSlot;
 
 struct TNgAcquisitionReceiver {
@@ -19,6 +20,9 @@ struct TNgAcquisitionReceiver {
     TNgChannel channels[32];
     TNgAcquisitionSlot slots[32];
     TNgAcquisitionReceiverStatus status;
+    /** Run-owned display cache; one bounded surface per GPS PRN. */
+    TNgAcquisitionCaf *caf;
+    unsigned latestCafPrn;
     TNgMutex mutex;
     unsigned cursor;
     uint32_t reserved;
@@ -92,6 +96,8 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
             receiver->status.nonCoherentSums = 1;
             receiver->cursor = 0;
             memset(receiver->status.satellites, 0, sizeof(receiver->status.satellites));
+            memset(receiver->caf, 0, 32u * sizeof(*receiver->caf));
+            receiver->latestCafPrn = 0;
         }
         receiver->haveWindow = 1;
         receiver->epoch = window->meta.epoch;
@@ -105,6 +111,7 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
         slot->generation = receiver->generation;
         slot->needsAssignment = 1;
         slot->prn = 0;
+        slot->lastCafSequence = 0;
         reset = 1;
     }
     /* Pause complete search contexts, never puncture an admitted coherent/noncoherent
@@ -119,9 +126,11 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
         if (slot->prn) {
             receiver->reserved &= ~(UINT32_C(1) << (slot->prn - 1));
             memset(&receiver->status.satellites[slot->prn - 1], 0, sizeof(result));
+            memset(&receiver->caf[slot->prn - 1], 0, sizeof(*receiver->caf));
             slot->prn = 0;
             receiver->channels[slot->index].id.satellite = 0;
             reset = 1;
+            slot->lastCafSequence = 0;
         }
         slot->needsAssignment = 1;
         ++receiver->status.deferredWindows;
@@ -134,12 +143,26 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
         slot->prn = assign;
         receiver->channels[slot->index].id.satellite = assign;
         slot->needsAssignment = assign == 0;
+        slot->lastCafSequence = 0;
+        if (assign != 0) memset(&receiver->caf[assign - 1u], 0, sizeof(*receiver->caf));
     }
     NgMutexUnlock(&receiver->mutex);
     if (reset) NgAcquisitionReset(slot->algorithm);
     if (assign && NgAcquisitionAssign(slot->algorithm, assign, sums, error) != NG_OK) return NG_ERROR;
     if (slot->prn == 0) return NG_OK;
     if (NgAcquisitionProcess(slot->algorithm, window, &result, error) != NG_OK) return NG_ERROR;
+    {
+        TNgAcquisitionCaf measured;
+        if (NgAcquisitionCafSequence(slot->algorithm) != 0 &&
+            NgAcquisitionCafSequence(slot->algorithm) != slot->lastCafSequence) {
+            NgAcquisitionCafSnapshot(slot->algorithm, &measured);
+            NgMutexLock(&receiver->mutex);
+            receiver->caf[slot->prn - 1u] = measured;
+            receiver->latestCafPrn = slot->prn;
+            NgMutexUnlock(&receiver->mutex);
+            slot->lastCafSequence = measured.sequence;
+        }
+    }
     NgMutexLock(&receiver->mutex);
     receiver->status.satellites[slot->prn - 1] = result;
     if (result.phase == NG_ACQ_ACQUIRED) {
@@ -182,6 +205,11 @@ int NgAcquisitionReceiverCreate(const TNgAcquisitionConfig *config, const TNgStr
         return NgFail(error, "Cannot initialize GPS receiver adapter mutex");
     }
     receiver->config = *config;
+    receiver->caf = calloc(32u, sizeof(*receiver->caf));
+    if (receiver->caf == NULL) {
+        NgAcquisitionReceiverDestroy(receiver);
+        return NgFail(error, "Cannot allocate bounded GPS CAF display cache");
+    }
     receiver->generation = 1;
     receiver->status.enabled = 1;
     receiver->status.nonCoherentSums = 1;
@@ -220,6 +248,7 @@ void NgAcquisitionReceiverDestroy(TNgAcquisitionReceiver *receiver)
     if (receiver == NULL) return;
     for (i = 0; i < 32; ++i) NgAcquisitionDestroy(receiver->slots[i].algorithm);
     NgAcquisitionPlanDestroy(receiver->plan);
+    free(receiver->caf);
     NgMutexDestroy(&receiver->mutex);
     free(receiver);
 }
@@ -245,5 +274,24 @@ void NgAcquisitionReceiverRead(TNgAcquisitionReceiver *receiver, TNgAcquisitionR
     if (receiver == NULL) { memset(status, 0, sizeof(*status)); return; }
     NgMutexLock(&receiver->mutex);
     *status = receiver->status;
+    NgMutexUnlock(&receiver->mutex);
+}
+
+void NgAcquisitionReceiverReadCaf(TNgAcquisitionReceiver *receiver, unsigned prn,
+                                 TNgAcquisitionCaf *caf)
+{
+    if (caf == NULL) return;
+    memset(caf, 0, sizeof(*caf));
+    if (receiver == NULL || prn > 32u) return;
+    NgMutexLock(&receiver->mutex);
+    if (prn == 0) {
+        prn = receiver->latestCafPrn;
+        if (prn == 0 || !receiver->caf[prn - 1u].available) {
+            for (prn = 1u; prn <= 32u; ++prn)
+                if (receiver->caf[prn - 1u].available) break;
+            if (prn > 32u) prn = 0;
+        }
+    }
+    if (prn != 0) *caf = receiver->caf[prn - 1u];
     NgMutexUnlock(&receiver->mutex);
 }
