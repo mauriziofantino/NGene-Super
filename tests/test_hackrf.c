@@ -22,6 +22,10 @@ static int initialized = 0;
 static hackrf_sample_block_cb_fn receiveCallback;
 static void *receiveContext;
 static int fakeDevice;
+static int antennaConfigured;
+static int antennaRequests;
+static int expectAntennaPower;
+static int failAntenna;
 
 /**
  * @brief Increment the simulated vendor initialization balance.
@@ -259,7 +263,7 @@ int ADDCALL hackrf_set_amp_enable(hackrf_device *device, const uint8_t value)
 }
 
 /**
- * @brief Assert antenna power is disabled.
+ * @brief Record an explicit request to enable antenna power.
  * @details Test-only implementation of the external C ABI; never linked into the
  * receiver executable. Assertions terminate on a configuration mismatch.
  * @param device Static fixture device handle; no heap ownership is transferred.
@@ -269,7 +273,11 @@ int ADDCALL hackrf_set_amp_enable(hackrf_device *device, const uint8_t value)
 int ADDCALL hackrf_set_antenna_enable(hackrf_device *device, const uint8_t value)
 {
     (void)device;
-    CHECK(value == 0);
+    CHECK(value == 1);
+    CHECK(!alive);
+    ++antennaRequests;
+    if (failAntenna) return HACKRF_ERROR_LIBUSB;
+    antennaConfigured = 1;
     return HACKRF_SUCCESS;
 }
 
@@ -316,6 +324,8 @@ int ADDCALL hackrf_start_rx(hackrf_device *device, hackrf_sample_block_cb_fn cal
                             void *context)
 {
     (void)device;
+    CHECK(antennaConfigured == expectAntennaPower);
+    antennaConfigured = 0;
     receiveCallback = callback;
     receiveContext = context;
     alive = 1;
@@ -390,6 +400,7 @@ int main(void)
     CHECK(NgHackrfOpen(&c, &f, &e) == NG_OK);
     CHECK(f.info.bandwidthHz == 15000000);
     CHECK(f.ops->start(f.context, &e) == NG_OK);
+    CHECK(antennaRequests == 0);
     CHECK(f.ops->acquire(f.context, &v, 0, &e) == NG_OK);
     CHECK(v.meta.count == 4 && v.samples[3].i == 3 && v.samples[3].q == -3);
     {
@@ -438,6 +449,8 @@ int main(void)
     CHECK(NgHackrfOpen(&c, &f, &e) == NG_OK);
     CHECK(f.ops->start(f.context, &e) == NG_OK);
     CHECK(f.ops->acquire(f.context, &v, 0, &e) == NG_ERROR);
+    CHECK(strstr(e.message, "ingress overflow") != NULL &&
+          strstr(e.message, "queue high-water 2/2 blocks") != NULL);
     DestroySource(&f, &e);
     initialPairs = 2;
     oddTransfer = 1;
@@ -449,6 +462,20 @@ int main(void)
     failRate = 1;
     CHECK(NgHackrfOpen(&c, &f, &e) == NG_ERROR);
     CHECK(initialized == 0);
+    failRate = 0;
+    c.antennaPower = 1;
+    expectAntennaPower = 1;
+    CHECK(NgHackrfOpen(&c, &f, &e) == NG_OK);
+    CHECK(f.ops->start(f.context, &e) == NG_OK);
+    CHECK(antennaRequests == 1);
+    DestroySource(&f, &e);
+    failAntenna = 1;
+    CHECK(NgHackrfOpen(&c, &f, &e) == NG_OK);
+    CHECK(f.ops->start(f.context, &e) == NG_ERROR);
+    CHECK(strstr(e.message, "antenna power configuration failed") != NULL);
+    CHECK(antennaRequests == 2 && !alive);
+    DestroySource(&f, &e);
+    failAntenna = 0;
     puts("PASS: native HackRF API config, callback lifetime, overflow/drop indices, malformed "
          "transfer and cleanup (simulated driver)");
     return 0;

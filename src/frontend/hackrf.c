@@ -87,18 +87,37 @@ static int Start(void *context, TNgError *error)
         return NgFail(error, "HackRF instance supports one run");
     }
     s->hasRun = 1;
+    /* Firmware disables antenna power in idle mode. Match the upstream RX
+     * utility: issue this USB command only when power was explicitly enabled,
+     * before callbacks can fill ingress while the receiver is starting. */
+    if (s->config.antennaPower != 0) {
+        code = hackrf_set_antenna_enable(s->device, 1);
+        if (code != HACKRF_SUCCESS) {
+            return NgFail(error, "HackRF antenna power configuration failed: %s",
+                          hackrf_error_name((enum hackrf_error)code));
+        }
+    }
     code = hackrf_start_rx(s->device, OnSamples, s);
     if (code != HACKRF_SUCCESS) {
         NgIngressTransportError(&s->ingress);
         return NgFail(error, "hackrf_start_rx: %s", hackrf_error_name((enum hackrf_error)code));
     }
     s->started = 1;
-    code = hackrf_set_antenna_enable(s->device, (uint8_t)s->config.antennaPower);
-    if (code != HACKRF_SUCCESS) {
-        return NgFail(error, "HackRF antenna power configuration failed: %s",
-                      hackrf_error_name((enum hackrf_error)code));
-    }
     return NG_OK;
+}
+
+static int CallbackFailure(TNgHackrfSource *s, int failure, TNgError *error)
+{
+    if (failure == 2) {
+        TNgFrontendStats stats;
+        NgIngressSnapshot(&s->ingress, 0, &stats);
+        return NgFail(error,
+                      "HackRF callback stopped: ingress overflow after %.3f s of input "
+                      "(queue high-water %zu/%zu blocks)",
+                      (double)stats.receivedSamples / (double)s->config.sampleRateHz,
+                      stats.ingress.highWaterBlocks, stats.ingress.capacityBlocks);
+    }
+    return NgFail(error, "HackRF callback stopped: invalid transfer/index");
 }
 
 /**
@@ -123,8 +142,7 @@ static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError 
     int failure;
     failure = NgAtomicGet(&s->ingress.failure);
     if (failure != 0) {
-        return NgFail(error, "HackRF callback stopped: %s",
-                      failure == 2 ? "ingress overflow" : "invalid transfer/index");
+        return CallbackFailure(s, failure, error);
     }
     result = NgRingAcquire(s->ingress.ring, view, timeoutMs);
     /* A failing producer can close the ring while this reader is asleep.
@@ -132,8 +150,7 @@ static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError 
      * and is processed normally; the next acquire surfaces the terminal error. */
     failure = NgAtomicGet(&s->ingress.failure);
     if (result != NG_OK && failure != 0) {
-        return NgFail(error, "HackRF callback stopped: %s",
-                      failure == 2 ? "ingress overflow" : "invalid transfer/index");
+        return CallbackFailure(s, failure, error);
     }
     if (result == NG_TIMEOUT && hackrf_is_streaming(s->device) != HACKRF_TRUE) {
         NgIngressTransportError(&s->ingress);
