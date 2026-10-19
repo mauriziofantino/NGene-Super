@@ -1,0 +1,54 @@
+
+# This table reports the index of the TESLA key transmitted by each PRN.
+
+
+
+# Maximum number of satellites with different keys per MACK block
+# Defined by ICD v1.1, page 26
+[curr NS]
+	 1
+	
+# Correspondence between PRNs and keys: for each PRN, the relative index of the correspondent key
+# is reported. The index of the key for PRN==1 is set to 1 (i.e. the root key has index 0).
+# This entry is made of a list of indexes: the number of elements is equal to "max NS" 
+# and each element has a value included in the range [1,NS].
+# In ICD v1.1 such correspondence is not specified, but an example is reported at page 36.
+[Key indexes]
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+	 1
+
+

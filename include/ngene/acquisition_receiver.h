@@ -42,4 +42,7 @@ void NgAcquisitionReceiverRead(TNgAcquisitionReceiver *receiver,
  */
 void NgAcquisitionReceiverReadCaf(TNgAcquisitionReceiver *receiver, unsigned prn,
                                  TNgAcquisitionCaf *caf);
+/** Set monotonic deadline of consumer interest in measured CAF surfaces. */
+void NgAcquisitionReceiverCafInterestUntil(TNgAcquisitionReceiver *receiver,
+                                           double expiresSeconds);
 #endif

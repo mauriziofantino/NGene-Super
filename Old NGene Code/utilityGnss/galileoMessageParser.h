@@ -1,0 +1,716 @@
+/**
+ * @file galileoMessageParser.h
+ *
+ * @author Mario Nicola
+ *
+ * @date 13/10/2014
+ *
+ * @version 1.0.0
+ *
+ * @brief Functions used to parse the Galileo navigation message.
+ */
+
+#ifndef GALILEO_MESSAGE_PARSER_H_INCLUDED
+#define GALILEO_MESSAGE_PARSER_H_INCLUDED
+
+#include "ngeneConfiguration.h"
+#include "channelDataStructure.h"
+#include "ngeneDataStructure.h"
+
+
+/**
+ * @def GAL_TOE_SCALE_FACTOR
+ * @brief Scale factor for T0e
+ */
+#define GAL_TOE_SCALE_FACTOR	60
+
+/**
+ * @def GAL_TYPE6_TOT_SCALE_FACTOR
+ * @brief Scale factor for T0t
+ */
+#define GAL_TYPE6_TOT_SCALE_FACTOR	3600
+
+/**
+ * @def GAL_TOA_SCALE_FACTOR
+ * @brief Scale factor for T0a
+ */
+#define GAL_TOA_SCALE_FACTOR		600
+
+/**
+ * @def GAL_SVID_FOR_DUMMY_ALMANAC
+ * @brief When dummy almanac is transmitted, SVID in the word is 0
+ */
+#define GAL_SVID_FOR_DUMMY_ALMANAC		0
+
+/**
+ * @def GAL_NOMINAL_SQRTA
+ * @brief This is the nominal value for SQRTA [m^(1/2)]
+ */
+#define GAL_NOMINAL_SQRTA	5440.588203494177
+
+/**
+ * @def GAL_NOMINAL_I0
+ * @brief This is the nominal value for i0 [rad], i.e. 56 degree
+ */
+#define GAL_NOMINAL_I0	0.977384381116825
+
+
+/**
+ * @brief Initialize the data structure used for parse the Galileo navigation message
+ *
+ * @param cfg points to the receiver configuration
+ * @param ch points to the current channel
+ *
+ * @return SUCCESS_RETURN when the function ends with success, FAILURE_RETURN otherwise
+ */
+int InitGalParser(TNGeneConfiguration *cfg,TChannel *ch);
+
+/**
+ * @brief Deinit the data structure used for parse the Galileo navigation message
+ *
+ * @param ch points to the current channel
+ */
+void DeinitGalParser(TChannel *ch);
+
+/**
+ * @brief Called at the start of the tracking, it prepares the parse of the navigation message
+ *
+ * @param cfg points to the receiver configuration
+ * @param rx points to the receiver base data structure
+ * @param ch points to the current channel
+ */
+void StartGalParser(TNGeneConfiguration *cfg,TNGeneData *rx,TChannel *ch);
+
+/**
+ * @brief Used to verify the CRC in the Galileo I/NAV and F/NAV navigation messages
+ *
+ * @param vec points to a vector of bits
+ * @param vecLen is the length of vec, in bytes, included the CRC
+ *
+ * return SUCCESS_RETURN if the CRC is correct, FAILURE_RETURN otherwise
+ */
+int GalCrc24qVerified(unsigned char *vec, int vecLen);
+
+/**
+ * @brief Manages the parse of the Galileo navigation message.
+ *
+ * @param cfg points to the receiver configuration
+ * @param rx points to the receiver base data structure
+ * @param ch points to the current channel
+ * @param corr is the correlation related to the last received bit
+ */
+void ParseGalMessage(TNGeneConfiguration *cfg,TNGeneData *rx,TChannel *ch,float corr);
+
+
+/* description of the navigation message format */
+#define GAL_WORDTYPE_FIRST_BYTE_IDX 			(0)
+#define GAL_WORDTYPE_LAST_BYTE_IDX  			(0)
+#define GAL_WORDTYPE_BITS_OF_FIRST_BYTE 		(6)
+#define GAL_WORDTYPE_BITS_OF_LAST_BYTE 			(0)
+
+#define GAL_TYPE0_TIME_FIRST_BYTE_IDX			(0)
+#define GAL_TYPE0_TIME_LAST_BYTE_IDX			(0)
+#define GAL_TYPE0_TIME_BITS_OF_FIRST_BYTE		(0)
+#define GAL_TYPE0_TIME_BITS_OF_LAST_BYTE 		(2)
+
+#define GAL_TYPE0_WN_FIRST_BYTE_IDX 			(12)
+#define GAL_TYPE0_WN_LAST_BYTE_IDX 				(13)
+#define GAL_TYPE0_WN_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE0_WN_BITS_OF_LAST_BYTE 			(4)
+
+#define GAL_TYPE0_TOW_FIRST_BYTE_IDX 			(13)
+#define GAL_TYPE0_TOW_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE0_TOW_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE0_TOW_BITS_OF_LAST_BYTE 		(8)
+
+#define GAL_TYPE1_IOD_FIRST_BYTE_IDX 			(0)
+#define GAL_TYPE1_IOD_LAST_BYTE_IDX 			(1)
+#define GAL_TYPE1_IOD_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE1_IOD_BITS_OF_LAST_BYTE 		(8)
+
+#define GAL_TYPE1_toe_FIRST_BYTE_IDX 			(2)
+#define GAL_TYPE1_toe_LAST_BYTE_IDX 			(3)
+#define GAL_TYPE1_toe_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE1_toe_BITS_OF_LAST_BYTE 		(6)
+
+#define GAL_TYPE1_M0_FIRST_BYTE_IDX 			(3)
+#define GAL_TYPE1_M0_LAST_BYTE_IDX 				(7)
+#define GAL_TYPE1_M0_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE1_M0_BITS_OF_LAST_BYTE 			(6)
+#define GAL_TYPE1_M0_BITS_FIELD_DIM 			(32)
+
+#define GAL_TYPE1_e_FIRST_BYTE_IDX 				(7)
+#define GAL_TYPE1_e_LAST_BYTE_IDX 				(11)
+#define GAL_TYPE1_e_BITS_OF_FIRST_BYTE 			(2)
+#define GAL_TYPE1_e_BITS_OF_LAST_BYTE 			(6)
+
+#define GAL_TYPE1_sqrtA_FIRST_BYTE_IDX 			(11)
+#define GAL_TYPE1_sqrtA_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE1_sqrtA_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE1_sqrtA_BITS_OF_LAST_BYTE 		(6)
+
+#define GAL_TYPE2_IOD_FIRST_BYTE_IDX 			(0)
+#define GAL_TYPE2_IOD_LAST_BYTE_IDX 			(1)
+#define GAL_TYPE2_IOD_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE2_IOD_BITS_OF_LAST_BYTE 		(8)
+
+#define GAL_TYPE2_omega0_FIRST_BYTE_IDX 		(2)
+#define GAL_TYPE2_omega0_LAST_BYTE_IDX 			(5)
+#define GAL_TYPE2_omega0_BITS_OF_FIRST_BYTE 	(8)
+#define GAL_TYPE2_omega0_BITS_OF_LAST_BYTE 		(8)
+#define GAL_TYPE2_omega0_BITS_FIELD_DIM 		(32)
+
+#define GAL_TYPE2_i0_FIRST_BYTE_IDX 			(6)
+#define GAL_TYPE2_i0_LAST_BYTE_IDX 				(9)
+#define GAL_TYPE2_i0_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE2_i0_BITS_OF_LAST_BYTE 			(8)
+#define GAL_TYPE2_i0_BITS_FIELD_DIM 			(32)
+
+#define GAL_TYPE2_omega_FIRST_BYTE_IDX 			(10)
+#define GAL_TYPE2_omega_LAST_BYTE_IDX 			(13)
+#define GAL_TYPE2_omega_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE2_omega_BITS_OF_LAST_BYTE 		(8)
+#define GAL_TYPE2_omega_BITS_FIELD_DIM 			(32)
+
+#define GAL_TYPE2_idot_FIRST_BYTE_IDX 			(14)
+#define GAL_TYPE2_idot_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE2_idot_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE2_idot_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE2_idot_BITS_FIELD_DIM 			(14)
+
+#define GAL_TYPE3_IOD_FIRST_BYTE_IDX 			(0)
+#define GAL_TYPE3_IOD_LAST_BYTE_IDX 			(1)
+#define GAL_TYPE3_IOD_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE3_IOD_BITS_OF_LAST_BYTE 		(8)
+
+#define GAL_TYPE3_omegadot_FIRST_BYTE_IDX 		(2)
+#define GAL_TYPE3_omegadot_LAST_BYTE_IDX		(4)
+#define GAL_TYPE3_omegadot_BITS_OF_FIRST_BYTE 	(8)
+#define GAL_TYPE3_omegadot_BITS_OF_LAST_BYTE 	(8)
+#define GAL_TYPE3_omegadot_BITS_FIELD_DIM 		(24)
+
+#define GAL_TYPE3_deltan_FIRST_BYTE_IDX 		(5)
+#define GAL_TYPE3_deltan_LAST_BYTE_IDX 			(6)
+#define GAL_TYPE3_deltan_BITS_OF_FIRST_BYTE 	(8)
+#define GAL_TYPE3_deltan_BITS_OF_LAST_BYTE 		(8)
+#define GAL_TYPE3_deltan_BITS_FIELD_DIM 		(16)
+
+#define GAL_TYPE3_cuc_FIRST_BYTE_IDX 			(7)
+#define GAL_TYPE3_cuc_LAST_BYTE_IDX 			(8)
+#define GAL_TYPE3_cuc_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE3_cuc_BITS_OF_LAST_BYTE 		(8)
+#define GAL_TYPE3_cuc_BITS_FIELD_DIM 			(16)
+
+#define GAL_TYPE3_cus_FIRST_BYTE_IDX 			(9)
+#define GAL_TYPE3_cus_LAST_BYTE_IDX 			(10)
+#define GAL_TYPE3_cus_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE3_cus_BITS_OF_LAST_BYTE 		(8)
+#define GAL_TYPE3_cus_BITS_FIELD_DIM 			(16)
+
+#define GAL_TYPE3_crc_FIRST_BYTE_IDX 			(11)
+#define GAL_TYPE3_crc_LAST_BYTE_IDX 			(12)
+#define GAL_TYPE3_crc_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE3_crc_BITS_OF_LAST_BYTE			(8)
+#define GAL_TYPE3_crc_BITS_FIELD_DIM 			(16)
+
+#define GAL_TYPE3_crs_FIRST_BYTE_IDX 			(13)
+#define GAL_TYPE3_crs_LAST_BYTE_IDX 			(14)
+#define GAL_TYPE3_crs_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE3_crs_BITS_OF_LAST_BYTE 		(8)
+#define GAL_TYPE3_crs_BITS_FIELD_DIM 			(16)
+
+#define GAL_TYPE3_SISA_FIRST_BYTE_IDX 			(15)
+#define GAL_TYPE3_SISA_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE3_SISA_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE3_SISA_BITS_OF_LAST_BYTE 		(0)
+
+#define GAL_TYPE4_IOD_FIRST_BYTE_IDX 			(0)
+#define GAL_TYPE4_IOD_LAST_BYTE_IDX 			(1)
+#define GAL_TYPE4_IOD_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE4_IOD_BITS_OF_LAST_BYTE 		(8)
+
+#define GAL_TYPE4_prn_FIRST_BYTE_IDX 			(2)
+#define GAL_TYPE4_prn_LAST_BYTE_IDX 			(2)
+#define GAL_TYPE4_prn_BITS_OF_FIRST_BYTE 		(6)
+#define GAL_TYPE4_prn_BITS_OF_LAST_BYTE 		(0)
+
+#define GAL_TYPE4_cic_FIRST_BYTE_IDX 			(2)
+#define GAL_TYPE4_cic_LAST_BYTE_IDX 			(4)
+#define GAL_TYPE4_cic_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE4_cic_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE4_cic_BITS_FIELD_DIM 			(16)
+
+#define GAL_TYPE4_cis_FIRST_BYTE_IDX 			(4)
+#define GAL_TYPE4_cis_LAST_BYTE_IDX 			(6)
+#define GAL_TYPE4_cis_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE4_cis_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE4_cis_BITS_FIELD_DIM 			(16)
+
+#define GAL_TYPE4_coc_FIRST_BYTE_IDX 			(6)
+#define GAL_TYPE4_coc_LAST_BYTE_IDX 			(8)
+#define GAL_TYPE4_coc_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE4_coc_BITS_OF_LAST_BYTE 		(4)
+
+#define GAL_TYPE4_af0_FIRST_BYTE_IDX 			(8)
+#define GAL_TYPE4_af0_LAST_BYTE_IDX 			(12)
+#define GAL_TYPE4_af0_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE4_af0_BITS_OF_LAST_BYTE 		(3)
+#define GAL_TYPE4_af0_BITS_FIELD_DIM 			(31)
+
+#define GAL_TYPE4_af1_FIRST_BYTE_IDX 			(12)
+#define GAL_TYPE4_af1_LAST_BYTE_IDX 			(14)
+#define GAL_TYPE4_af1_BITS_OF_FIRST_BYTE 		(5)
+#define GAL_TYPE4_af1_BITS_OF_LAST_BYTE 		(8)
+#define GAL_TYPE4_af1_BITS_FIELD_DIM 			(21)
+
+#define GAL_TYPE4_af2_FIRST_BYTE_IDX 			(15)
+#define GAL_TYPE4_af2_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE4_af2_BITS_OF_FIRST_BYTE 		(6)
+#define GAL_TYPE4_af2_BITS_OF_LAST_BYTE 		(0)
+#define GAL_TYPE4_af2_BITS_FIELD_DIM 			(6)
+
+#define GAL_TYPE5_A0I_FIRST_BYTE_IDX 			(0)
+#define GAL_TYPE5_A0I_LAST_BYTE_IDX 			(2)
+#define GAL_TYPE5_A0I_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE5_A0I_BITS_OF_LAST_BYTE 		(1)
+#define GAL_TYPE5_A0I_BITS_FIELD_DIM 			(11)
+
+#define GAL_TYPE5_A1I_FIRST_BYTE_IDX 			(2)
+#define GAL_TYPE5_A1I_LAST_BYTE_IDX 			(3)
+#define GAL_TYPE5_A1I_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE5_A1I_BITS_OF_LAST_BYTE 		(4)
+#define GAL_TYPE5_A1I_BITS_FIELD_DIM 			(11)
+
+#define GAL_TYPE5_A2I_FIRST_BYTE_IDX 			(3)
+#define GAL_TYPE5_A2I_LAST_BYTE_IDX 			(5)
+#define GAL_TYPE5_A2I_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE5_A2I_BITS_OF_LAST_BYTE 		(2)
+#define GAL_TYPE5_A2I_BITS_FIELD_DIM 			(14)
+
+#define GAL_TYPE5_SF1_FIRST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF1_LAST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF1_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE5_SF1_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE5_SF1_BITS_FIELD_DIM 			(1)
+
+#define GAL_TYPE5_SF2_FIRST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF2_LAST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF2_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE5_SF2_BITS_OF_LAST_BYTE 		(5)
+#define GAL_TYPE5_SF2_BITS_FIELD_DIM 			(1)
+
+#define GAL_TYPE5_SF3_FIRST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF3_LAST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF3_BITS_OF_FIRST_BYTE 		(5)
+#define GAL_TYPE5_SF3_BITS_OF_LAST_BYTE 		(4)
+#define GAL_TYPE5_SF3_BITS_FIELD_DIM 			(1)
+
+#define GAL_TYPE5_SF4_FIRST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF4_LAST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF4_BITS_OF_FIRST_BYTE 		(6)
+#define GAL_TYPE5_SF4_BITS_OF_LAST_BYTE 		(3)
+#define GAL_TYPE5_SF4_BITS_FIELD_DIM 			(1)
+
+#define GAL_TYPE5_SF5_FIRST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF5_LAST_BYTE_IDX 			(5)
+#define GAL_TYPE5_SF5_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE5_SF5_BITS_OF_LAST_BYTE 		(2)
+#define GAL_TYPE5_SF5_BITS_FIELD_DIM 			(1)
+
+#define GAL_TYPE5_TGD_E1E5A_FIRST_BYTE_IDX 			(5)
+#define GAL_TYPE5_TGD_E1E5A_LAST_BYTE_IDX 			(7)
+#define GAL_TYPE5_TGD_E1E5A_BITS_OF_FIRST_BYTE 		(1)
+#define GAL_TYPE5_TGD_E1E5A_BITS_OF_LAST_BYTE 		(1)
+#define GAL_TYPE5_TGD_E1E5A_BITS_FIELD_DIM 			(10)
+
+#define GAL_TYPE5_TGD_E1E5B_FIRST_BYTE_IDX 			(7)
+#define GAL_TYPE5_TGD_E1E5B_LAST_BYTE_IDX 			(8)
+#define GAL_TYPE5_TGD_E1E5B_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE5_TGD_E1E5B_BITS_OF_LAST_BYTE 		(3)
+#define GAL_TYPE5_TGD_E1E5B_BITS_FIELD_DIM 			(10)
+
+#define GAL_TYPE5_WN_FIRST_BYTE_IDX 			(9)
+#define GAL_TYPE5_WN_LAST_BYTE_IDX 				(10)
+#define GAL_TYPE5_WN_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE5_WN_BITS_OF_LAST_BYTE 			(5)
+
+#define GAL_TYPE5_TOW_FIRST_BYTE_IDX 			(10)
+#define GAL_TYPE5_TOW_LAST_BYTE_IDX 			(13)
+#define GAL_TYPE5_TOW_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE5_TOW_BITS_OF_LAST_BYTE 		(1)
+
+#define GAL_TYPE5_E5BHS_FIRST_BYTE_IDX 			(8)
+#define GAL_TYPE5_E5BHS_LAST_BYTE_IDX 			(8)
+#define GAL_TYPE5_E5BHS_BITS_OF_FIRST_BYTE 	    (5)
+#define GAL_TYPE5_E5BHS_BITS_OF_LAST_BYTE 		(5)
+
+#define GAL_TYPE5_E1BHS_FIRST_BYTE_IDX 			(8)
+#define GAL_TYPE5_E1BHS_LAST_BYTE_IDX 			(8)
+#define GAL_TYPE5_E1BHS_BITS_OF_FIRST_BYTE 	    (7)
+#define GAL_TYPE5_E1BHS_BITS_OF_LAST_BYTE 		(3)
+
+#define GAL_TYPE5_E5BDVS_FIRST_BYTE_IDX 		(8)
+#define GAL_TYPE5_E5BDVS_LAST_BYTE_IDX 			(8)
+#define GAL_TYPE5_E5BDVS_BITS_OF_FIRST_BYTE 	(0)
+#define GAL_TYPE5_E5BDVS_BITS_OF_LAST_BYTE 		(1)
+
+#define GAL_TYPE5_E1BDVS_FIRST_BYTE_IDX 		(9)
+#define GAL_TYPE5_E1BDVS_LAST_BYTE_IDX 			(9)
+#define GAL_TYPE5_E1BDVS_BITS_OF_FIRST_BYTE 	(1)
+#define GAL_TYPE5_E1BDVS_BITS_OF_LAST_BYTE 		(0)
+
+#define GAL_TYPE5_satstatus_FIRST_BYTE_IDX 		(9)
+#define GAL_TYPE5_satstatus_LAST_BYTE_IDX 		(9)
+#define GAL_TYPE5_satstatus_BITS_OF_FIRST_BYTE 	(1)
+#define GAL_TYPE5_satstatus_BITS_OF_LAST_BYTE 	(0)
+
+#define GAL_TYPE6_A0_FIRST_BYTE_IDX 			(0)
+#define GAL_TYPE6_A0_LAST_BYTE_IDX 				(4)
+#define GAL_TYPE6_A0_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE6_A0_BITS_OF_LAST_BYTE 			(6)
+#define GAL_TYPE6_A0_BITS_FIELD_DIM 			(32)
+
+#define GAL_TYPE6_A1_FIRST_BYTE_IDX 			(4)
+#define GAL_TYPE6_A1_LAST_BYTE_IDX 				(7)
+#define GAL_TYPE6_A1_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE6_A1_BITS_OF_LAST_BYTE 			(6)
+#define GAL_TYPE6_A1_BITS_FIELD_DIM 			(24)
+
+#define GAL_TYPE6_DTLS_FIRST_BYTE_IDX 			(7)
+#define GAL_TYPE6_DTLS_LAST_BYTE_IDX 			(8)
+#define GAL_TYPE6_DTLS_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE6_DTLS_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE6_DTLS_BITS_FIELD_DIM 			(8)
+
+#define GAL_TYPE6_TOT_FIRST_BYTE_IDX 			(8)
+#define GAL_TYPE6_TOT_LAST_BYTE_IDX				(9)
+#define GAL_TYPE6_TOT_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE6_TOT_BITS_OF_LAST_BYTE 		(6)
+
+#define GAL_TYPE6_WNT_FIRST_BYTE_IDX 			(9)
+#define GAL_TYPE6_WNT_LAST_BYTE_IDX 			(10)
+#define GAL_TYPE6_WNT_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE6_WNT_BITS_OF_LAST_BYTE 		(6)
+
+#define GAL_TYPE6_WNLSF_FIRST_BYTE_IDX 			(10)
+#define GAL_TYPE6_WNLSF_LAST_BYTE_IDX 			(11)
+#define GAL_TYPE6_WNLSF_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE6_WNLSF_BITS_OF_LAST_BYTE 		(6)
+
+#define GAL_TYPE6_DN_FIRST_BYTE_IDX 			(11)
+#define GAL_TYPE6_DN_LAST_BYTE_IDX 				(12)
+#define GAL_TYPE6_DN_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE6_DN_BITS_OF_LAST_BYTE 		 	(1)
+
+#define GAL_TYPE6_DTLSF_FIRST_BYTE_IDX 			(12)
+#define GAL_TYPE6_DTLSF_LAST_BYTE_IDX 			(13)
+#define GAL_TYPE6_DTLSF_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE6_DTLSF_BITS_OF_LAST_BYTE 		(1)
+#define GAL_TYPE6_DTLSF_BITS_FIELD_DIM 			(8)
+
+#define GAL_TYPE6_TOW_FIRST_BYTE_IDX 			(13)
+#define GAL_TYPE6_TOW_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE6_TOW_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE6_TOW_BITS_OF_LAST_BYTE 		(5)
+
+#define GAL_TYPE7_IODA_FIRST_BYTE_IDX      		(0)
+#define GAL_TYPE7_IODA_LAST_BYTE_IDX 			(1)
+#define GAL_TYPE7_IODA_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE7_IODA_BITS_OF_LAST_BYTE 		(2)
+
+#define GAL_TYPE7_WNA_FIRST_BYTE_IDX      		(1)
+#define GAL_TYPE7_WNA_LAST_BYTE_IDX 			(1)
+#define GAL_TYPE7_WNA_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE7_WNA_BITS_OF_LAST_BYTE 		(6)
+
+#define GAL_TYPE7_T0A_FIRST_BYTE_IDX      		(1)
+#define GAL_TYPE7_T0A_LAST_BYTE_IDX 			(2)
+#define GAL_TYPE7_T0A_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE7_T0A_BITS_OF_LAST_BYTE 		(6)
+
+#define GAL_TYPE7_SVID1_FIRST_BYTE_IDX      	(2)
+#define GAL_TYPE7_SVID1_LAST_BYTE_IDX 			(3)
+#define GAL_TYPE7_SVID1_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE7_SVID1_BITS_OF_LAST_BYTE 		(4)
+
+#define GAL_TYPE7_SQRTA_FIRST_BYTE_IDX      	(3)
+#define GAL_TYPE7_SQRTA_LAST_BYTE_IDX 			(5)
+#define GAL_TYPE7_SQRTA_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE7_SQRTA_BITS_OF_LAST_BYTE 		(1)
+#define GAL_TYPE7_SQRTA_FIELD_DIM				(13)
+
+#define GAL_TYPE7_E_FIRST_BYTE_IDX      		(5)
+#define GAL_TYPE7_E_LAST_BYTE_IDX 				(6)
+#define GAL_TYPE7_E_BITS_OF_FIRST_BYTE 			(7)
+#define GAL_TYPE7_E_BITS_OF_LAST_BYTE 			(4)
+
+#define GAL_TYPE7_OMEGA_FIRST_BYTE_IDX      	(6)
+#define GAL_TYPE7_OMEGA_LAST_BYTE_IDX 			(8)
+#define GAL_TYPE7_OMEGA_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE7_OMEGA_BITS_OF_LAST_BYTE 		(4)
+#define GAL_TYPE7_OMEGA_FIELD_DIM 				(16)
+
+#define GAL_TYPE7_I0_FIRST_BYTE_IDX      		(8)
+#define GAL_TYPE7_I0_LAST_BYTE_IDX 				(9)
+#define GAL_TYPE7_I0_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE7_I0_BITS_OF_LAST_BYTE 			(7)
+#define GAL_TYPE7_I0_FIELD_DIM 					(11)
+
+#define GAL_TYPE7_OMEGA0_FIRST_BYTE_IDX      	(9)
+#define GAL_TYPE7_OMEGA0_LAST_BYTE_IDX 			(11)
+#define GAL_TYPE7_OMEGA0_BITS_OF_FIRST_BYTE 	(1)
+#define GAL_TYPE7_OMEGA0_BITS_OF_LAST_BYTE 		(7)
+#define GAL_TYPE7_OMEGA0_FIELD_DIM 				(16)
+
+#define GAL_TYPE7_OMEGADOT_FIRST_BYTE_IDX      	(11)
+#define GAL_TYPE7_OMEGADOT_LAST_BYTE_IDX 		(13)
+#define GAL_TYPE7_OMEGADOT_BITS_OF_FIRST_BYTE 	(1)
+#define GAL_TYPE7_OMEGADOT_BITS_OF_LAST_BYTE 	(2)
+#define GAL_TYPE7_OMEGADOT_FIELD_DIM 			(11)
+
+#define GAL_TYPE7_M0_FIRST_BYTE_IDX      		(13)
+#define GAL_TYPE7_M0_LAST_BYTE_IDX 				(15)
+#define GAL_TYPE7_M0_BITS_OF_FIRST_BYTE 		(6)
+#define GAL_TYPE7_M0_BITS_OF_LAST_BYTE 			(2)
+#define GAL_TYPE7_M0_FIELD_DIM 					(16)
+
+#define GAL_TYPE8_IODA_FIRST_BYTE_IDX      		(0)
+#define GAL_TYPE8_IODA_LAST_BYTE_IDX			(1)
+#define GAL_TYPE8_IODA_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE8_IODA_BITS_OF_LAST_BYTE		(2)
+
+#define GAL_TYPE8_AF0_FIRST_BYTE_IDX      		(1)
+#define GAL_TYPE8_AF0_LAST_BYTE_IDX				(3)
+#define GAL_TYPE8_AF0_BITS_OF_FIRST_BYTE 		(6)
+#define GAL_TYPE8_AF0_BITS_OF_LAST_BYTE			(2)
+#define GAL_TYPE8_AF0_FIELD_DIM 				(16)
+
+#define GAL_TYPE8_AF1_FIRST_BYTE_IDX      		(3)
+#define GAL_TYPE8_AF1_LAST_BYTE_IDX				(4)
+#define GAL_TYPE8_AF1_BITS_OF_FIRST_BYTE 		(6)
+#define GAL_TYPE8_AF1_BITS_OF_LAST_BYTE			(7)
+#define GAL_TYPE8_AF1_FIELD_DIM 				(13)
+
+#define GAL_TYPE8_HEALTH_FIRST_BYTE_IDX      	(5)
+#define GAL_TYPE8_HEALTH_LAST_BYTE_IDX			(5)
+#define GAL_TYPE8_HEALTH_BITS_OF_FIRST_BYTE 	(3)
+#define GAL_TYPE8_HEALTH_BITS_OF_LAST_BYTE		(7)
+
+#define GAL_TYPE8_SVID2_FIRST_BYTE_IDX      	(5)
+#define GAL_TYPE8_SVID2_LAST_BYTE_IDX 			(6)
+#define GAL_TYPE8_SVID2_BITS_OF_FIRST_BYTE 		(5)
+#define GAL_TYPE8_SVID2_BITS_OF_LAST_BYTE 		(1)
+
+#define GAL_TYPE8_SQRTA_FIRST_BYTE_IDX      	(6)
+#define GAL_TYPE8_SQRTA_LAST_BYTE_IDX 			(7)
+#define GAL_TYPE8_SQRTA_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE8_SQRTA_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE8_SQRTA_FIELD_DIM				(13)
+
+#define GAL_TYPE8_E_FIRST_BYTE_IDX      		(7)
+#define GAL_TYPE8_E_LAST_BYTE_IDX 				(9)
+#define GAL_TYPE8_E_BITS_OF_FIRST_BYTE 			(2)
+#define GAL_TYPE8_E_BITS_OF_LAST_BYTE 			(1)
+
+#define GAL_TYPE8_OMEGA_FIRST_BYTE_IDX      	(9)
+#define GAL_TYPE8_OMEGA_LAST_BYTE_IDX 			(11)
+#define GAL_TYPE8_OMEGA_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE8_OMEGA_BITS_OF_LAST_BYTE 		(1)
+#define GAL_TYPE8_OMEGA_FIELD_DIM 				(16)
+
+#define GAL_TYPE8_I0_FIRST_BYTE_IDX      		(11)
+#define GAL_TYPE8_I0_LAST_BYTE_IDX 				(12)
+#define GAL_TYPE8_I0_BITS_OF_FIRST_BYTE 		(7)
+#define GAL_TYPE8_I0_BITS_OF_LAST_BYTE 			(4)
+#define GAL_TYPE8_I0_FIELD_DIM 					(11)
+
+#define GAL_TYPE8_OMEGA0_FIRST_BYTE_IDX      	(12)
+#define GAL_TYPE8_OMEGA0_LAST_BYTE_IDX 			(14)
+#define GAL_TYPE8_OMEGA0_BITS_OF_FIRST_BYTE 	(4)
+#define GAL_TYPE8_OMEGA0_BITS_OF_LAST_BYTE 		(4)
+#define GAL_TYPE8_OMEGA0_FIELD_DIM 				(16)
+
+#define GAL_TYPE8_OMEGADOT_FIRST_BYTE_IDX      	(14)
+#define GAL_TYPE8_OMEGADOT_LAST_BYTE_IDX 		(15)
+#define GAL_TYPE8_OMEGADOT_BITS_OF_FIRST_BYTE 	(4)
+#define GAL_TYPE8_OMEGADOT_BITS_OF_LAST_BYTE 	(7)
+#define GAL_TYPE8_OMEGADOT_FIELD_DIM 			(11)
+
+#define GAL_TYPE9_IODA_FIRST_BYTE_IDX      		(0)
+#define GAL_TYPE9_IODA_LAST_BYTE_IDX			(1)
+#define GAL_TYPE9_IODA_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE9_IODA_BITS_OF_LAST_BYTE		(2)
+
+#define GAL_TYPE9_WNA_FIRST_BYTE_IDX      		(1)
+#define GAL_TYPE9_WNA_LAST_BYTE_IDX				(1)
+#define GAL_TYPE9_WNDA_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE9_WNDA_BITS_OF_LAST_BYTE		(6)
+
+#define GAL_TYPE9_T0A_FIRST_BYTE_IDX      		(1)
+#define GAL_TYPE9_T0A_LAST_BYTE_IDX				(2)
+#define GAL_TYPE9_T0A_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE9_T0A_BITS_OF_LAST_BYTE			(6)
+
+#define GAL_TYPE9_M0_FIRST_BYTE_IDX      		(2)
+#define GAL_TYPE9_M0_LAST_BYTE_IDX 				(4)
+#define GAL_TYPE9_M0_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE9_M0_BITS_OF_LAST_BYTE 			(6)
+#define GAL_TYPE9_M0_FIELD_DIM 					(16)
+
+#define GAL_TYPE9_AF0_FIRST_BYTE_IDX      		(4)
+#define GAL_TYPE9_AF0_LAST_BYTE_IDX				(6)
+#define GAL_TYPE9_AF0_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE9_AF0_BITS_OF_LAST_BYTE			(6)
+#define GAL_TYPE9_AF0_FIELD_DIM 				(16)
+
+#define GAL_TYPE9_AF1_FIRST_BYTE_IDX      		(6)
+#define GAL_TYPE9_AF1_LAST_BYTE_IDX				(8)
+#define GAL_TYPE9_AF1_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE9_AF1_BITS_OF_LAST_BYTE			(3)
+#define GAL_TYPE9_AF1_FIELD_DIM 				(13)
+
+#define GAL_TYPE9_HEALTH_FIRST_BYTE_IDX      	(8)
+#define GAL_TYPE9_HEALTH_LAST_BYTE_IDX			(8)
+#define GAL_TYPE9_HEALTH_BITS_OF_FIRST_BYTE 	(7)
+#define GAL_TYPE9_HEALTH_BITS_OF_LAST_BYTE		(3)
+
+#define GAL_TYPE9_SVID3_FIRST_BYTE_IDX      	(8)
+#define GAL_TYPE9_SVID3_LAST_BYTE_IDX 			(9)
+#define GAL_TYPE9_SVID3_BITS_OF_FIRST_BYTE 		(1)
+#define GAL_TYPE9_SVID3_BITS_OF_LAST_BYTE 		(5)
+
+#define GAL_TYPE9_SQRTA_FIRST_BYTE_IDX      	(9)
+#define GAL_TYPE9_SQRTA_LAST_BYTE_IDX 			(11)
+#define GAL_TYPE9_SQRTA_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE9_SQRTA_BITS_OF_LAST_BYTE 		(2)
+#define GAL_TYPE9_SQRTA_FIELD_DIM				(13)
+
+#define GAL_TYPE9_E_FIRST_BYTE_IDX      		(11)
+#define GAL_TYPE9_E_LAST_BYTE_IDX 				(12)
+#define GAL_TYPE9_E_BITS_OF_FIRST_BYTE 			(6)
+#define GAL_TYPE9_E_BITS_OF_LAST_BYTE 			(5)
+
+#define GAL_TYPE9_OMEGA_FIRST_BYTE_IDX      	(12)
+#define GAL_TYPE9_OMEGA_LAST_BYTE_IDX 			(14)
+#define GAL_TYPE9_OMEGA_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE9_OMEGA_BITS_OF_LAST_BYTE 		(5)
+#define GAL_TYPE9_OMEGA_FIELD_DIM 				(16)
+
+#define GAL_TYPE9_I0_FIRST_BYTE_IDX      		(14)
+#define GAL_TYPE9_I0_LAST_BYTE_IDX 				(15)
+#define GAL_TYPE9_I0_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE9_I0_BITS_OF_LAST_BYTE 			(8)
+#define GAL_TYPE9_I0_FIELD_DIM 					(11)
+
+#define GAL_TYPE10_IODA_FIRST_BYTE_IDX      	(0)
+#define GAL_TYPE10_IODA_LAST_BYTE_IDX 			(1)
+#define GAL_TYPE10_IODA_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE10_IODA_BITS_OF_LAST_BYTE 		(2)
+
+#define GAL_TYPE10_OMEGA0_FIRST_BYTE_IDX      	(1)
+#define GAL_TYPE10_OMEGA0_LAST_BYTE_IDX 		(3)
+#define GAL_TYPE10_OMEGA0_BITS_OF_FIRST_BYTE 	(6)
+#define GAL_TYPE10_OMEGA0_BITS_OF_LAST_BYTE 	(2)
+#define GAL_TYPE10_OMEGA0_FIELD_DIM 			(16)
+
+#define GAL_TYPE10_OMEGADOT_FIRST_BYTE_IDX      (3)
+#define GAL_TYPE10_OMEGADOT_LAST_BYTE_IDX 		(4)
+#define GAL_TYPE10_OMEGADOT_BITS_OF_FIRST_BYTE 	(6)
+#define GAL_TYPE10_OMEGADOT_BITS_OF_LAST_BYTE 	(5)
+#define GAL_TYPE10_OMEGADOT_FIELD_DIM 			(11)
+
+#define GAL_TYPE10_M0_FIRST_BYTE_IDX      		(4)
+#define GAL_TYPE10_M0_LAST_BYTE_IDX 			(6)
+#define GAL_TYPE10_M0_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE10_M0_BITS_OF_LAST_BYTE 		(5)
+#define GAL_TYPE10_M0_FIELD_DIM 				(16)
+
+#define GAL_TYPE10_AF0_FIRST_BYTE_IDX      		(6)
+#define GAL_TYPE10_AF0_LAST_BYTE_IDX			(8)
+#define GAL_TYPE10_AF0_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE10_AF0_BITS_OF_LAST_BYTE		(5)
+#define GAL_TYPE10_AF0_FIELD_DIM 				(16)
+
+#define GAL_TYPE10_AF1_FIRST_BYTE_IDX      		(8)
+#define GAL_TYPE10_AF1_LAST_BYTE_IDX			(10)
+#define GAL_TYPE10_AF1_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE10_AF1_BITS_OF_LAST_BYTE		(2)
+#define GAL_TYPE10_AF1_FIELD_DIM 				(13)
+
+#define GAL_TYPE10_HEALTH_FIRST_BYTE_IDX      	(10)
+#define GAL_TYPE10_HEALTH_LAST_BYTE_IDX			(10)
+#define GAL_TYPE10_HEALTH_BITS_OF_FIRST_BYTE 	(6)
+#define GAL_TYPE10_HEALTH_BITS_OF_LAST_BYTE		(4)
+
+#define GAL_TYPE10_A0G_FIRST_BYTE_IDX 			(10)
+#define GAL_TYPE10_A0G_LAST_BYTE_IDX 			(12)
+#define GAL_TYPE10_A0G_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE10_A0G_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE10_A0G_BITS_FIELD_DIM 			(16)
+
+#define GAL_TYPE10_A1G_FIRST_BYTE_IDX 			(12)
+#define GAL_TYPE10_A1G_LAST_BYTE_IDX 			(14)
+#define GAL_TYPE10_A1G_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE10_A1G_BITS_OF_LAST_BYTE 		(2)
+#define GAL_TYPE10_A1G_BITS_FIELD_DIM 			(12)
+
+#define GAL_TYPE10_t0G_FIRST_BYTE_IDX 			(14)
+#define GAL_TYPE10_t0G_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE10_t0G_BITS_OF_FIRST_BYTE 		(6)
+#define GAL_TYPE10_t0G_BITS_OF_LAST_BYTE 		(2)
+
+#define GAL_TYPE10_WN0G_FIRST_BYTE_IDX 			(15)
+#define GAL_TYPE10_WN0G_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE10_WN0G_BITS_OF_FIRST_BYTE 		(0)
+#define GAL_TYPE10_WN0G_BITS_OF_LAST_BYTE 		(6)
+
+#define GAL_TYPE16_DA_FIRST_BYTE_IDX 			(0)
+#define GAL_TYPE16_DA_LAST_BYTE_IDX 			(1)
+#define GAL_TYPE16_DA_BITS_OF_FIRST_BYTE 		(2)
+#define GAL_TYPE16_DA_BITS_OF_LAST_BYTE 		(3)
+#define GAL_TYPE16_DA_BITS_FIELD_DIM 			(5)
+
+#define GAL_TYPE16_EX_FIRST_BYTE_IDX 			(1)
+#define GAL_TYPE16_EX_LAST_BYTE_IDX 			(2)
+#define GAL_TYPE16_EX_BITS_OF_FIRST_BYTE 		(5)
+#define GAL_TYPE16_EX_BITS_OF_LAST_BYTE 		(8)
+#define GAL_TYPE16_EX_BITS_FIELD_DIM 			(13)
+
+#define GAL_TYPE16_EY_FIRST_BYTE_IDX 			(3)
+#define GAL_TYPE16_EY_LAST_BYTE_IDX 			(4)
+#define GAL_TYPE16_EY_BITS_OF_FIRST_BYTE 		(8)
+#define GAL_TYPE16_EY_BITS_OF_LAST_BYTE 		(5)
+#define GAL_TYPE16_EY_BITS_FIELD_DIM 			(13)
+
+#define GAL_TYPE16_I0_FIRST_BYTE_IDX 			(4)
+#define GAL_TYPE16_I0_LAST_BYTE_IDX 			(6)
+#define GAL_TYPE16_I0_BITS_OF_FIRST_BYTE 		(3)
+#define GAL_TYPE16_I0_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE16_I0_BITS_FIELD_DIM 			(17)
+
+#define GAL_TYPE16_OMEGA0_FIRST_BYTE_IDX 		(6)
+#define GAL_TYPE16_OMEGA0_LAST_BYTE_IDX 		(9)
+#define GAL_TYPE16_OMEGA0_BITS_OF_FIRST_BYTE 	(2)
+#define GAL_TYPE16_OMEGA0_BITS_OF_LAST_BYTE 	(5)
+#define GAL_TYPE16_OMEGA0_BITS_FIELD_DIM 		(23)
+
+#define GAL_TYPE16_LAMBDA0_FIRST_BYTE_IDX 		(9)
+#define GAL_TYPE16_LAMBDA0_LAST_BYTE_IDX 		(12)
+#define GAL_TYPE16_LAMBDA0_BITS_OF_FIRST_BYTE 	(3)
+#define GAL_TYPE16_LAMBDA0_BITS_OF_LAST_BYTE 	(4)
+#define GAL_TYPE16_LAMBDA0_BITS_FIELD_DIM 		(23)
+
+#define GAL_TYPE16_AF0_FIRST_BYTE_IDX 			(12)
+#define GAL_TYPE16_AF0_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE16_AF0_BITS_OF_FIRST_BYTE 		(4)
+#define GAL_TYPE16_AF0_BITS_OF_LAST_BYTE 		(2)
+#define GAL_TYPE16_AF0_BITS_FIELD_DIM 			(22)
+
+#define GAL_TYPE16_AF1_FIRST_BYTE_IDX 			(15)
+#define GAL_TYPE16_AF1_LAST_BYTE_IDX 			(15)
+#define GAL_TYPE16_AF1_BITS_OF_FIRST_BYTE 		(0)
+#define GAL_TYPE16_AF1_BITS_OF_LAST_BYTE 		(6)
+#define GAL_TYPE16_AF1_BITS_FIELD_DIM 			(6)
+
+
+#endif /* GALILEO_MESSAGE_PARSER_H_INCLUDED */

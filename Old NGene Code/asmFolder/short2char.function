@@ -1,0 +1,39 @@
+	
+	
+#ifdef COMPILE_64_BIT
+inputOffset = (unsigned long long int)(&(inputArray[index])) & 0x0f;
+#else
+inputOffset = (unsigned int)(&(inputArray[index])) & 0x0f;
+#endif
+
+if(inputOffset==0)
+{
+	while((index+XMM_REGISTER_SIZE) <= arrayLength)
+	{
+		movdqa_m2r(inputArray[index],xmm0);
+		movdqa_m2r(inputArray[index+8],xmm1);
+		#ifdef SHIFTED_BITS
+		psraw_i2r(SHIFTED_BITS,xmm0);
+		psraw_i2r(SHIFTED_BITS,xmm1);
+		#endif
+		packsswb_r2r(xmm1,xmm0);
+		movdqa_r2m(xmm0,outputArray[index]);
+		index += XMM_REGISTER_SIZE;
+	}
+}
+else
+{
+	while((index+XMM_REGISTER_SIZE) <= arrayLength)
+	{
+		movdqu_m2r(inputArray[index],xmm0);
+		movdqu_m2r(inputArray[index+8],xmm1);
+		#ifdef SHIFTED_BITS
+		psraw_i2r(SHIFTED_BITS,xmm0);
+		psraw_i2r(SHIFTED_BITS,xmm1);
+		#endif
+		packsswb_r2r(xmm1,xmm0);
+		movdqa_r2m(xmm0,outputArray[index]);
+		index += XMM_REGISTER_SIZE;
+	}
+}
+

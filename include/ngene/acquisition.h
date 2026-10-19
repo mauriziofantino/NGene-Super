@@ -135,6 +135,9 @@ void NgAcquisitionSnapshot(const TNgAcquisition *context,
                            TNgAcquisitionResult *result);
 /** Owner-thread copy; call only when this context is not concurrently processing. */
 void NgAcquisitionCafSnapshot(const TNgAcquisition *context, TNgAcquisitionCaf *caf);
+/** Owner-thread display switch. Disabling skips CAF max pooling without changing
+ * coarse correlation or detector decisions. */
+void NgAcquisitionSetCafEnabled(TNgAcquisition *context, int enabled);
 /** Cheap change indicator for copying a display CAF after a completed coarse dwell. */
 uint64_t NgAcquisitionCafSequence(const TNgAcquisition *context);
 /** Clear a search and its partial frame while preserving the assigned PRN. */

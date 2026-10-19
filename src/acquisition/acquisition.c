@@ -38,6 +38,7 @@ struct TNgAcquisition {
     double *accumulatedPower;
     TNgAcquisitionResult result;
     TNgAcquisitionCaf caf;
+    int cafEnabled;
     size_t frameCount;
     size_t frameTarget;
     size_t skipSamples;
@@ -282,6 +283,7 @@ int NgAcquisitionCreate(const TNgAcquisitionPlan *plan,
     context = calloc(1, sizeof(*context));
     if (!context) return NgFail(error, "Cannot allocate acquisition context");
     context->plan = plan;
+    context->cafEnabled = 1;
     context->frame = malloc(plan->frameCapacity * plan->sampleBytes);
     context->power = calloc(plan->fftSize, sizeof(double));
     context->accumulatedPower = calloc(plan->fftSize, sizeof(double));
@@ -383,6 +385,15 @@ void NgAcquisitionCafSnapshot(const TNgAcquisition *context, TNgAcquisitionCaf *
     if (context && caf) *caf = context->caf;
 }
 
+void NgAcquisitionSetCafEnabled(TNgAcquisition *context, int enabled)
+{
+    if (!context) return;
+    enabled = enabled != 0;
+    if (context->cafEnabled == enabled) return;
+    context->cafEnabled = enabled;
+    ClearCaf(context);
+}
+
 uint64_t NgAcquisitionCafSequence(const TNgAcquisition *context)
 {
     return context ? context->caf.sequence : 0;
@@ -463,7 +474,7 @@ static int CoarseFrame(TNgAcquisition *context, const TNgIqView *view, TNgError 
         context->accumulatedPower[index] += context->power[index];
     ++context->sumsDone;
     if (context->sumsDone < context->coarseSums) return NG_OK;
-    {
+    if (context->cafEnabled) {
         TNgAcquisitionCaf *caf = &context->caf;
         size_t row = result->dopplerIndex * caf->dopplerBins / plan->dopplerCount;
         unsigned variant = view->meta.count == plan->frameCapacity &&
@@ -522,10 +533,10 @@ static int CoarseFrame(TNgAcquisition *context, const TNgIqView *view, TNgError 
     if (++context->delayIndex >= plan->delayCount) {
         context->delayIndex = 0;
         ++result->dopplerIndex;
-        context->caf.completedDopplerBins = result->dopplerIndex;
+        if (context->cafEnabled) context->caf.completedDopplerBins = result->dopplerIndex;
     }
     if (result->dopplerIndex < plan->dopplerCount) return NG_OK;
-    context->caf.complete = 1;
+    if (context->cafEnabled) context->caf.complete = 1;
     if (context->coarseMaximum > result->threshold && context->coarseMaximum > 0.0) {
         context->codeRateHz = NG_GPS_CA_RATE_HZ * (1.0 + result->dopplerHz / ACQ_L1_HZ);
         StartRefinement(context, NG_ACQ_DOPPLER_REFINEMENT);

@@ -1,0 +1,143 @@
+{
+	/*
+		Let be 
+		- m0 m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15
+		16 bytes in the memory (input array)
+		- a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15
+		- b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 b10 b11 b12 b13 b14 b15
+		16 bytes in two registers (e.g. xmm0, xmm1)
+		
+		First, an unpacking instruction is called
+		Result is stored in registers as follows
+		- a8 m8 a9 m9 a10 m10 a11 m11 a12 m12 a13 m13 a14 m14 a15 m15
+		- b0 m0 b1 m1  b2  m2  b3  m3  b4  m4  b5  m5  b6  m6  b7  m7
+		The registers still contain some of the old contents. But this
+		does not invalidate elaboration.
+		
+		If we consider registers grouping each pair of bytes
+		into a word (16 bits), sample bits from memory are in the most 
+		significant byte.
+		Then, the shift is performed. The amount of bits of the shift
+		is incremented by 8: in this way bits of the samples are shifted
+		into the least significant byte, while older bits (from previous value
+		of the register) are discarded. We have this situation
+		- m8 s8 m9 s9 m10 s10 m11 s11 m12 s12 m13 s13 m14 s14 m15 s15
+		- m0 s0 m1 s1  m2  s2  m3  s3  m4  s4  m5  s5  m6  s6  m7  s7
+		that represents content of the two registers where results are stored;
+		mx indicates result of shift for the xth samples, 
+		sx indicates the correspondent sign extension
+		
+		The two registers are then packed in the same register. For each word
+		in the input registers, only one byte is written in the destination register.
+		This does not lead to errors since samples are contained in the least significant
+		byte only, while the most significant one is a mere sign extension.
+		The content of the destination register
+		- m0 m1 m2 m3 m4 m5 m6 m7 m8 m9 m10 m11 m12 m13 m14 m15
+		is then written to the memory in the output array location.
+	*/
+
+	#ifdef COMPILE_64_BIT
+	offsetOut = (unsigned long long int)outputArray & 0x0f;
+	#else
+	offsetOut = (unsigned int)outputArray & 0x0f;
+	#endif
+	if(offsetOut!=0)
+	{
+		for(index=0;index<((int)16-(int)offsetOut) && index<arrayLength;index++)
+		{
+			outputArray[index] = inputArray[index] >> (SHIFTED_BITS-8);
+		}	
+	}
+	/**/
+	#ifdef COMPILE_64_BIT
+	offsetIn = (unsigned long long int)(&(inputArray[index])) & 0x0f;
+	#else
+	offsetIn = (unsigned int)(&(inputArray[index])) & 0x0f;
+	#endif
+	if(offsetIn == 0)
+	{
+		while((index+48)<=arrayLength)
+		{
+			punpckhbw_m2r(inputArray[index],xmm0);
+			punpcklbw_m2r(inputArray[index],xmm1);
+			punpckhbw_m2r(inputArray[index+16],xmm2);
+			punpcklbw_m2r(inputArray[index+16],xmm3);
+			punpckhbw_m2r(inputArray[index+32],xmm4);
+			punpcklbw_m2r(inputArray[index+32],xmm5);
+			psraw_i2r(SHIFTED_BITS,xmm0);
+			psraw_i2r(SHIFTED_BITS,xmm1);
+			psraw_i2r(SHIFTED_BITS,xmm2);
+			psraw_i2r(SHIFTED_BITS,xmm3);
+			psraw_i2r(SHIFTED_BITS,xmm4);
+			psraw_i2r(SHIFTED_BITS,xmm5);
+			packsswb_r2r(xmm0, xmm1);
+			packsswb_r2r(xmm2, xmm3);
+			packsswb_r2r(xmm4, xmm5);
+			movdqa_r2m(xmm1,outputArray[index]);
+			movdqa_r2m(xmm3,outputArray[index+16]);
+			movdqa_r2m(xmm5,outputArray[index+32]);
+			index += 48;
+		}
+		if((index+32)<=arrayLength)
+		{
+			punpckhbw_m2r(inputArray[index],xmm0);
+			punpcklbw_m2r(inputArray[index],xmm1);
+			punpckhbw_m2r(inputArray[index+16],xmm2);
+			punpcklbw_m2r(inputArray[index+16],xmm3);
+			psraw_i2r(SHIFTED_BITS,xmm0);
+			psraw_i2r(SHIFTED_BITS,xmm1);
+			psraw_i2r(SHIFTED_BITS,xmm2);
+			psraw_i2r(SHIFTED_BITS,xmm3);
+			packsswb_r2r(xmm0, xmm1);
+			packsswb_r2r(xmm2, xmm3);
+			movdqa_r2m(xmm1,outputArray[index]);
+			movdqa_r2m(xmm3,outputArray[index+16]);
+			index += 32;
+		}
+		if((index+16)<=arrayLength)
+		{
+			punpckhbw_m2r(inputArray[index],xmm0);
+			punpcklbw_m2r(inputArray[index],xmm1);
+			psraw_i2r(SHIFTED_BITS,xmm0);
+			psraw_i2r(SHIFTED_BITS,xmm1);
+			packsswb_r2r(xmm0, xmm1);
+			movdqa_r2m(xmm1,outputArray[index]);
+			index += 16;
+		}			
+	}
+	else
+	{
+		while((index+32)<=arrayLength)
+		{
+			movdqu_m2r(inputArray[index],xmm2);
+			movdqu_m2r(inputArray[index+16],xmm5);
+			punpckhbw_r2r(xmm2,xmm0);
+			punpcklbw_r2r(xmm2,xmm1);
+			punpckhbw_r2r(xmm5,xmm3);
+			punpcklbw_r2r(xmm5,xmm4);
+			psraw_i2r(SHIFTED_BITS,xmm0);
+			psraw_i2r(SHIFTED_BITS,xmm1);
+			psraw_i2r(SHIFTED_BITS,xmm3);
+			psraw_i2r(SHIFTED_BITS,xmm4);
+			packsswb_r2r(xmm0, xmm1);
+			packsswb_r2r(xmm3, xmm4);
+			movdqa_r2m(xmm1,outputArray[index]);
+			movdqa_r2m(xmm4,outputArray[index+16]);
+			index += 32;
+		}
+		if((index+16)<=arrayLength)
+		{
+			movdqu_m2r(inputArray[index],xmm2);
+			punpckhbw_r2r(xmm2,xmm0);
+			punpcklbw_r2r(xmm2,xmm1);
+			psraw_i2r(SHIFTED_BITS,xmm0);
+			psraw_i2r(SHIFTED_BITS,xmm1);
+			packsswb_r2r(xmm0, xmm1);
+			movdqa_r2m(xmm1,outputArray[index]);
+			index += 16;
+		}
+	}
+
+	for(;index<arrayLength;index++)
+			outputArray[index] = (inputArray[index] >> (SHIFTED_BITS-8));
+}

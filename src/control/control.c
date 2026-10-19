@@ -1022,7 +1022,7 @@ int NgControlAnalysisConfigure(TNgControl *control, const TNgAnalysisConfig *con
  * dispatch or recording when plots become dormant.
  *
  * Parameter control: Live controller.
- * Parameter mask: Mask bits: 1 PSD, 2 histogram, 3 both; zero renews neither.
+ * Parameter mask: Mask bits: 1 PSD, 2 histogram, 4 acquisition CAF.
  */
 void NgControlDiagnosticInterest(TNgControl *control, unsigned mask)
 {
@@ -1036,5 +1036,7 @@ void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double
     if (control->analysis != NULL) {
         NgAnalysisInterest(control->analysis, mask & 3u, expiresSeconds);
     }
+    if ((mask & 4u) != 0 && control->acquisition != NULL)
+        NgAcquisitionReceiverCafInterestUntil(control->acquisition, expiresSeconds);
     NgMutexUnlock(&control->mutex);
 }

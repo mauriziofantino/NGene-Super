@@ -1,0 +1,43 @@
+FILE FORMAT FOR THE SPREADING CODES FILE
+----------------------------------------------------------------------------
+These binary files contain the spreading codes for 
+ - GPS L1 C/A
+ - Galileo E1b/c
+ - EGNOS (120,124,126)
+Each chip occupies one byte (one samples per chip).
+Each code is reported using two different modulations:
+ - +1/-1   BPSK
+ -  0/-1   NGene2 internal format
+Galileo codes don't contain BOC.
+
+-------------------------------
+ GPS_codes.dat
+ 
+ 1023 bytes - PRN  1 (+1/-1)
+ 1023 bytes - PRN  1 ( 0/-1)
+    .
+    .
+    .
+ 1023 bytes - PRN 32 (+1/-1)
+ 1023 bytes - PRN 32 ( 0/-1)
+ -------------------------------
+ EGNOS_codes.dat
+ 
+ Analogous to GPS but for PRN 120,124,126
+ -------------------------------
+ Galileo_E1b_codes.dat
+ 
+ 4092 bytes - PRN  1 (+1/-1)
+ 4092 bytes - PRN  1 ( 0/-1)
+    .
+    .
+    .
+ 4092 bytes - PRN 50 (+1/-1)
+ 4092 bytes - PRN 50 ( 0/-1)
+ -------------------------------
+ Galileo_E1c_codes.dat
+  Analogous to Galileo_E1b_codes.dat
+  
+ ----------------------------------------------------------------------------
+ 
+ 

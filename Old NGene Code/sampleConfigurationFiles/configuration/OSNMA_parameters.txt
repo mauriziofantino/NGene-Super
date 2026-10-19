@@ -1,0 +1,64 @@
+
+# This file contains some OSNMA parameters.
+# The Galileo navigation message contains almost all relevant OSNMA parameters,
+# but some are missing. They can be retrieved by the user through an internet server
+# and the user can configure te receiver to read them through this file.
+#
+# The selection of the PRNs to be used in the PVT computation in function of the authentication
+# is configured in the PVT.conf file.
+# 
+
+
+
+# Flag to enable the insertion of an additional delay between the MAC and the related
+# TESLA key. The value must be 0 (disabled) or 1 (enabled)
+[MACK Block Offset]
+  1
+
+# Maximum number of supported satellites
+[max NS]
+  36
+
+# Minimum MAC length as defined by OSNMA Guidelines for the MAC accumulation, in bits
+[Minimum MAC length]
+  80
+
+# Timeout
+# If this timeout occurs after a successful validation, the authentic flag is removed.
+# Value in seconds. It must be > 60, else the timeout is disabled 
+[OSNMA timeout]
+ 120
+
+
+# OSNMA data folder
+# indicates the folder where the OSMA related files are stored
+# Comment out the tag and the string with # if the files must be read from the ~/.ngene2/otherData folder
+# Do not terminate with /
+#[OSNMA data folder]
+# /complete/path/folder
+
+# Public key file: name of the text file containing the public key used to authenticate the root key
+# Supported file formats are .pem and .xml
+[Public key filename]
+ publicKey.xml
+# publicKey.xml
+# ec-pub.pem
+
+# Merkle Tree root file: name of the file containing the root of the Merkle Tree: 
+# In hex format, 64 characters long, it can be used to check the validity of the public key received with the DSM-PKR.
+# Supported file formats are .txt and .xml
+[Merkle Tree Root filename]
+ MerkleTree.xml
+# MerkleTree.xml
+# MerkleTreeRoot.txt
+	
+# MAC lookup table file: name of the text file containing the MAC Lookup Table
+# Its content and format are temporary, because in ICD v1.1 the MAC Lookup Table 
+# is in a preliminary form (page 46)
+[MAC Lookup Table filename]
+ macLookupTable.txt
+
+# TESLA Keys Index Table file: name of the file containing the current NS parameter and
+# the table with the indexes of the TESLA keys with respect to the transmitting PRN 
+[Keys Index Table filename]
+ TeslaKeysIndexTable.txt

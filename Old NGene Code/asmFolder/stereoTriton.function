@@ -1,0 +1,84 @@
+{
+   	/* starts elaboration and aligns output array to a 16 bytes boundary */
+	#ifdef COMPILE_64_BIT
+   	outputOffset = (unsigned long long int)outputArray & 0x0f;
+	#else
+   	outputOffset = (unsigned int)outputArray & 0x0f;
+	#endif
+	if(outputOffset!=0)
+	{
+		for(index=0;index<((int)16-(int)outputOffset) && index<arrayLength;index++)
+		{
+			#ifdef SHIFTED_BITS
+			inputArray[index] = inputArray[index] >> SHIFTED_BITS;
+			#endif
+			outputArray[index] = (char)((inputArray[index]^stereoTritonMask[(index+maskOffset)%4])-stereoTritonMask[(index+maskOffset)%4]);
+		}
+	}
+
+	stereoTritonMaskLocal = &(stereoTritonMask[(maskOffset+index) & 0x03]);
+	movdqu_m2r(stereoTritonMaskLocal[0],xmm7);
+
+	#ifdef COMPILE_64_BIT
+	inputOffset = (unsigned long long int)(&(inputArray[index])) & 0x0f;
+	#else
+	inputOffset = (unsigned int)(&(inputArray[index])) & 0x0f;
+	#endif
+	/**/
+	if(inputOffset == 0) /* if input array is aligned to a 16 bytes boundary, movdqa_m2r is used */
+	{
+		while((index+16)<=arrayLength)
+		{
+			pxor_r2r(xmm1,xmm1);
+			pxor_r2r(xmm2,xmm2);
+			movdqa_m2r(inputArray[index],  xmm0);
+			punpckhbw_r2r(xmm0, xmm1);
+			punpcklbw_r2r(xmm0, xmm2);
+			#ifdef SHIFTED_BITS
+			psraw_i2r(SHIFTED_BITS,xmm1);
+			psraw_i2r(SHIFTED_BITS,xmm2);
+			#endif
+			pxor_r2r(xmm7,xmm1);
+			pxor_r2r(xmm7,xmm2);
+			psubsb_r2r(xmm7,xmm1);
+			psubsb_r2r(xmm7,xmm2);
+			psraw_i2r(8,xmm1);
+			psraw_i2r(8,xmm2);
+			packsswb_r2r(xmm1, xmm2);
+			movdqa_r2m(xmm2,outputArray[index]);
+			index += 16;
+		}
+	}
+	else /* if input array is not aligned to a 16 bytes boundary, movdqu_m2r is used */
+	{
+		while((index+16)<=arrayLength)
+		{
+			pxor_r2r(xmm1,xmm1);
+			pxor_r2r(xmm2,xmm2);
+			movdqu_m2r(inputArray[index],  xmm0);
+			punpckhbw_r2r(xmm0, xmm1);
+			punpcklbw_r2r(xmm0, xmm2);
+			#ifdef SHIFTED_BITS
+			psraw_i2r(SHIFTED_BITS,xmm1);
+			psraw_i2r(SHIFTED_BITS,xmm2);
+			#endif
+			pxor_r2r(xmm7,xmm1);
+			pxor_r2r(xmm7,xmm2);
+			psubsb_r2r(xmm7,xmm1);
+			psubsb_r2r(xmm7,xmm2);
+			psraw_i2r(8,xmm1);
+			psraw_i2r(8,xmm2);
+			packsswb_r2r(xmm1, xmm2);
+			movdqa_r2m(xmm2,outputArray[index]);
+			index += 16;
+		}
+	}
+	/**/
+	for(;index<arrayLength;index++)
+	{
+		#ifdef SHIFTED_BITS
+		inputArray[index] = inputArray[index] >> SHIFTED_BITS;
+		#endif
+		outputArray[index] = (char)((inputArray[index]^stereoTritonMask[(index+maskOffset)%4])-stereoTritonMask[(index+maskOffset)%4]);
+	}
+}

@@ -151,7 +151,7 @@ int NgControlRequest(TNgControl *control, TNgCommand command, uint64_t revision,
  * dispatch or recording when plots become dormant.
  *
  * @param control Live controller.
- * @param mask Mask bits: 1 PSD, 2 histogram, 3 both; zero renews neither.
+ * @param mask Mask bits: 1 PSD, 2 histogram, 4 acquisition CAF.
  */
 void NgControlDiagnosticInterest(TNgControl *control, unsigned mask);
 /**
@@ -159,7 +159,7 @@ void NgControlDiagnosticInterest(TNgControl *control, unsigned mask);
  * @details Thread-safe; callers aggregate independent subscriptions before replacing a lane.
  * Zero revokes selected lanes immediately without changing receiver dispatch or recording.
  * @param control Live controller.
- * @param mask Selected lanes: 1 PSD, 2 histogram, 3 both.
+ * @param mask Selected lanes: 1 PSD, 2 histogram, 4 acquisition CAF.
  * @param expiresSeconds Absolute monotonic lease deadline; zero revokes selected lanes.
  */
 void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double expiresSeconds);

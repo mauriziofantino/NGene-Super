@@ -1,0 +1,189 @@
+/**
+ * @file mainTestCryptoFunctions.c
+ *
+ * @author Micaela Troglia Gamba
+ *
+ * @date 31/05/2019
+ *
+ * @version 0.1
+ *
+ * @brief Testbed for openssl library function to be used for OSNMA.
+ */
+
+#include <string.h>
+#include "base64.h"
+
+//#define DEBUG
+
+#define FILENAME_LEN	1024
+
+int main(int argc,char *argv[])
+{
+	char filenameIn[FILENAME_LEN];
+	char filenameOut[FILENAME_LEN];
+	FILE *PKFile, *PEMFile;
+	size_t pubKeyUncompressedSize;
+	int index;
+	unsigned hex;
+	unsigned char pubKeyUncompressed[133];
+	//**
+	unsigned char pubKeyASN1DER[158];
+	size_t pubKeyASN1DERSize,headerBytesSize;
+	unsigned char *headerBytes;
+
+	/*PEM Header for Public Keys */
+	char headerPEM[27]="-----BEGIN PUBLIC KEY-----";
+	/*PEM Footer for Public Keys */
+	char footerPEM[25]="-----END PUBLIC KEY-----";
+
+	/*Header Bytes for the ASN1-DER encoded for the P-224 elliptic curve*/
+	unsigned char headerBytes_P224[23]={0x30,0x4E,0x30,0x10,0x06,0x07,0x2A,0x86,0x48,0xCE,0x3D,0x02,0x01,0x06,0x05,0x2B,0x81,0x04,0x00,0x21,0x03,0x3A,0x00};
+	/*Header Bytes for the ASN1-DER encoded for the P-256 elliptic curve*/
+	unsigned char headerBytes_P256[26]={0x30,0x59,0x30,0x13,0x06,0x07,0x2A,0x86,0x48,0xCE,0x3D,0x02,0x01,0x06,0x08,0x2A,0x86,0x48,0xCE,0x3D,0x03,0x01,0x07,0x03,0x42,0x00};
+	/*Header Bytes for the ASN1-DER encoded for the P-384 elliptic curve*/
+	unsigned char headerBytes_P384[23]={0x30,0x76,0x30,0x10,0x06,0x07,0x2A,0x86,0x48,0xCE,0x3D,0x02,0x01,0x06,0x05,0x2B,0x81,0x04,0x00,0x22,0x03,0x62,0x00};
+	/*Header Bytes for the ASN1-DER encoded for the P-521 elliptic curve*/
+	unsigned char headerBytes_P521[25]={0x30,0x81,0x9B,0x30,0x10,0x06,0x07,0x2A,0x86,0x48,0xCE,0x3D,0x02,0x01,0x06,0x05,0x2B,0x81,0x04,0x00,0x23,0x03,0x81,0x86,0x00};
+
+	if(argc>2)
+	{
+		fprintf(stderr,"use:\n%s <folder>\n",argv[0]);
+		return 1;
+	}
+
+	/* Prepare filenames */
+	filenameIn[0] = '\0';
+	filenameOut[0] = '\0';
+	if(argc==2)
+	{
+		/* use the specified folder */
+		strcat(filenameIn, argv[1]);
+		strcat(filenameOut, argv[1]);
+	}
+	else
+	{
+		/* use the default folder */
+		strcat(filenameIn, "/home/micaela/.ngene2/otherData/");
+		strcat(filenameOut, "/home/micaela/.ngene2/otherData/");
+	}
+	strcat(filenameIn, "publicKeyHexUncompressed.txt");
+	strcat(filenameOut, "ec-pub.pem");
+
+	/* feedback for the user */
+	fprintf(stdout,"%s\n   %s ->\n   %s\n",argv[0],filenameIn,filenameOut);
+
+	/*Public key PEM FILE to write*/
+	PEMFile=fopen(filenameOut,"w");
+	/*Uncompressed raw binary public key file*/
+	PKFile=fopen(filenameIn,"r");
+	if(PKFile!=NULL)
+	{
+		pubKeyUncompressedSize=0;
+		index=0;
+		while(1==fscanf(PKFile, "%2x", &hex))
+		{
+			pubKeyUncompressed[index] = (unsigned char)hex;
+			index++;
+		}
+		fclose(PKFile);
+		pubKeyUncompressedSize=index;
+		switch(pubKeyUncompressedSize)
+		{
+		case 57:
+			//pubKeyUncompressedSize=57;
+			//pubKeyUncompressedSize=29;
+			//osnma->function=EVP_sha224();
+			//				hashSize=SHA224_DIGEST_LENGTH;
+			//nid=NID_secp224r1;
+			//osnma->osnmaPars.DSSizeBytes=56;
+			headerBytesSize=23;
+			headerBytes=headerBytes_P224;
+			pubKeyASN1DERSize=57+23;
+			break;
+		case 65:
+			//    				//pubKeyUncompressedSize=65;
+			//    				//pubKeyCompressedSize=33;
+			//    				osnma->function=EVP_sha256();
+			//    				//hashSize=SHA256_DIGEST_LENGTH;
+			//    				nid=NID_X9_62_prime256v1;
+			//    				osnma->osnmaPars.DSSizeBytes=64;
+			headerBytesSize=26;
+			headerBytes=headerBytes_P256;
+			pubKeyASN1DERSize=65+26;
+			break;
+		case 97:
+			//    				//pubKeyUncompressedSize=97;
+			//    				//pubKeyCompressedSize=49;
+			//    				osnma->function=EVP_sha384();
+			//    				//hashSize=SHA384_DIGEST_LENGTH;
+			//    				nid=NID_secp384r1;
+			//    				osnma->osnmaPars.DSSizeBytes=96;
+			headerBytesSize=23;
+			headerBytes=headerBytes_P384;
+			pubKeyASN1DERSize=97+23;
+			break;
+		case 133:
+			//    				//pubKeyUncompressedSize=133;
+			//    				//pubKeyCompressedSize=67;
+			//    				osnma->function=EVP_sha512();
+			//    				//hashSize=SHA512_DIGEST_LENGTH;
+			//    				nid=NID_secp521r1;
+			//    				osnma->osnmaPars.DSSizeBytes=132;
+			headerBytesSize=25;
+			headerBytes=headerBytes_P521;
+			pubKeyASN1DERSize=133+25;
+			break;
+		default:
+			//    				//pubKeyUncompressedSize=57;
+			//    				//pubKeyCompressedSize=29;
+			//    				osnma->function=EVP_sha224();
+			//    				//hashSize=SHA224_DIGEST_LENGTH;
+			//    				nid=NID_secp224r1;
+			//    				osnma->osnmaPars.DSSizeBytes=56;
+			headerBytesSize=23;
+			headerBytes=headerBytes_P224;
+			pubKeyASN1DERSize=57+23;
+			break;
+		}
+		memset(pubKeyASN1DER, 0, pubKeyASN1DERSize);
+		memcpy(pubKeyASN1DER, headerBytes, headerBytesSize);
+		memcpy(&pubKeyASN1DER[headerBytesSize], pubKeyUncompressed, pubKeyUncompressedSize);
+#ifdef DEBUG
+		int index;
+		for (index = 0; index < (int )pubKeyASN1DERSize; index++) {
+			printf("%02X", pubKeyASN1DER[index]);
+		}
+		printf("\n");
+#endif
+
+		/*PEM encoding of the Public Key*/
+		size_t out_len;
+		unsigned char *pubKeyPEM=base64_encode((const unsigned char *) pubKeyASN1DER, pubKeyASN1DERSize,&out_len);
+#ifdef DEBUG
+		printf("Base64: *");
+		for(index=0; index<(int)out_len;index++)
+		{
+			printf("%c", pubKeyPEM[index]);
+		}
+		printf("*\n");
+#endif
+
+		fprintf(PEMFile,"%s\n", headerPEM);
+		for(index=0; index<(int)out_len;index++)
+		{
+			fprintf(PEMFile,"%c", pubKeyPEM[index]);
+		}
+		fprintf(PEMFile,"%s", footerPEM);
+		fclose(PEMFile);
+	}
+	else
+	{
+		fprintf(stderr,"Input file does not exist!\n");
+		return 1;
+	}
+
+	return 0;
+
+}
+
+

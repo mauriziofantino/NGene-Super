@@ -1,0 +1,15 @@
+{
+	/* used to perform a programmable right shift with simd */
+	while(index>0)
+	{
+		movdqu_m2r(ptrIn[0],xmm0);
+		#ifdef SHIFTED_BITS
+		psrld_i2r(SHIFTED_BITS,xmm0);
+		#endif
+		movdqu_r2m(xmm0,ptrOut[0]);
+		index--;
+		ptrIn += xmmSize;
+		ptrOut += xmmSize;
+	}		
+}	
+

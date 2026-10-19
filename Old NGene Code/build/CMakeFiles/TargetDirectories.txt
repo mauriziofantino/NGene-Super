@@ -1,0 +1,9 @@
+/home/navtools/ngene/build/CMakeFiles/ngene.dir
+/home/navtools/ngene/build/CMakeFiles/libfec_build.dir
+/home/navtools/ngene/build/CMakeFiles/uninstall.dir
+/home/navtools/ngene/build/CMakeFiles/edit_cache.dir
+/home/navtools/ngene/build/CMakeFiles/rebuild_cache.dir
+/home/navtools/ngene/build/CMakeFiles/list_install_components.dir
+/home/navtools/ngene/build/CMakeFiles/install.dir
+/home/navtools/ngene/build/CMakeFiles/install/local.dir
+/home/navtools/ngene/build/CMakeFiles/install/strip.dir

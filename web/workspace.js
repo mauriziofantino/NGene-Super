@@ -100,7 +100,8 @@ function positiveConfigNumber(profile, key, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function renderSearchSpaces(coarse, refinement, summary, profile, acquisition, satellites, sampleRate) {
+function renderSearchSpaces(coarse, refinement, summary, profile, acquisition, satellites, sampleRate,
+                            coarseEnabled = true, refinementEnabled = true) {
   if (!coarse || !refinement || !summary) return;
   const dopplerMax = Math.max(0, Number(profile['acquisition.doppler_max_hz']) || 0);
   const dopplerStep = positiveConfigNumber(profile, 'acquisition.doppler_step_hz', 1);
@@ -112,7 +113,7 @@ function renderSearchSpaces(coarse, refinement, summary, profile, acquisition, s
   const dopplerBins = Math.floor(2 * dopplerMax / dopplerStep + 0.5) + 1;
   const delayOffsets = fftSize ? Math.max(1, Math.ceil((1023 / fftSize) / codeStep)) : 1;
   const codeBins = fftSize * delayOffsets;
-  const points = satellites.filter(satellite =>
+  const points = (coarseEnabled ? satellites : []).filter(satellite =>
     Number.isFinite(satellite.doppler_hz) && Number.isFinite(satellite.code_phase_chips) &&
     satellite.code_phase_chips >= 0 && satellite.code_phase_chips <= 1023
   ).map(satellite => ({
@@ -120,7 +121,7 @@ function renderSearchSpaces(coarse, refinement, summary, profile, acquisition, s
     prn: satellite.prn, phase: satellite.phase.replaceAll('_', ' '),
     acquired: satellite.phase === 'acquired'
   }));
-  coarse.replaceChildren(searchSpacePlot({
+  if (coarseEnabled) coarse.replaceChildren(searchSpacePlot({
     title: 'GPS coarse search space: code phase by Doppler',
     xLabel: 'Code phase (chips)', yLabel: 'Doppler (Hz)',
     xMin: 0, xMax: 1023, yMin: -dopplerMax || -1, yMax: dopplerMax || 1,
@@ -136,7 +137,7 @@ function renderSearchSpaces(coarse, refinement, summary, profile, acquisition, s
     ? Math.floor(refinementCodeSpan * rate / 1023000 + 0.5) : 0;
   const refinementCodeBins = Math.floor(2 * codeSpanSamples / refinementCodeStepSamples + 0.5) + 1;
   const refinementDopplerBins = Math.floor(2 * refinementDopplerSpan / refinementDopplerStep + 0.5) + 1;
-  refinement.replaceChildren(searchSpacePlot({
+  if (refinementEnabled) refinement.replaceChildren(searchSpacePlot({
     title: 'GPS refinement search space around each coarse candidate',
     xLabel: 'Doppler offset from coarse candidate (Hz)',
     yLabel: 'Code phase offset from coarse candidate (chips)',
@@ -462,7 +463,7 @@ function frequency(value, suffix, scale = 1e6) {
  * Add receiver workspace views without owning controller state or running signal work.
  * The application supplies snapshots; unavailable GNSS modules have no synthetic data.
  */
-export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings = () => {}, onBrowseReplay = () => {}, onFetchCaf = async () => ({available:false})} = {}) {
+export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings = () => {}, onBrowseReplay = () => {}, onFetchCaf = async () => ({available:false}), onPlotInterestChange = () => {}} = {}) {
   const renderers = {journey: journeyMarkup, acquisition: acquisitionMarkup, tracking: trackingMarkup, navigation: navigationMarkup, pvt: pvtMarkup};
   for (const [name, render] of Object.entries(renderers)) {
     const panel = document.getElementById(ROUTES[name].id);
@@ -496,12 +497,65 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   const cafCursor = document.getElementById('cafCursor');
   const cafPrnSelect = document.getElementById('cafPrnSelect');
   const cafModeButtons = [...document.querySelectorAll('[data-caf-mode]')];
+  function plotSwitch(id, parent, label) {
+    const wrapper = document.createElement('label');
+    wrapper.className = 'plot-toggle';
+    const input = document.createElement('input');
+    input.type = 'checkbox'; input.id = id; input.checked = true;
+    input.setAttribute('aria-label', `Enable ${label}`);
+    wrapper.append(input, document.createTextNode('Enable'));
+    parent?.append(wrapper);
+    return input;
+  }
+  const cafCard = cafWrap?.closest('.workspace-card');
+  const cafToggle = plotSwitch('showCaf', cafCard?.querySelector('.panel-heading'), 'cross ambiguity function');
+  const cafOff = document.createElement('p');
+  cafOff.className = 'plot-disabled muted hidden'; cafOff.textContent = 'Cross ambiguity plot disabled; acquisition continues.';
+  cafCard?.append(cafOff);
+  const coarsePanel = coarseSearchSpace?.closest('.search-space-panel');
+  const refinementPanel = refinementSearchSpace?.closest('.search-space-panel');
+  const coarseToggle = plotSwitch('showCoarseSearch', coarsePanel?.querySelector('h3'), 'coarse search plot');
+  const refinementToggle = plotSwitch('showRefinementSearch', refinementPanel?.querySelector('h3'), 'refinement search plot');
+  function toggleSearchPanel(panel, plot, enabled) {
+    if (!panel || !plot) return;
+    plot.classList.toggle('hidden', !enabled);
+    panel.querySelector('p')?.classList.toggle('hidden', !enabled);
+    let off = panel.querySelector('.plot-disabled');
+    if (!off) {
+      off = document.createElement('p'); off.className = 'plot-disabled muted';
+      off.textContent = 'Plot disabled.'; panel.append(off);
+    }
+    off.classList.toggle('hidden', enabled);
+    if (!enabled) plot.replaceChildren();
+  }
+  function syncPlotSwitches() {
+    const enabled = cafToggle.checked;
+    for (const node of [cafCard?.querySelector('.caf-controls'), cafWrap, cafDetails, cafCursor])
+      node?.classList.toggle('hidden', !enabled);
+    cafOff.classList.toggle('hidden', enabled);
+    toggleSearchPanel(coarsePanel, coarseSearchSpace, coarseToggle.checked);
+    toggleSearchPanel(refinementPanel, refinementSearchSpace, refinementToggle.checked);
+  }
+  cafToggle.addEventListener('change', () => {
+    syncPlotSwitches();
+    clearCaf(cafToggle.checked ? 'Waiting for measured GPS search cells.' : 'Cross ambiguity plot disabled.');
+    cafFetchedStopped = false;
+    onPlotInterestChange();
+    if (cafToggle.checked) maybePollCaf(true);
+  });
+  for (const toggle of [coarseToggle, refinementToggle]) toggle.addEventListener('change', () => {
+    searchSpaceSignature = '';
+    syncPlotSwitches();
+    update(lastSnapshot);
+  });
+  syncPlotSwitches();
   const acquisitionDot = document.querySelector('[data-view="acquisition"] .workspace-nav-dot');
   let acquisitionSignature = '';
   let searchSpaceSignature = '';
   let caf = null, cafMode = '2d', cafGeometry = null, cafRun = null, cafSelection = '';
   let cafPollAt = 0, cafPending = false, cafGeneration = 0, cafFetchedStopped = false, cafLiveState = 'stopped';
   let cafCanFetch = false, cafStatusText = 'No measured cross ambiguity data yet. Start GPS acquisition to inspect a search.';
+  let lastSnapshot = {};
   const panels = Object.entries(ROUTES).map(([name, info]) => [name, document.getElementById(info.id)]);
   const nav = [...document.querySelectorAll('[data-view]')];
   const crumb = document.getElementById('workspaceCrumb');
@@ -513,7 +567,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     for (const node of bindings.get(key) || []) if (node.textContent !== string) node.textContent = string;
   };
   function paintCaf() {
-    if (!cafCanvasNode || !cafEmpty || !cafDetails) return;
+    if (!cafToggle.checked || !cafCanvasNode || !cafEmpty || !cafDetails) return;
     cafEmpty.hidden = Boolean(caf);
     if (!caf) {
       cafEmpty.textContent = cafStatusText;
@@ -562,7 +616,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     cafPrnSelect.value = cafSelection;
   }
   function maybePollCaf(force = false) {
-    if (selected !== 'acquisition' || !cafCanFetch || cafPending) return;
+    if (!cafToggle.checked || selected !== 'acquisition' || !cafCanFetch || cafPending) return;
     const now = performance.now();
     if (!force && (now - cafPollAt < 850 || cafFetchedStopped)) return;
     cafPollAt = now;
@@ -687,6 +741,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   window.addEventListener('popstate', fromHash);
 
   function update(snapshot = {}) {
+    lastSnapshot = snapshot;
     const {status, capabilities, profile = {}, draft = {}, revision, dirty = false, connected = false} = snapshot;
     const live = connected && status ? status : null;
     const configuredSource = profile['frontend.type'];
@@ -760,14 +815,17 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     };
     for (const [key, value] of Object.entries(values)) text(key, value);
     const searchSpaceKey = JSON.stringify([
+      selected === 'acquisition', coarseToggle.checked, refinementToggle.checked,
       Object.entries(searchProfile).filter(([key]) => key.startsWith('acquisition.')).sort(([a], [b]) => a.localeCompare(b)),
       acq?.fft_size, live?.actual_sample_rate_hz || searchProfile['frontend.sample_rate_hz'],
       satellites.map(satellite => [satellite.prn, satellite.phase, satellite.code_phase_chips, satellite.doppler_hz])
     ]);
-    if (searchSpaceKey !== searchSpaceSignature) {
+    if (selected === 'acquisition' && (coarseToggle.checked || refinementToggle.checked) &&
+        searchSpaceKey !== searchSpaceSignature) {
       searchSpaceSignature = searchSpaceKey;
       renderSearchSpaces(coarseSearchSpace, refinementSearchSpace, searchSpaceSummary,
-        searchProfile, acq, satellites, live?.actual_sample_rate_hz || searchProfile['frontend.sample_rate_hz']);
+        searchProfile, acq, satellites, live?.actual_sample_rate_hz || searchProfile['frontend.sample_rate_hz'],
+        coarseToggle.checked, refinementToggle.checked);
     }
     maybePollCaf();
     if (acquisitionRows) {
@@ -798,5 +856,6 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   }
   update();
   fromHash();
-  return {setView: show, update, get view() { return selected; }};
+  return {setView: show, update, get view() { return selected; },
+    get cafEnabled() { return cafToggle.checked; }};
 }

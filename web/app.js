@@ -487,7 +487,8 @@ function diagnosticMask(){
   const visible=diagnosticVisibility();
   return (visible&1&&diagnosticEnabled('spectrum_enabled')?1:0)|(visible&2&&diagnosticEnabled('histogram_enabled')?2:0);
 }
-function diagnosticInterest(){return paused?0:diagnosticMask();}
+function diagnosticInterest(){return (paused?0:diagnosticMask())|
+  (!document.hidden&&activeWorkspaceView==='acquisition'&&receiverWorkspace?.cafEnabled?4:0);}
 /** Apply current server settings without replacing unrelated profile or diagnostic drafts. */
 function acceptAnalysisConfig(result){
   const iniDraft=$('iniEditor').value,customIni=iniDraft!==toIni(values);
@@ -917,6 +918,9 @@ $('resetFrequency').addEventListener('click',()=>{$('frequencyMin').value='';$('
 $('autoScale').addEventListener('click',()=>{if(!($('showSpectrum').checked||$('showWaterfall').checked)||!diagnosticEnabled('spectrum_enabled')||!analysisSnapshot?.dbfs.length)return;const lo=Math.floor(Math.min(...analysisSnapshot.dbfs)/10)*10,hi=Math.ceil(Math.max(...analysisSnapshot.dbfs)/10)*10+10;for(const id of ['dbMin','colourMin'])$(id).value=lo;for(const id of ['dbMax','colourMax'])$(id).value=hi;drawAnalysis();});
 for(const id of ['showSpectrum','showWaterfall'])$(id).addEventListener('change',changePlotEnabled);
 $('showHistogram').addEventListener('change',()=>{$('histogramPanel').classList.toggle('hidden',!$('showHistogram').checked);if($('showHistogram').checked&&!paused&&status)renderAnalysis(status.analysis,status.revision);requestStatus();});
+$('histogramPanel').querySelector('.panel-heading').append($('showHistogram').parentElement);
+$('showHistogram').parentElement.classList.add('plot-toggle');
+$('showHistogram').parentElement.lastChild.textContent=' Enable';
 document.addEventListener('visibilitychange',requestStatus);
 $('hackrfPreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'hackrf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','hackrf.lna_gain_db':'16','hackrf.vga_gain_db':'20','hackrf.rf_amp':'false','hackrf.antenna_power':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
 $('exit').addEventListener('click', async () => { if (!confirm('Stop the receiver, finish recording and close the local NGene service?')) return; try { await api('shutdown', {}); quitting = true; notice('NGene is closing. Restart ngene --web to reconnect.'); } catch (error) { notice(error.message, true); } });
@@ -933,6 +937,7 @@ receiverWorkspace = createReceiverWorkspace({
   },
   onOpenSettings(topic) { showView('setup'); selectSettings(topic); },
   onFetchCaf(prn) { return api(`acquisition/caf${prn ? `?prn=${encodeURIComponent(prn)}` : ''}`); },
+  onPlotInterestChange() { requestStatus(); },
   onBrowseReplay() {
     if (!editable()) { notice('Stop the receiver before choosing another input file.', true); return; }
     showView('setup'); selectSettings('source'); $('browseReplay').click();

@@ -1492,7 +1492,7 @@ static int Handle(struct mg_connection *connection, void *context)
 struct TNgWebSession {
     /** Monotonic time of the most recent response on this connection. */
     double lastReply;
-    /** Independent PSD/histogram request bits for this client. */
+    /** Independent PSD/histogram/CAF request bits for this client. */
     unsigned mask;
     /** Next live session; protected by the server JSON mutex. */
     TNgWebSession *next;
@@ -1502,19 +1502,19 @@ struct TNgWebSession {
 static void UpdateDiagnosticInterest(TNgWebServer *server, double now)
 {
     TNgWebSession *session;
-    double until[2] = {0, 0};
+    double until[3] = {0, 0, 0};
     unsigned kind;
     for (session = server->sessions; session != NULL; session = session->next) {
         double expires = session->lastReply + 2.0;
         if (expires > now) {
-            for (kind = 0; kind < 2; ++kind) {
+            for (kind = 0; kind < 3; ++kind) {
                 if ((session->mask & (1u << kind)) != 0 && expires > until[kind]) {
                     until[kind] = expires;
                 }
             }
         }
     }
-    for (kind = 0; kind < 2; ++kind) {
+    for (kind = 0; kind < 3; ++kind) {
         NgControlDiagnosticInterestUntil(server->control, 1u << kind, until[kind]);
     }
 }
@@ -1620,7 +1620,7 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
         return 1;
     }
     if (((bits) & (128)) == 0 || (length != 6 && length != 8) || memcmp(data, "status", 6) != 0 ||
-        (length == 8 && (data[6] != ':' || data[7] < '0' || data[7] > '3'))) {
+        (length == 8 && (data[6] != ':' || data[7] < '0' || data[7] > '7'))) {
         return 0;
     }
     mask = length == 8 ? (unsigned)(data[7] - '0') : 3u;

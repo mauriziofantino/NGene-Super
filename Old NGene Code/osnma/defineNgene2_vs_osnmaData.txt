@@ -1,0 +1,41 @@
+
+datasets TU
+
+PATCH_ADKD_NAVDATA_ALIGNMENT-----disabilitato
+PATCH_ADKD_4_NAVDATA_ALIGNMENT---disabilitato
+PATCH_ADKD_2_BIT_MASK------------abilitato
+PATCH_PRNN_255-------------------disabilitato
+PATCH_JRC_GENERATOR_DSM----------disabilitato
+PATCH_JRC_GENERATOR_MACK_OFFSET--disabilitato
+In OSNMA_parameters:
+MACK Block Offset----------------0
+
+**************************************************
+
+
+datasets JRC
+
+PATCH_ADKD_NAVDATA_ALIGNMENT-----abilitato (2)
+PATCH_ADKD_2_BIT_MASK------------abilitato
+PATCH_PRNN_255-------------------disabilitato
+PATCH_JRC_GENERATOR_DSM----------abilitato (1)
+PATCH_JRC_GENERATOR_MACK_OFFSET--abilitato (1)
+
+(1) non tutti i dataset richiedono questo valore per funzionare
+(2) alcuni dataset JRC richiedono una ulteriore patch sull'ADKD 4 nel codice
+
+
+**************************************************
+
+
+dati reali (da verificare)
+
+PATCH_ADKD_NAVDATA_ALIGNMENT-----abilitato
+PATCH_ADKD_2_BIT_MASK------------abilitato (3)
+PATCH_PRNN_255-------------------abilitato
+PATCH_JRC_GENERATOR_DSM----------disabilitato
+PATCH_JRC_GENERATOR_MACK_OFFSET--disabilitato
+
+(3) da verificare
+
+
