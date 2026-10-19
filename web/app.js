@@ -943,13 +943,15 @@ $('calibrateGains').addEventListener('click', async () => {
     }
     const source = values['frontend.type'];
     if (source === 'hackrf') Object.assign(values, {'hackrf.lna_gain_db':String(result.lna_gain_db), 'hackrf.vga_gain_db':String(result.vga_gain_db), 'hackrf.rf_amp':String(result.rf_amp)});
-    if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':'false', 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db)});
+    if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':String(result.rtl_auto_gain), 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db)});
     if (source === 'bladerf') values['bladerf.gain_db'] = String(result.blade_gain_db);
     deviceCaps = source === 'hackrf' ? null :
       {...result, source, serial:requested[1], tuning:requested[3], precision:requested[4]};
     buildForm(); dirtyState(true);
     const level = (result.rms_fraction * 100).toFixed(1);
-    $('calibrationStatus').textContent = `Suggested gains from ${result.tested} measurements · I/Q RMS ${level}% of ADC range · ${(result.clipped_fraction * 100).toFixed(3)}% near clipping. Apply & save to keep them.`;
+    const mode = source === 'rtlsdr' ? (result.rtl_auto_gain ? 'automatic tuner gain' : 'manual tuner gain') :
+      source === 'hackrf' ? (result.rf_amp ? 'RF amplifier on' : 'RF amplifier off') : 'manual gain';
+    $('calibrationStatus').textContent = `Suggested ${mode} from ${result.tested} measurements · I/Q RMS ${level}% of ADC range · ${(result.clipped_fraction * 100).toFixed(3)}% near clipping. Apply & save to keep it.`;
     notice('Gain calibration completed. Review and save the suggested receiver profile.');
   } catch (error) {
     $('calibrationStatus').textContent = error.message;

@@ -1357,6 +1357,7 @@ static int Handle(struct mg_connection *connection, void *context)
                     Number(reply, "lna_gain_db", calibration.selected.lnaGainDb);
                     Number(reply, "vga_gain_db", calibration.selected.vgaGainDb);
                     cJSON_AddBoolToObject(reply, "rf_amp", calibration.selected.rfAmp);
+                    cJSON_AddBoolToObject(reply, "rtl_auto_gain", calibration.selected.rtlAutoGain);
                     Number(reply, "rtl_gain_tenths_db", calibration.selected.rtlGainTenthsDb);
                     Number(reply, "blade_gain_db", calibration.selected.bladeGainDb);
                     Number(reply, "sample_rate_min_hz", calibration.capabilities.sampleRateMinHz);

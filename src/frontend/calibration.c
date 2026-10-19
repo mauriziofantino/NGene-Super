@@ -77,7 +77,10 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality *q, TNgError *erro
     }
     if (frontend.ops->start(frontend.context, error) != NG_OK) goto done;
     started = 1;
-    discard = candidate->sampleRateHz / 50u; /* 20 ms for gain settling. */
+    /* The RTL tuner controls its own gain in automatic mode and needs longer
+     * to settle than a fixed analog gain before we judge its distribution. */
+    discard = candidate->sampleRateHz /
+              (candidate->frontend == NG_FRONTEND_RTLSDR && candidate->rtlAutoGain ? 10u : 50u);
     deadline = NgMonotonicSeconds() + 4.0;
     while (count < CAL_PAIRS && NgMonotonicSeconds() < deadline) {
         int rc = frontend.ops->acquire(frontend.context, &view, 200, error);
@@ -116,14 +119,12 @@ done:
     return ok;
 }
 
-static int Try(const TNgConfig *candidate, TNgGainCalibration *result, TNgError *error)
+static void Consider(const TNgConfig *candidate, const TNgGainQuality *quality,
+                     TNgGainCalibration *result)
 {
-    TNgGainQuality quality;
     double score, previous;
-    if (result->tested >= CAL_MAX) return NG_OK;
-    if (Measure(candidate, &quality, error) != NG_OK) return NG_ERROR;
     ++result->tested;
-    score = quality.score;
+    score = quality->score;
     previous = result->quality.score;
     if (candidate->frontend == NG_FRONTEND_HACKRF) {
         /* Among valid distributions, avoid unnecessary analog gain and favor
@@ -136,12 +137,20 @@ static int Try(const TNgConfig *candidate, TNgGainCalibration *result, TNgError 
         previous += result->selected.rfAmp ? 0.1 : 0.0;
         previous += 0.015 * (result->selected.lnaGainDb + result->selected.vgaGainDb);
     }
-    if (result->tested == 1 || (quality.acceptable && !result->accepted) ||
-        (quality.acceptable == result->accepted && score < previous)) {
+    if (result->tested == 1 || (quality->acceptable && !result->accepted) ||
+        (quality->acceptable == result->accepted && score < previous)) {
         result->selected = *candidate;
-        result->quality = quality;
-        result->accepted = quality.acceptable;
+        result->quality = *quality;
+        result->accepted = quality->acceptable;
     }
+}
+
+static int Try(const TNgConfig *candidate, TNgGainCalibration *result, TNgError *error)
+{
+    TNgGainQuality quality;
+    if (result->tested >= CAL_MAX) return NG_OK;
+    if (Measure(candidate, &quality, error) != NG_OK) return NG_ERROR;
+    Consider(candidate, &quality, result);
     return NG_OK;
 }
 
@@ -163,11 +172,14 @@ int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgErro
         /* Prefer the documented balanced 16/16 starting region. Test comparable
          * total gains with different stage splits; do not assume they are equivalent. */
         for (a = 0; a < sizeof(lna)/sizeof(lna[0]); ++a) {
-            candidate = *config;
-            candidate.lnaGainDb = lna[a];
-            candidate.vgaGainDb = vga[a];
-            candidate.rfAmp = 0;
-            if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
+            unsigned amp;
+            for (amp = 0; amp <= 1; ++amp) {
+                candidate = *config;
+                candidate.lnaGainDb = lna[a];
+                candidate.vgaGainDb = vga[a];
+                candidate.rfAmp = amp;
+                if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
+            }
         }
         if (result->tested) {
             int delta;
@@ -186,27 +198,37 @@ int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgErro
                 }
             }
         }
-        if (!result->accepted) {
-            for (i = 0; i < 4; ++i) {
-                candidate = *config;
-                candidate.lnaGainDb = i * 8;
-                candidate.vgaGainDb = i * 8;
-                candidate.rfAmp = 1;
-                if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
-            }
-        }
     } else if (config->frontend == NG_FRONTEND_RTLSDR) {
         size_t count = result->capabilities.tunerGainCount;
-        if (!count) return NgFail(error, "RTL-SDR reports no manual tuner gains");
+        size_t bestManualIndex = 0;
+        double bestManualScore = 0;
+        int haveManual = 0;
+        int bestManualAccepted = 0;
+        candidate = *config;
+        candidate.rtlAutoGain = 1;
+        if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
         for (i = 0; i < 5; ++i) {
+            size_t index;
+            TNgGainQuality quality;
+            if (!count) break;
+            index = (count - 1) * (size_t)percent[i] / 100u;
             candidate = *config;
             candidate.rtlAutoGain = 0;
-            candidate.rtlGainTenthsDb = result->capabilities.tunerGains[(count - 1) * (size_t)percent[i] / 100u];
-            if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
+            candidate.rtlGainTenthsDb = result->capabilities.tunerGains[index];
+            /* Track the manual optimum independently; the overall winner may
+             * be automatic, but manual neighbors still deserve comparison. */
+            if (Measure(&candidate, &quality, error) != NG_OK) return NG_ERROR;
+            if (!haveManual || (quality.acceptable && !bestManualAccepted) ||
+                (quality.acceptable == bestManualAccepted && quality.score < bestManualScore)) {
+                bestManualIndex = index;
+                bestManualScore = quality.score;
+                bestManualAccepted = quality.acceptable;
+                haveManual = 1;
+            }
+            Consider(&candidate, &quality, result);
         }
-        if (result->tested) {
-            size_t k;
-            for (k = 0; k < count; ++k) if (result->capabilities.tunerGains[k] == result->selected.rtlGainTenthsDb) break;
+        if (haveManual) {
+            size_t k = bestManualIndex;
             for (i = 1; i <= 2; ++i) {
                 if (k >= i) { candidate = *config; candidate.rtlAutoGain = 0; candidate.rtlGainTenthsDb = result->capabilities.tunerGains[k-i]; if (Try(&candidate,result,error) != NG_OK) return NG_ERROR; }
                 if (k+i < count) { candidate = *config; candidate.rtlAutoGain = 0; candidate.rtlGainTenthsDb = result->capabilities.tunerGains[k+i]; if (Try(&candidate,result,error) != NG_OK) return NG_ERROR; }
