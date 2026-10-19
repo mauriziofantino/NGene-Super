@@ -492,7 +492,7 @@ static int CoarseFrame(TNgAcquisition *context, const TNgIqView *view, TNgError 
         caf->available = 1;
         caf->epoch = view->meta.epoch;
         caf->referenceSample = context->coarseStartSample;
-        caf->sequence = result->sequence + 1u;
+        ++caf->sequence;
     }
     {
         size_t peakIndex = 0;

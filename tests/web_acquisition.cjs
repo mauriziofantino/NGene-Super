@@ -251,6 +251,17 @@ refinement_code_step_samples=1
     assert.match(saved.ini, /\[acquisition\][\s\S]*gps_prn_mask=4(?:\r?\n|$)/);
     assert.match(saved.ini, /spectrum_enabled=false(?:\r?\n|$)/, 'Profile save preserves RF computation off');
 
+    await select('acquisition');
+    assert(await page.locator('#showCaf').isChecked(), 'Measured CAF has an explicit Enable switch');
+    await page.locator('#showCaf').uncheck();
+    assert(await page.locator('#cafPlotWrap').isHidden(), 'Disabled CAF canvas is hidden');
+    await page.locator('#showCaf').check();
+    await page.locator('#showCoarseSearch').uncheck();
+    assert(await page.locator('#coarseSearchSpace').isHidden(), 'Disabled coarse plot is hidden');
+    await page.locator('#showCoarseSearch').check();
+    await page.locator('#showRefinementSearch').uncheck();
+    assert(await page.locator('#refinementSearchSpace').isHidden(), 'Disabled refinement plot is hidden');
+    await page.locator('#showRefinementSearch').check();
     await until(() => page.locator('#start').isEnabled(), 'receiver ready to start');
     await page.locator('#start').click();
     await until(async () => (await get('status')).state === 'running', 'paced GPS replay running');

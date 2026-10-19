@@ -12,7 +12,6 @@ typedef struct {
     unsigned prn;
     int needsAssignment;
     uint64_t lastCafSequence;
-    size_t lastCafCompleted;
     int cafEnabled;
 } TNgAcquisitionSlot;
 
@@ -116,7 +115,6 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
         slot->needsAssignment = 1;
         slot->prn = 0;
         slot->lastCafSequence = 0;
-        slot->lastCafCompleted = 0;
         reset = 1;
     }
     /* Pause complete search contexts, never puncture an admitted coherent/noncoherent
@@ -136,7 +134,6 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
             receiver->channels[slot->index].id.satellite = 0;
             reset = 1;
             slot->lastCafSequence = 0;
-            slot->lastCafCompleted = 0;
         }
         slot->needsAssignment = 1;
         ++receiver->status.deferredWindows;
@@ -150,14 +147,12 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
         receiver->channels[slot->index].id.satellite = assign;
         slot->needsAssignment = assign == 0;
         slot->lastCafSequence = 0;
-        slot->lastCafCompleted = 0;
         if (assign != 0) memset(&receiver->caf[assign - 1u], 0, sizeof(*receiver->caf));
     }
     cafEnabled = receiver->cafInterestUntil > NgMonotonicSeconds();
     if (slot->cafEnabled != cafEnabled) {
         slot->cafEnabled = cafEnabled;
         slot->lastCafSequence = 0;
-        slot->lastCafCompleted = 0;
         if (!cafEnabled && slot->prn) {
             memset(&receiver->caf[slot->prn - 1u], 0, sizeof(*receiver->caf));
             if (receiver->latestCafPrn == slot->prn) receiver->latestCafPrn = 0;
@@ -171,16 +166,14 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
     if (NgAcquisitionProcess(slot->algorithm, window, &result, error) != NG_OK) return NG_ERROR;
     {
         TNgAcquisitionCaf measured;
-        if (cafEnabled) NgAcquisitionCafSnapshot(slot->algorithm, &measured);
-        if (cafEnabled && measured.available &&
-            (measured.sequence != slot->lastCafSequence ||
-             measured.completedDopplerBins != slot->lastCafCompleted)) {
+        if (cafEnabled && NgAcquisitionCafSequence(slot->algorithm) != 0 &&
+            NgAcquisitionCafSequence(slot->algorithm) != slot->lastCafSequence) {
+            NgAcquisitionCafSnapshot(slot->algorithm, &measured);
             NgMutexLock(&receiver->mutex);
             receiver->caf[slot->prn - 1u] = measured;
             receiver->latestCafPrn = slot->prn;
             NgMutexUnlock(&receiver->mutex);
             slot->lastCafSequence = measured.sequence;
-            slot->lastCafCompleted = measured.completedDopplerBins;
         }
     }
     NgMutexLock(&receiver->mutex);

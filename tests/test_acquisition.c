@@ -342,6 +342,23 @@ static void TestCafDecimationAndReset(void)
     CHECK(maximum == caf.maxPower);
     CHECK(fabs(caf.dopplerHz[peakRow] - 650.0) <= 150.0);
     CHECK(CircularDistance(caf.codeDelaySamples[peakColumn], 731.0, 2046.0) <= 20.0);
+    {
+        TNgAcquisitionPhase phase = result.phase;
+        double metric = result.metric, threshold = result.threshold;
+        NgAcquisitionSetCafEnabled(context, 0);
+        NgAcquisitionCafSnapshot(context, &caf);
+        CHECK(!caf.available && NgAcquisitionCafSequence(context) == 0);
+        CHECK(NgAcquisitionAssign(context, 7, 1, &error) == NG_OK);
+        ProcessRange(context, &signal, 0, 82u * 2046u, 9, 0, &result);
+        NgAcquisitionCafSnapshot(context, &caf);
+        CHECK(!caf.available && NgAcquisitionCafSequence(context) == 0);
+        CHECK(result.phase == phase && result.metric == metric && result.threshold == threshold);
+        NgAcquisitionSetCafEnabled(context, 1);
+        CHECK(NgAcquisitionAssign(context, 7, 1, &error) == NG_OK);
+        ProcessRange(context, &signal, 0, 2u * 2046u, 10, 0, &result);
+        NgAcquisitionCafSnapshot(context, &caf);
+        CHECK(caf.available && caf.sequence != 0);
+    }
     NgAcquisitionReset(context);
     NgAcquisitionCafSnapshot(context, &caf);
     CHECK(!caf.available && !caf.complete && caf.power[0] < 0.0f);
@@ -927,6 +944,7 @@ static void TestReceiverAdapter(void)
     config.gpsChannels = 2;
     CHECK(NgAcquisitionReceiverCreate(&config, &signal.stream, &receiver, &error) == NG_OK);
     channels = NgAcquisitionReceiverChannels(receiver, &count);
+    NgAcquisitionReceiverCafInterestUntil(receiver, 1e20);
     CHECK(channels != NULL && count == 2);
     CHECK(NgAcquisitionReceiverExecution(receiver).workerCount == 2);
     for (slot = 0; slot < count; ++slot) {

@@ -507,6 +507,23 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     parent?.append(wrapper);
     return input;
   }
+  for (const [id, title, selector] of [
+    ['showCorrelators', 'Early / prompt / late correlators', '.workspace-empty'],
+    ['showSkyplot', 'Satellite geometry', '.workspace-skyplot']
+  ]) {
+    const cardNode = [...document.querySelectorAll('.workspace-card')]
+      .find(node => node.querySelector('.panel-heading h2')?.textContent === title);
+    const plot = cardNode?.querySelector(selector);
+    if (!plot) continue;
+    const toggle = plotSwitch(id, cardNode.querySelector('.panel-heading'), title);
+    const off = document.createElement('p');
+    off.className = 'plot-disabled muted hidden'; off.textContent = 'Plot disabled.';
+    cardNode.append(off);
+    toggle.addEventListener('change', () => {
+      plot.classList.toggle('hidden', !toggle.checked);
+      off.classList.toggle('hidden', toggle.checked);
+    });
+  }
   const cafCard = cafWrap?.closest('.workspace-card');
   const cafToggle = plotSwitch('showCaf', cafCard?.querySelector('.panel-heading'), 'cross ambiguity function');
   const cafOff = document.createElement('p');
@@ -535,10 +552,14 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     cafOff.classList.toggle('hidden', enabled);
     toggleSearchPanel(coarsePanel, coarseSearchSpace, coarseToggle.checked);
     toggleSearchPanel(refinementPanel, refinementSearchSpace, refinementToggle.checked);
+    if (!coarseToggle.checked && !refinementToggle.checked && searchSpaceSummary)
+      searchSpaceSummary.textContent = 'Search-space plots disabled.';
   }
   cafToggle.addEventListener('change', () => {
     syncPlotSwitches();
-    clearCaf(cafToggle.checked ? 'Waiting for measured GPS search cells.' : 'Cross ambiguity plot disabled.');
+    clearCaf(cafToggle.checked ?
+      'Waiting for measured GPS search cells. Enable this plot before or during a new search; past cells cannot be reconstructed.' :
+      'Cross ambiguity plot disabled.');
     cafFetchedStopped = false;
     onPlotInterestChange();
     if (cafToggle.checked) maybePollCaf(true);
@@ -548,7 +569,6 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     syncPlotSwitches();
     update(lastSnapshot);
   });
-  syncPlotSwitches();
   const acquisitionDot = document.querySelector('[data-view="acquisition"] .workspace-nav-dot');
   let acquisitionSignature = '';
   let searchSpaceSignature = '';
@@ -562,6 +582,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   const tourCounter = tour.querySelector('[data-tour-counter]'), tourTitle = tour.querySelector('[data-tour-title]'), tourDescription = tour.querySelector('[data-tour-description]');
   const previous = tour.querySelector('[data-tour="previous"]'), next = tour.querySelector('[data-tour="next"]');
   let selected = 'rf', guided = false, tourIndex = 0;
+  syncPlotSwitches();
   const text = (key, value) => {
     const string = String(value ?? UNAVAILABLE);
     for (const node of bindings.get(key) || []) if (node.textContent !== string) node.textContent = string;

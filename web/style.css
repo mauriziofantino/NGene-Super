@@ -352,7 +352,7 @@ td a{color:#80dce4}
 .caf-cursor:empty{visibility:hidden}
 .search-space-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 19px 8px}
 .search-space-panel{min-width:0;padding:14px 12px 10px;border:1px solid #263e55;border-radius:9px;background:#0c1a2b}
-.search-space-panel h3{margin:0 0 8px;color:#c8deed;font-size:11px}
+.search-space-panel h3{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px;color:#c8deed;font-size:11px}
 .search-space-panel p{margin:4px 3px 0;color:#829db4;font-size:9px;line-height:1.6}
 .search-space-plot{width:100%;overflow:hidden}
 .search-space-plot svg{display:block;width:100%;height:auto;overflow:visible}

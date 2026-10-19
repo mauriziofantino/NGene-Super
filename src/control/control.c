@@ -46,6 +46,8 @@ struct TNgControl {
     TNgAnalysis *analysis;
     /** Run-owned module adapter; publication/lifetime protected by mutex. */
     TNgAcquisitionReceiver *acquisition;
+    /** Last aggregate CAF consumer deadline, also applied to a newly started run. */
+    double cafInterestUntil;
     /** Bounded measured surfaces retained after replay EOF or manual stop. */
     TNgAcquisitionCaf *cafArchive;
     unsigned cafArchiveLatestPrn;
@@ -443,6 +445,7 @@ static void ReceiverWorker(void *context)
             execution = NgAcquisitionReceiverExecution(acquisition);
             NgMutexLock(&c->mutex);
             c->acquisition = acquisition;
+            NgAcquisitionReceiverCafInterestUntil(acquisition, c->cafInterestUntil);
             NgMutexUnlock(&c->mutex);
         }
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
@@ -1036,7 +1039,9 @@ void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double
     if (control->analysis != NULL) {
         NgAnalysisInterest(control->analysis, mask & 3u, expiresSeconds);
     }
-    if ((mask & 4u) != 0 && control->acquisition != NULL)
+    if ((mask & 4u) != 0) {
+        control->cafInterestUntil = expiresSeconds;
         NgAcquisitionReceiverCafInterestUntil(control->acquisition, expiresSeconds);
+    }
     NgMutexUnlock(&control->mutex);
 }
