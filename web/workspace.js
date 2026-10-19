@@ -34,6 +34,121 @@ const kpi = (label, value, detail) => `<article class="card workspace-kpi"><span
 const table = (columns, message) => `<div class="table-wrap workspace-table"><table><thead><tr>${columns.map(column => `<th scope="col">${column}</th>`).join('')}</tr></thead><tbody><tr><td colspan="${columns.length}" class="empty-table">${message}</td></tr></tbody></table></div>`;
 const route = (previous, next) => `<nav class="workspace-route" aria-label="Receiver workflow">${button(previous, `← ${ROUTES[previous].label}`)}<span class="muted">Follow the receiver pipeline</span>${button(next, `${ROUTES[next].label} →`)}</nav>`;
 const unavailableNote = text => `<div class="workspace-callout"><strong>Not available in this receiver build.</strong> ${text}</div>`;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function svgElement(name, attributes = {}, textContent = '') {
+  const element = document.createElementNS(SVG_NS, name);
+  for (const [attribute, value] of Object.entries(attributes)) element.setAttribute(attribute, String(value));
+  if (textContent) element.textContent = textContent;
+  return element;
+}
+
+function searchSpacePlot({title, xLabel, yLabel, xMin, xMax, yMin, yMax, xBins, yBins, points = []}) {
+  const svg = svgElement('svg', {viewBox: '0 0 760 280', role: 'img', 'aria-label': title});
+  const left = 67, right = 735, top = 18, bottom = 228;
+  const width = right - left, height = bottom - top;
+  const xAt = value => left + (value - xMin) / (xMax - xMin || 1) * width;
+  const yAt = value => bottom - (value - yMin) / (yMax - yMin || 1) * height;
+  const boundedGrid = count => Math.max(1, Math.min(count, 40));
+  svg.append(svgElement('title', {}, title));
+  svg.append(svgElement('desc', {}, 'Configured search grid; candidate markers show receiver estimates, not per-cell correlation power.'));
+  for (let index = 0, count = boundedGrid(xBins); index <= count; ++index) {
+    const x = left + width * index / count;
+    svg.append(svgElement('line', {x1: x, y1: top, x2: x, y2: bottom, class: 'search-space-gridline'}));
+  }
+  for (let index = 0, count = boundedGrid(yBins); index <= count; ++index) {
+    const y = top + height * index / count;
+    svg.append(svgElement('line', {x1: left, y1: y, x2: right, y2: y, class: 'search-space-gridline'}));
+  }
+  svg.append(svgElement('rect', {x: left, y: top, width, height, class: 'search-space-frame'}));
+  svg.append(svgElement('text', {x: left, y: 255, class: 'search-space-axis-label'}, xLabel));
+  svg.append(svgElement('text', {
+    x: 17, y: (top + bottom) / 2, class: 'search-space-axis-label',
+    transform: `rotate(-90 17 ${(top + bottom) / 2})`
+  }, yLabel));
+  for (let index = 0; index <= 4; ++index) {
+    const fraction = index / 4;
+    const xValue = xMin + (xMax - xMin) * fraction;
+    const yValue = yMax - (yMax - yMin) * fraction;
+    svg.append(svgElement('text', {
+      x: left + width * fraction, y: 245, class: 'search-space-tick', 'text-anchor': 'middle'
+    }, Number(xValue.toPrecision(4)).toString()));
+    svg.append(svgElement('text', {
+      x: left - 8, y: top + height * fraction + 3, class: 'search-space-tick', 'text-anchor': 'end'
+    }, Number(yValue.toPrecision(4)).toString()));
+  }
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) ||
+        point.x < xMin || point.x > xMax || point.y < yMin || point.y > yMax) continue;
+    const marker = svgElement('circle', {
+      cx: xAt(point.x), cy: yAt(point.y), r: 5,
+      class: point.acquired ? 'search-space-point acquired' : 'search-space-point'
+    });
+    marker.append(svgElement('title', {},
+      `GPS ${point.prn} · ${point.phase} · Doppler ${point.y.toFixed(1)} Hz · code phase ${point.x.toFixed(2)} chips`));
+    svg.append(marker);
+  }
+  return svg;
+}
+
+function positiveConfigNumber(profile, key, fallback) {
+  const value = Number(profile[key]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function renderSearchSpaces(coarse, refinement, summary, profile, acquisition, satellites, sampleRate) {
+  if (!coarse || !refinement || !summary) return;
+  const dopplerMax = Math.max(0, Number(profile['acquisition.doppler_max_hz']) || 0);
+  const dopplerStep = positiveConfigNumber(profile, 'acquisition.doppler_step_hz', 1);
+  const fftSize = positiveConfigNumber(
+    {fftSize: acquisition?.fft_size}, 'fftSize',
+    positiveConfigNumber(profile, 'acquisition.fft_size', 0)
+  );
+  const codeStep = positiveConfigNumber(profile, 'acquisition.code_step_chips', 1);
+  const dopplerBins = Math.floor(2 * dopplerMax / dopplerStep + 0.5) + 1;
+  const delayOffsets = fftSize ? Math.max(1, Math.ceil((1023 / fftSize) / codeStep)) : 1;
+  const codeBins = fftSize * delayOffsets;
+  const points = satellites.filter(satellite =>
+    Number.isFinite(satellite.doppler_hz) && Number.isFinite(satellite.code_phase_chips) &&
+    satellite.code_phase_chips >= 0 && satellite.code_phase_chips <= 1023
+  ).map(satellite => ({
+    x: satellite.code_phase_chips, y: satellite.doppler_hz,
+    prn: satellite.prn, phase: satellite.phase.replaceAll('_', ' '),
+    acquired: satellite.phase === 'acquired'
+  }));
+  coarse.replaceChildren(searchSpacePlot({
+    title: 'GPS coarse search space: code phase by Doppler',
+    xLabel: 'Code phase (chips)', yLabel: 'Doppler (Hz)',
+    xMin: 0, xMax: 1023, yMin: -dopplerMax || -1, yMax: dopplerMax || 1,
+    xBins: codeBins, yBins: dopplerBins, points
+  }));
+
+  const refinementDopplerSpan = Math.max(0, Number(profile['acquisition.refinement_doppler_span_hz']) || 0);
+  const refinementDopplerStep = positiveConfigNumber(profile, 'acquisition.refinement_doppler_step_hz', 1);
+  const refinementCodeSpan = Math.max(0, Number(profile['acquisition.refinement_code_span_chips']) || 0);
+  const refinementCodeStepSamples = positiveConfigNumber(profile, 'acquisition.refinement_code_step_samples', 1);
+  const rate = Number(sampleRate);
+  const codeSpanSamples = Number.isFinite(rate) && rate > 0
+    ? Math.floor(refinementCodeSpan * rate / 1023000 + 0.5) : 0;
+  const refinementCodeBins = Math.floor(2 * codeSpanSamples / refinementCodeStepSamples + 0.5) + 1;
+  const refinementDopplerBins = Math.floor(2 * refinementDopplerSpan / refinementDopplerStep + 0.5) + 1;
+  refinement.replaceChildren(searchSpacePlot({
+    title: 'GPS refinement search space around each coarse candidate',
+    xLabel: 'Doppler offset from coarse candidate (Hz)',
+    yLabel: 'Code phase offset from coarse candidate (chips)',
+    xMin: -refinementDopplerSpan || -1, xMax: refinementDopplerSpan || 1,
+    yMin: -refinementCodeSpan || -1, yMax: refinementCodeSpan || 1,
+    xBins: refinementDopplerBins, yBins: refinementCodeBins
+  }));
+  const gridDescription = fftSize
+    ? `${dopplerBins.toLocaleString()} Doppler bins × ${codeBins.toLocaleString()} coarse code cells per PRN; FFT ${acquisition?.fft_size || fftSize} points.`
+    : 'Waiting for the saved GPS acquisition profile.';
+  const candidateDescription = points.length
+    ? ` ${points.length} candidate ${points.length === 1 ? 'position' : 'positions'} from receiver telemetry are marked on the coarse map.`
+    : ' No receiver candidate positions yet.';
+  const refinementDescription = `${refinementDopplerBins.toLocaleString()} Doppler refinement bins × ${refinementCodeBins.toLocaleString()} code offsets per candidate.`;
+  summary.textContent = `${gridDescription} ${refinementDescription}${candidateDescription} Search-cell power is not included in current telemetry.`;
+}
 
 function journeyMarkup() {
   return heading('RECEIVER WORKSPACE', 'One path from I/Q to a GNSS solution',
@@ -52,6 +167,8 @@ function acquisitionMarkup() {
     'Inspect GPS L1 C/A coarse search, Doppler and code refinement, and optional confirmation on the native I/Q stream.',
     `${settingsButton('acquisition', 'Acquisition settings')}${button('rf', 'Check RF input')}${button('tracking', 'Open tracking →')}`) +
     `<div class="workspace-kpis">${kpi('SEARCH STATE', field('acqState'), field('acqDetail'))}${kpi('ATTEMPTED GPS PRNS', field('acqSearched'), 'Current receiver run')}${kpi('ACQUIRED SIGNALS', field('acqConfirmed'), 'Acquired · ready for tracking')}${kpi('COARSE FFT', field('acqGrid'), 'NGene compression · 1 ms coherent periods')}</div>` +
+    card('GPS search spaces', 'Configured Doppler/code-phase coverage and the refinement neighborhood around each coarse peak.',
+      `<div class="search-space-grid"><section class="search-space-panel"><h3>Coarse search · full code period</h3><div id="coarseSearchSpace" class="search-space-plot"></div><p>Markers show candidate estimates; the receiver does not publish correlation power per cell.</p></section><section class="search-space-panel"><h3>Refinement · local offsets</h3><div id="refinementSearchSpace" class="search-space-plot"></div><p>Grid bounds and spacing are configured values around the coarse candidate.</p></section></div><p id="searchSpaceSummary" class="search-space-summary" role="status" aria-live="polite">Waiting for the receiver profile.</p>`) +
     card('GPS acquisition results', 'Delay and code phase refer to the reported sample epoch. Acquisition does not establish tracking or a position fix. Confirmation is optional.',
       `<div class="table-wrap"><table><thead><tr>${['GPS PRN','Stage','Doppler (Hz)','Delay (samples)','Metric / threshold','Confirmation','Epoch / reference sample'].map(title=>`<th scope="col">${title}</th>`).join('')}</tr></thead><tbody id="acquisitionResults"><tr><td colspan="7" class="empty-table">Enable GPS acquisition in Receiver configuration, then start the receiver.</td></tr></tbody></table></div>`) +
     card('Search control', 'Acquisition starts with the receiver when enabled in its profile.',
@@ -167,6 +284,9 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   });
   const replayButtons = [...document.querySelectorAll('[data-workspace-replay]')];
   const acquisitionRows = document.getElementById('acquisitionResults');
+  const coarseSearchSpace = document.getElementById('coarseSearchSpace');
+  const refinementSearchSpace = document.getElementById('refinementSearchSpace');
+  const searchSpaceSummary = document.getElementById('searchSpaceSummary');
   const acquisitionDot = document.querySelector('[data-view="acquisition"] .workspace-nav-dot');
   let acquisitionSignature = '';
   const panels = Object.entries(ROUTES).map(([name, info]) => [name, document.getElementById(info.id)]);
@@ -238,7 +358,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   window.addEventListener('popstate', fromHash);
 
   function update(snapshot = {}) {
-    const {status, capabilities, profile = {}, revision, dirty = false, connected = false} = snapshot;
+    const {status, capabilities, profile = {}, draft = {}, revision, dirty = false, connected = false} = snapshot;
     const live = connected && status ? status : null;
     const configuredSource = profile['frontend.type'];
     const source = SOURCE_NAMES[configuredSource] || configuredSource || UNAVAILABLE;
@@ -253,6 +373,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     const profileState = revision ? `Profile r${revision}${dirty ? ' · unsaved changes' : ''}` : 'Waiting for profile';
     const acq = live?.acquisition;
     const satellites = acq?.satellites || [];
+    const searchProfile = {...profile, ...draft};
     const confirmed = satellites.filter(satellite=>satellite.phase==='acquired').length;
     const enabled = profile['acquisition.enabled']==='true';
     const acquisitionState = !capabilities?.gps_acquisition ? UNAVAILABLE : !connected ? 'Disconnected' :
@@ -292,6 +413,8 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       'stage-record': record
     };
     for (const [key, value] of Object.entries(values)) text(key, value);
+    renderSearchSpaces(coarseSearchSpace, refinementSearchSpace, searchSpaceSummary,
+      searchProfile, acq, satellites, live?.actual_sample_rate_hz || searchProfile['frontend.sample_rate_hz']);
     if (acquisitionRows) {
       const signature = JSON.stringify(satellites);
       if (signature !== acquisitionSignature) {

@@ -275,6 +275,13 @@ refinement_code_step_samples=1
       'GPS acquisition does not enable spectrum computation');
     await until(() => page.locator('#acquisitionResults').textContent().then(text => /GPS 3/.test(text) && /acquired/.test(text)),
       'real acquired result reaches the UI table');
+    await until(() => page.locator('#coarseSearchSpace circle.search-space-point').count().then(count => count === 1),
+      'real acquired candidate is plotted in the coarse code/Doppler search space');
+    assert.equal(await page.locator('#refinementSearchSpace svg').count(), 1,
+      'The configured refinement search space is visible');
+    assert.match(await page.locator('#searchSpaceSummary').textContent(), /Doppler bins.*code cells.*Search-cell power is not included/i,
+      'The UI reports configured grid dimensions and distinguishes geometry from measured cell power');
+    assert.match(await page.locator('#coarseSearchSpace circle.search-space-point title').textContent(), /GPS 3.*acquired/i);
     assert.match(await page.locator('#acquisitionView').textContent(), /ready for tracking/i);
     assert.equal((await page.locator('#acquisitionResults tr').count()), 1, 'No synthetic satellite rows appear');
     assert.equal(await page.locator('[data-workspace-field="acqConfirmed"]').textContent(), '1');
