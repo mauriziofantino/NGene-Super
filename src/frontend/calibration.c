@@ -172,7 +172,7 @@ int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgErro
         /* Prefer the documented balanced 16/16 starting region. Test comparable
          * total gains with different stage splits; do not assume they are equivalent. */
         for (a = 0; a < sizeof(lna)/sizeof(lna[0]); ++a) {
-            unsigned amp;
+            int amp;
             for (amp = 0; amp <= 1; ++amp) {
                 candidate = *config;
                 candidate.lnaGainDb = lna[a];
