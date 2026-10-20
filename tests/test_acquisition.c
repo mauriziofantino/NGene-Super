@@ -506,6 +506,31 @@ static void TestWeakSignalNoncoherent(void)
     SignalDestroy(&signal);
 }
 
+/* A GPS-like power level exercises sensitivity rather than only strong
+ * synthetic peaks. For complex AWGN, C/N0 = A^2 Fs / (2 sigma^2). */
+static void TestReceiverLevelSensitivity(void)
+{
+    static const size_t chunks[] = {3200};
+    TSignal signal = SignalCreate(3200000, NG_FORMAT_CU8, 6, 997.0, 350.0, 0,
+                                  1.04, 13.0, 450);
+    TNgAcquisitionConfig config = TestConfig(6);
+    TNgAcquisitionPlan *plan = NULL;
+    TNgAcquisitionResult result;
+    TNgError error = {{0}};
+    config.nonCoherentSums = 8;
+    config.fftSize = 4096; /* Effective 2048 at 3.2 Msps, as in a live profile. */
+    config.codeStepChips = 0.25;
+    config.falseAlarmProbability = 1e-9;
+    CHECK(NgAcquisitionPlanCreate(&config, &signal.stream, &plan, &error) == NG_OK);
+    result = RunChunksWithSums(plan, &signal, 6, chunks, 1, 8);
+    if (result.phase != NG_ACQ_ACQUIRED)
+        fprintf(stderr, "Sensitivity: phase=%s metric=%g threshold=%g\n",
+                NgAcquisitionPhaseName(result.phase), result.metric, result.threshold);
+    CHECK(result.phase == NG_ACQ_ACQUIRED);
+    NgAcquisitionPlanDestroy(plan);
+    SignalDestroy(&signal);
+}
+
 static void TestNoFalseAcquisition(void)
 {
     static const size_t chunks[] = {2046};
@@ -1507,6 +1532,7 @@ int main(void)
     TestRationalMillisecond();
     TestHighRateCompression();
     TestWeakSignalNoncoherent();
+    TestReceiverLevelSensitivity();
     TestNoFalseAcquisition();
     TestDiscontinuityAndReset();
     TestReceiverAdapter();

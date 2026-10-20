@@ -637,7 +637,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     cafPrnSelect.value = cafSelection;
   }
   function maybePollCaf(force = false) {
-    if (!cafToggle.checked || selected !== 'acquisition' || !cafCanFetch || cafPending) return;
+    if (document.hidden || !cafToggle.checked || selected !== 'acquisition' || !cafCanFetch || cafPending) return;
     const now = performance.now();
     if (!force && (now - cafPollAt < 850 || cafFetchedStopped)) return;
     cafPollAt = now;
@@ -667,6 +667,9 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       if (generation !== cafGeneration && selected === 'acquisition') maybePollCaf(true);
     });
   }
+  /* Keep CAF interest alive even when heavy native processing delays status
+   * WebSocket replies. Leaving this view or disabling the plot stops polling. */
+  setInterval(() => maybePollCaf(), 900);
   cafPrnSelect?.addEventListener('change', () => {
     cafSelection = cafPrnSelect.value;
     clearCaf(cafSelection ? `Waiting for measured CAF cells for GPS ${cafSelection}.` : 'Waiting for the latest measured GPS search.');

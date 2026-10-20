@@ -433,6 +433,7 @@ static void TestGainQuality(void)
     for (format = NG_FORMAT_CI8; format <= NG_FORMAT_SC16_Q11;
          format = (TNgSampleFormat)(format + 1)) {
         int scale = format == NG_FORMAT_SC16_Q11 ? 16 : 1;
+        double centeredScore;
         view.format = format;
         for (k = 0; k < 8192; ++k) {
             int sumI = 0, sumQ = 0;
@@ -447,6 +448,17 @@ static void TestGainQuality(void)
             NgIqStore(samples, format, k, 1, (sumQ - 90) * 2 * scale);
         }
         CHECK(NgGainAnalyze(&view, &quality, &error) == NG_OK && quality.acceptable);
+        centeredScore = quality.score;
+        /* A small constant I/Q offset creates a DC spectral line even when
+         * the rest of the amplitude distribution still looks Gaussian. */
+        for (k = 0; k < 8192; ++k) {
+            int inPhase = NgIqComponent(&view, k, 0);
+            int quadrature = NgIqComponent(&view, k, 1);
+            NgIqStore(samples, format, k, 0, inPhase + 3 * scale);
+            NgIqStore(samples, format, k, 1, quadrature + 3 * scale);
+        }
+        CHECK(NgGainAnalyze(&view, &quality, &error) == NG_OK &&
+              quality.score > centeredScore && !quality.acceptable);
         for (k = 0; k < 8192; ++k) {
             int peak = format == NG_FORMAT_SC16_Q11 ? 2047 : 127;
             NgIqStore(samples, format, k, 0, k % 2 ? peak : -peak);

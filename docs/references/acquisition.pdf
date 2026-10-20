@@ -1,0 +1,161 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Length 5530 >>
+stream
+BT /F2 17 Tf 48 782.0 Td (GPS acquisition in NGene Evo) Tj ET
+BT /F1 9.5 Tf 48 751.0 Td (Implementation review against the bundled original NGene source - 19 October 2026 - GPS L1 C/A only) Tj ET
+BT /F1 9.5 Tf 48 737.5 Td (Finding: A complete cross-ambiguity surface is evidence that the search ran, not that a satellite) Tj ET
+BT /F1 9.5 Tf 48 724.0 Td (was detected. The current implementation acquires a deterministic complex-I/Q signal at) Tj ET
+BT /F1 9.5 Tf 48 710.5 Td (approximately 40 dB-Hz with eight noncoherent sums in an automated test. It has not been validated) Tj ET
+BT /F1 9.5 Tf 48 697.0 Td (against the user's live RF capture. No unique cause of the reported failed live acquisition can be) Tj ET
+BT /F1 9.5 Tf 48 683.5 Td (established from the screenshot alone.) Tj ET
+BT /F2 12 Tf 48 660.0 Td (1. Signal path and I/Q convention) Tj ET
+BT /F1 9.5 Tf 48 634.0 Td (SDR or I/Q file -> native complex pairs -> optional conditioner -> kernel windows) Tj ET
+BT /F1 9.5 Tf 48 620.5 Td (-> acquisition channel \(one PRN\) -> 1 ms private frame) Tj ET
+BT /F1 9.5 Tf 48 607.0 Td (-> remove frame I/Q means -> wipe off residual carrier) Tj ET
+BT /F1 9.5 Tf 48 593.5 Td (-> compress complex samples -> FFT correlation -> detection/refinement) Tj ET
+BT /F1 9.5 Tf 48 580.0 Td (The original NGene frontend delivered real intermediate-frequency samples. Its coarse acquisition) Tj ET
+BT /F1 9.5 Tf 48 566.5 Td (called GenerateCarrier and CarrierComplexWipeOff to create in-phase and quadrature streams before) Tj ET
+BT /F1 9.5 Tf 48 553.0 Td (SampleCompression. NGene Evo's frontend already delivers simultaneous I and Q values. The) Tj ET
+BT /F1 9.5 Tf 48 539.5 Td (acquisition module does not split a real stream or repeat the analog quadrature demodulation. It) Tj ET
+BT /F1 9.5 Tf 48 526.0 Td (reads each native pair using NgIqComponent: signed CI8 directly, unsigned CU8 recentered by) Tj ET
+BT /F1 9.5 Tf 48 512.5 Td (subtracting 128, or signed SC16/Q11 without truncating to 8 bits.) Tj ET
+BT /F1 9.5 Tf 48 499.0 Td (Acquisition receives the post-conditioner kernel stream. With bypass, those are the frontend's) Tj ET
+BT /F1 9.5 Tf 48 485.5 Td (original samples. With dc_iir, the continuous DC estimate has already been subtracted. In either) Tj ET
+BT /F1 9.5 Tf 48 472.0 Td (case, the acquisition correlator also subtracts the mean I and Q of its own 1 ms frame before) Tj ET
+BT /F1 9.5 Tf 48 458.5 Td (carrier mixing. This local centering does not alter the shared receiver stream.) Tj ET
+BT /F1 9.5 Tf 48 445.0 Td (The frontend's configured signal centre minus its hardware tuning frequency is digitalIfHz. A) Tj ET
+BT /F1 9.5 Tf 48 431.5 Td (Doppler hypothesis fD produces an NCO at digitalIfHz + fD. For input x[n] = I[n] + jQ[n], the NCO) Tj ET
+BT /F1 9.5 Tf 48 418.0 Td (computes y[n] = \(x[n] - mean\) exp\(-j2pi\(digitalIfHz + fD\)n/Fs\). If the hardware is tuned to nominal) Tj ET
+BT /F1 9.5 Tf 48 404.5 Td (GPS L1, digital IF is zero: the NCO still removes the hypothesized residual Doppler. The code NCO is) Tj ET
+BT /F1 9.5 Tf 48 391.0 Td (independent of the carrier NCO.) Tj ET
+BT /F2 12 Tf 48 367.5 Td (2. Coarse acquisition: what was preserved and changed) Tj ET
+BT /F1 9.5 Tf 48 341.5 Td (Operation | Original NGene | NGene Evo) Tj ET
+BT /F1 9.5 Tf 48 328.0 Td (Input and carrier | Real IF; generate cosine/sine, then form I/Q. | Native complex pairs; multiply) Tj ET
+BT /F1 9.5 Tf 48 314.5 Td (by conjugate residual carrier NCO.) Tj ET
+BT /F1 9.5 Tf 48 301.0 Td (Coherent period | GPS C/A code period, normally 1 ms. | One private 1 ms frame, assembled across) Tj ET
+BT /F1 9.5 Tf 48 287.5 Td (arbitrary kernel windows.) Tj ET
+BT /F1 9.5 Tf 48 274.0 Td (Compression | Short/long sample accumulation into a power-of-two FFT length. | Precomputed integer) Tj ET
+BT /F1 9.5 Tf 48 260.5 Td (boundaries; accumulate both native I and Q after carrier wipe-off. No intermediate 8-bit narrowing.) Tj ET
+BT /F1 9.5 Tf 48 247.0 Td (Code replica | Generate sampled C/A code; compress; cache its FFT per PRN. | Generate the same) Tj ET
+BT /F1 9.5 Tf 48 233.5 Td (1023-chip polarity; compress once for floor/ceil frame lengths; cache FFT per PRN.) Tj ET
+BT /F1 9.5 Tf 48 220.0 Td (Correlation | FFT\(signal\) x conjugate FFT\(code\), inverse via another forward FFT and reversed) Tj ET
+BT /F1 9.5 Tf 48 206.5 Td (indices. | Same algebra; Q14 FFT inputs are dynamically scaled and the scale is undone in reported) Tj ET
+BT /F1 9.5 Tf 48 193.0 Td (power.) Tj ET
+BT /F1 9.5 Tf 48 179.5 Td (Threshold | Variance estimated at a fake +30 kHz Doppler; false-alarm threshold from a noise model.) Tj ET
+BT /F1 9.5 Tf 48 166.0 Td (| Per-Doppler off-peak delay background and finite-reference false-alarm factor. A +30 kHz warm-up) Tj ET
+BT /F1 9.5 Tf 48 152.5 Td (still runs but is not the final local threshold.) Tj ET
+BT /F1 9.5 Tf 48 139.0 Td (Search | Doppler bins and supplementary shifted compression origins; noncoherent sums increase over) Tj ET
+BT /F1 9.5 Tf 48 125.5 Td (PRN cycles. | Same broad policy; each Doppler/shift/noncoherent dwell consumes successive live) Tj ET
+BT /F1 9.5 Tf 48 112.0 Td (milliseconds.) Tj ET
+BT /F1 9.5 Tf 48 98.5 Td (For sample rate Fs, a code period contains approximately Fs/1000 complex pairs. The configured FFT) Tj ET
+BT /F1 9.5 Tf 48 85.0 Td (size is reduced to the largest allowed power of two at or below that count. At 2.4 Msps, a requested) Tj ET
+BT /F1 9.5 Tf 48 71.5 Td (4096-point FFT therefore becomes 2048 points. The compression partitions the 1 ms input into) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 5979 >>
+stream
+BT /F1 9.5 Tf 48 792.0 Td (contiguous groups; each FFT input is the complex sum of its group's carrier-wiped samples.) Tj ET
+BT /F1 9.5 Tf 48 778.5 Td (Supplementary shifted origins cover fractional code offsets that a single compression grid misses.) Tj ET
+BT /F1 9.5 Tf 48 765.0 Td (The generated local code is summed over the same group boundaries.) Tj ET
+BT /F1 9.5 Tf 48 751.5 Td (For each Doppler and shift, the correlator produces one power for every compressed code lag. Powers) Tj ET
+BT /F1 9.5 Tf 48 738.0 Td (from M separate 1 ms frames are summed noncoherently; complex amplitudes are not added across those) Tj ET
+BT /F1 9.5 Tf 48 724.5 Td (frames. The current detector compares the peak against a local off-peak mean multiplied by a factor) Tj ET
+BT /F1 9.5 Tf 48 711.0 Td (calculated from the configured per-cell false-alarm probability. This factor assumes approximately) Tj ET
+BT /F1 9.5 Tf 48 697.5 Td (independent white-noise cells; real interference, filtering and repeated searches can violate that) Tj ET
+BT /F1 9.5 Tf 48 684.0 Td (assumption.) Tj ET
+BT /F2 12 Tf 48 660.5 Td (3. Refinement and confirmation) Tj ET
+BT /F1 9.5 Tf 48 634.5 Td (When the coarse peak exceeds its threshold, the module refines Doppler around that candidate using) Tj ET
+BT /F1 9.5 Tf 48 621.0 Td (full-rate, 1 ms prompt correlations. It then refines code delay in native sample steps. For a prompt) Tj ET
+BT /F1 9.5 Tf 48 607.5 Td (at code phase tau, it multiplies the carrier-wiped I/Q pair by the local +/-1 C/A chip and sums I) Tj ET
+BT /F1 9.5 Tf 48 594.0 Td (and Q across the frame. The prompt power is \(SumI/N\)^2 + \(SumQ/N\)^2. The code rate is corrected by 1) Tj ET
+BT /F1 9.5 Tf 48 580.5 Td (+ fD/1575.42 MHz. The carrier phase is deliberately left invalid because GPS navigation-bit polarity) Tj ET
+BT /F1 9.5 Tf 48 567.0 Td (gives a pi ambiguity.) Tj ET
+BT /F1 9.5 Tf 48 553.5 Td (Optional M-of-N confirmation uses later, separate frames, with 32 off-peak code shifts as its noise) Tj ET
+BT /F1 9.5 Tf 48 540.0 Td (references. The default is 3 hits in 4 attempts. With confirmation disabled, a refined coarse) Tj ET
+BT /F1 9.5 Tf 48 526.5 Td (detection is reported immediately; that is a weaker claim than a confirmed detection. Neither result) Tj ET
+BT /F1 9.5 Tf 48 513.0 Td (implies tracking lock, navigation decoding or a position fix.) Tj ET
+BT /F2 12 Tf 48 489.5 Td (4. Kernel API, timing and the GUI surface) Tj ET
+BT /F1 9.5 Tf 48 463.5 Td (The kernel passes borrowed, immutable windows of complex pairs to acquisition channels.) Tj ET
+BT /F1 9.5 Tf 48 450.0 Td (NgAcquisitionProcess copies only enough samples to form its next 1 ms private frame. A 5 ms window) Tj ET
+BT /F1 9.5 Tf 48 436.5 Td (is therefore handled as five consecutive code periods; a shorter window may be joined with the next.) Tj ET
+BT /F1 9.5 Tf 48 423.0 Td (Epoch changes or sample gaps reset partial coherent history and candidate state. Channel scheduling) Tj ET
+BT /F1 9.5 Tf 48 409.5 Td (can process separate PRNs concurrently. The receiver starts with one noncoherent sum and raises it) Tj ET
+BT /F1 9.5 Tf 48 396.0 Td (toward the configured maximum after PRN-list cycles; this follows the old NGene policy but can delay) Tj ET
+BT /F1 9.5 Tf 48 382.5 Td (weak-signal detection.) Tj ET
+BT /F1 9.5 Tf 48 369.0 Td (The 2D/3D cross-ambiguity plot is a bounded display cache, not the full detector. It max-pools) Tj ET
+BT /F1 9.5 Tf 48 355.5 Td (measured coarse powers into at most 64 Doppler x 64 code-delay cells. Different Doppler rows come) Tj ET
+BT /F1 9.5 Tf 48 342.0 Td (from different milliseconds. The colors and height are normalized to the strongest displayed cell; a) Tj ET
+BT /F1 9.5 Tf 48 328.5 Td (yellow peak is not an acquisition decision. Hiding the plot skips this pooling but does not stop the) Tj ET
+BT /F1 9.5 Tf 48 315.0 Td (correlation required for detection. In the supplied screenshot the plot says "Complete sweep", "2) Tj ET
+BT /F1 9.5 Tf 48 301.5 Td (noncoherent 1 ms periods", and "FFT 1024 points"; it shows a nearly flat surface and a relative) Tj ET
+BT /F1 9.5 Tf 48 288.0 Td (peak, not a threshold crossing or confirmation.) Tj ET
+BT /F2 12 Tf 48 264.5 Td (5. What the present evidence does and does not prove) Tj ET
+BT /F1 9.5 Tf 48 238.5 Td (The existing synthetic tests check original C/A code hashes, FFT correlation against independent) Tj ET
+BT /F1 9.5 Tf 48 225.0 Td (calculations, code and Doppler estimates, CI8/CU8/SC16 input, DC bias, no-antenna noise,) Tj ET
+BT /F1 9.5 Tf 48 211.5 Td (sample-chunk invariance, and optional confirmation. A new test feeds approximately 40 dB-Hz complex) Tj ET
+BT /F1 9.5 Tf 48 198.0 Td (CU8 GPS-like signal at 3.2 Msps, with an effective 2048-point FFT, quarter-chip supplementary step,) Tj ET
+BT /F1 9.5 Tf 48 184.5 Td (eight noncoherent sums, Pfa=10-9 and 3-of-4 confirmation; it passes. The synthetic model is) Tj ET
+BT /F1 9.5 Tf 48 171.0 Td (idealized and does not reproduce analog filters, oscillator drift, multipath, interference or) Tj ET
+BT /F1 9.5 Tf 48 157.5 Td (dropped USB samples.) Tj ET
+BT /F1 9.5 Tf 48 144.0 Td (For live reception, the first items to check are: \(1\) metric / threshold for the selected PRN after) Tj ET
+BT /F1 9.5 Tf 48 130.5 Td (a completed sweep, and the current noncoherent-sum count; \(2\) sample-gap/reset counters; \(3\) the) Tj ET
+BT /F1 9.5 Tf 48 117.0 Td (actual RF centre error. A +/-5 kHz Doppler window covers only about +/-3.17 ppm of L1) Tj ET
+BT /F1 9.5 Tf 48 103.5 Td (centre-frequency error even before satellite Doppler is allowed for. A tuner offset of several ppm) Tj ET
+BT /F1 9.5 Tf 48 90.0 Td (can put every satellite outside the configured search. Gain calibration checks ADC distribution; it) Tj ET
+BT /F1 9.5 Tf 48 76.5 Td (does not calibrate L1 frequency or prove antenna reception. The screenshot alone provides none of) Tj ET
+BT /F1 9.5 Tf 48 63.0 Td (these measurements, so attributing the failure to one cause would be speculation.) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 677 >>
+stream
+BT /F2 12 Tf 48 782.0 Td (6. Source map) Tj ET
+BT /F1 9.5 Tf 48 756.0 Td (Original: Old NGene) Tj ET
+BT /F1 9.5 Tf 48 742.5 Td (Code/acquisition/{coarseAcquisition,acquisition,refinement,confirmation,nonCoherentSumsManager}.c) Tj ET
+BT /F1 9.5 Tf 48 729.0 Td (and Old NGene Code/utility/sampleCompression.c. Current:) Tj ET
+BT /F1 9.5 Tf 48 715.5 Td (src/core/{receiver,acquisition_receiver,stream_info}.c, src/acquisition/acquisition.c,) Tj ET
+BT /F1 9.5 Tf 48 702.0 Td (src/dsp/{acquisition_math,gps_ca,nco}.c, tests/test_acquisition.c. All comparisons in this document) Tj ET
+BT /F1 9.5 Tf 48 688.5 Td (refer to the bundled source, not to an external reconstruction.) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000128 00000 n 
+0000000198 00000 n 
+0000000273 00000 n 
+0000005854 00000 n 
+0000005990 00000 n 
+0000012020 00000 n 
+0000012156 00000 n 
+0000012883 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R >>
+startxref
+13020
+%%EOF

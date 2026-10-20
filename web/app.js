@@ -932,15 +932,12 @@ $('calibrateGains').addEventListener('click', async () => {
   const requested = keys.map(key => values[key] || '');
   const current = () => keys.every((key,index) => (values[key] || '') === requested[index]);
   httpBusy = true; controls();
-  $('calibrationStatus').textContent = 'Sampling live I/Q and comparing device gain settings…';
+  $('calibrationStatus').textContent = values['frontend.type'] === 'hackrf' ?
+    'Checking all 384 HackRF gain settings, three I/Q windows each. This can take several minutes; display histogram bins stay unchanged.' :
+    'Checking every supported gain setting, three I/Q windows each. Display histogram bins stay unchanged.';
   try {
     const result = await api('frontend/calibrate', {revision, ini: toIni(values)});
     if (!current()) throw new Error('Source settings changed during calibration.');
-    if (!result.accepted) {
-      $('calibrationStatus').textContent = `No reliable gain setting found in ${result.tested} measurements. Check the antenna, interference and I/Q level; settings were kept.`;
-      notice('Gain calibration could not find a clean input distribution.', true);
-      return;
-    }
     const source = values['frontend.type'];
     if (source === 'hackrf') Object.assign(values, {'hackrf.lna_gain_db':String(result.lna_gain_db), 'hackrf.vga_gain_db':String(result.vga_gain_db), 'hackrf.rf_amp':String(result.rf_amp)});
     if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':String(result.rtl_auto_gain), 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db)});
@@ -951,8 +948,10 @@ $('calibrateGains').addEventListener('click', async () => {
     const level = (result.rms_fraction * 100).toFixed(1);
     const mode = source === 'rtlsdr' ? (result.rtl_auto_gain ? 'automatic tuner gain' : 'manual tuner gain') :
       source === 'hackrf' ? (result.rf_amp ? 'RF amplifier on' : 'RF amplifier off') : 'manual gain';
-    $('calibrationStatus').textContent = `Suggested ${mode} from ${result.tested} measurements · I/Q RMS ${level}% of ADC range · ${(result.clipped_fraction * 100).toFixed(3)}% near clipping. Apply & save to keep it.`;
-    notice('Gain calibration completed. Review and save the suggested receiver profile.');
+    const verdict = result.accepted ? 'Suggested' : 'Best measured, but quality criteria not met:';
+    $('calibrationStatus').textContent = `${verdict} ${mode} from ${result.tested / 3} gain settings (${result.tested} I/Q windows) · RMS ${level}% of ADC range · DC offset ${(result.dc_fraction * 100).toFixed(3)}% · ${(result.clipped_fraction * 100).toFixed(3)}% near clipping. Display histogram bins are unchanged. Review before Apply & save.`;
+    notice(result.accepted ? 'Gain calibration completed. Review and save the suggested receiver profile.' :
+      'No clean gain setting was found. Review the best measured draft before saving it.', !result.accepted);
   } catch (error) {
     $('calibrationStatus').textContent = error.message;
     notice(error.message, true);

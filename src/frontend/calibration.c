@@ -4,23 +4,40 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { CAL_PAIRS = 32768, CAL_BLOCK = 32768, CAL_INGRESS_BLOCKS = 128, CAL_MAX = 32 };
+enum { CAL_PAIRS = 32768, CAL_BLOCK = 32768, CAL_INGRESS_BLOCKS = 128,
+       CAL_REPEATS = 3, CAL_HISTOGRAM_LEVELS = 4096 };
+
+static double Median3(double a, double b, double c)
+{
+    if (a > b) { double tmp = a; a = b; b = tmp; }
+    if (b > c) { double tmp = b; b = c; c = tmp; }
+    if (a > b) b = a;
+    return b;
+}
 
 int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *q, TNgError *error)
 {
     double mean[2] = {0}, second[2] = {0}, fourth[2] = {0};
-    double limit, variance[2], kurtosis[2], dc, rms;
+    double limit, variance[2], kurtosis[2], dc, rms, cdfError = 0;
+    uint32_t histogram[2][CAL_HISTOGRAM_LEVELS] = {{0}};
+    unsigned levels;
     size_t k, clipped = 0;
     if (!view || !view->samples || view->meta.count < 1024 || !q)
         return NgFail(error, "Calibration requires at least 1024 I/Q pairs");
     memset(q, 0, sizeof(*q));
-    limit = view->format == NG_FORMAT_SC16_Q11 ? 2048.0 : 128.0;
+    levels = view->format == NG_FORMAT_SC16_Q11 ? 4096u : 256u;
+    limit = (double)levels * 0.5;
     for (k = 0; k < view->meta.count; ++k) {
         unsigned c;
         for (c = 0; c < 2; ++c) {
-            double x = NgIqComponent(view, k, c) / limit;
+            int value = NgIqComponent(view, k, c);
+            int index = value + (int)(levels / 2u);
+            double x = (double)value / limit;
             mean[c] += x;
             if (fabs(x) >= 0.97) ++clipped;
+            if (index < 0) index = 0;
+            if ((unsigned)index >= levels) index = (int)levels - 1;
+            ++histogram[c][(size_t)index];
         }
     }
     for (k = 0; k < 2; ++k) mean[k] /= (double)view->meta.count;
@@ -40,29 +57,53 @@ int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *q, TNgError *error)
     }
     rms = sqrt((variance[0] + variance[1]) * 0.5);
     dc = hypot(mean[0], mean[1]);
+    for (k = 0; k < 2; ++k) {
+        uint64_t cumulative = 0;
+        unsigned bin;
+        double invStd;
+        if (variance[k] < 1e-12) { cdfError = 1.0; continue; }
+        invStd = 1.0 / sqrt(2.0 * variance[k]);
+        for (bin = 0; bin < levels; ++bin) {
+            double edge, expected, observed, difference;
+            cumulative += histogram[k][bin];
+            /* A discrete ADC level occupies a bin centred on the integer. */
+            edge = ((double)bin + 0.5 - limit) / limit;
+            expected = 0.5 * (1.0 + erf((edge - mean[k]) * invStd));
+            observed = (double)cumulative / (double)view->meta.count;
+            difference = fabs(observed - expected);
+            if (difference > cdfError) cdfError = difference;
+        }
+    }
     q->rmsFraction = rms;
     q->clippedFraction = (double)clipped / (2.0 * (double)view->meta.count);
-    q->gaussianError = (fabs(kurtosis[0] - 3.0) + fabs(kurtosis[1] - 3.0)) * 0.5;
+    /* Compare the native ADC-level CDF, independently of the display bins. */
+    q->gaussianError = (fabs(kurtosis[0] - 3.0) + fabs(kurtosis[1] - 3.0)) * 0.5 +
+                       8.0 * cdfError;
     q->dcFraction = dc;
     q->iqImbalance = fabs(sqrt(variance[0]) - sqrt(variance[1])) /
                      (sqrt(variance[0]) + sqrt(variance[1]) + 1e-12);
     q->acceptable = rms >= 0.06 && rms <= 0.32 && q->clippedFraction < 0.001 &&
-                    q->gaussianError < 0.9 && q->iqImbalance < 0.25 && dc < 0.14;
+                    q->gaussianError < 0.9 && q->iqImbalance < 0.25 &&
+                    dc / (rms + 1e-12) * sqrt((double)view->meta.count * 0.5) < 8.0;
     q->score = fabs(log((rms + 1e-12) / 0.12)) + 2.0 * q->gaussianError +
-               8.0 * q->iqImbalance + 5.0 * dc + 100.0 * q->clippedFraction;
+               8.0 * q->iqImbalance +
+               1.5 * dc / (rms + 1e-12) * sqrt((double)view->meta.count * 0.5) +
+               100.0 * q->clippedFraction;
     return NG_OK;
 }
 
-static int Measure(const TNgConfig *candidate, TNgGainQuality *q, TNgError *error)
+static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
+                   TNgError *error)
 {
     TNgConfig local = *candidate;
     TNgFrontend frontend = {0};
     TNgIqView view = {0};
     TNgIqView collected = {0};
     unsigned char *samples = NULL;
-    size_t bytes, count = 0, discard;
+    size_t bytes, count, discard;
     double deadline;
     int started = 0, ok = NG_ERROR;
+    unsigned repeat;
     local.windowSamples = CAL_BLOCK;
     /* 128 x 32768 pairs provide ~262 ms at 16 Msps; the former 32 x 8192
      * probe queue provided only 16 ms of scheduling headroom. */
@@ -79,33 +120,38 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality *q, TNgError *erro
     started = 1;
     /* The RTL tuner controls its own gain in automatic mode and needs longer
      * to settle than a fixed analog gain before we judge its distribution. */
-    discard = candidate->sampleRateHz /
-              (candidate->frontend == NG_FRONTEND_RTLSDR && candidate->rtlAutoGain ? 10u : 50u);
-    deadline = NgMonotonicSeconds() + 4.0;
-    while (count < CAL_PAIRS && NgMonotonicSeconds() < deadline) {
-        int rc = frontend.ops->acquire(frontend.context, &view, 200, error);
-        size_t offset = 0, n;
-        if (rc == NG_TIMEOUT) continue;
-        if (rc != NG_OK) goto done;
-        if (discard) {
-            offset = view.meta.count < discard ? view.meta.count : discard;
-            discard -= offset;
-        }
-        n = view.meta.count - offset;
-        if (n > CAL_PAIRS - count) n = CAL_PAIRS - count;
-        if (n) memcpy(samples + count * bytes,
-                      (const unsigned char *)view.samples + offset * bytes, n * bytes);
-        count += n;
-        frontend.ops->release(frontend.context);
-    }
-    if (count < CAL_PAIRS) {
-        NgFail(error, "SDR did not deliver enough I/Q samples for calibration");
-        goto done;
-    }
     collected.samples = (const TNgIq8 *)samples;
     collected.format = frontend.info.format;
-    collected.meta.count = count;
-    ok = NgGainAnalyze(&collected, q, error);
+    collected.meta.count = CAL_PAIRS;
+    for (repeat = 0; repeat < (unsigned)CAL_REPEATS; ++repeat) {
+        count = 0;
+        discard = frontend.info.sampleRateHz /
+                  (candidate->frontend == NG_FRONTEND_RTLSDR && candidate->rtlAutoGain &&
+                   repeat == 0 ? 10u : 50u);
+        deadline = NgMonotonicSeconds() + 4.0;
+        while (count < CAL_PAIRS && NgMonotonicSeconds() < deadline) {
+            int rc = frontend.ops->acquire(frontend.context, &view, 200, error);
+            size_t offset = 0, n;
+            if (rc == NG_TIMEOUT) continue;
+            if (rc != NG_OK) goto done;
+            if (discard) {
+                offset = view.meta.count < discard ? view.meta.count : discard;
+                discard -= offset;
+            }
+            n = view.meta.count - offset;
+            if (n > CAL_PAIRS - count) n = CAL_PAIRS - count;
+            if (n) memcpy(samples + count * bytes,
+                          (const unsigned char *)view.samples + offset * bytes, n * bytes);
+            count += n;
+            frontend.ops->release(frontend.context);
+        }
+        if (count < CAL_PAIRS) {
+            NgFail(error, "SDR did not deliver enough I/Q samples for calibration");
+            goto done;
+        }
+        if (NgGainAnalyze(&collected, &q[repeat], error) != NG_OK) goto done;
+    }
+    ok = NG_OK;
 done:
     if (started) {
         TNgError stopError = {{0}};
@@ -122,34 +168,41 @@ done:
 static void Consider(const TNgConfig *candidate, const TNgGainQuality *quality,
                      TNgGainCalibration *result)
 {
-    double score, previous;
-    ++result->tested;
-    score = quality->score;
-    previous = result->quality.score;
-    if (candidate->frontend == NG_FRONTEND_HACKRF) {
-        /* Among valid distributions, avoid unnecessary analog gain and favor
-         * balanced IF/baseband stages. Clipping and quality gates dominate. */
-        score += 0.005 * fabs((double)candidate->lnaGainDb - candidate->vgaGainDb);
-        score += candidate->rfAmp ? 0.1 : 0.0;
-        score += 0.015 * (candidate->lnaGainDb + candidate->vgaGainDb);
-        previous += 0.005 * fabs((double)result->selected.lnaGainDb -
-                                 result->selected.vgaGainDb);
-        previous += result->selected.rfAmp ? 0.1 : 0.0;
-        previous += 0.015 * (result->selected.lnaGainDb + result->selected.vgaGainDb);
-    }
-    if (result->tested == 1 || (quality->acceptable && !result->accepted) ||
-        (quality->acceptable == result->accepted && score < previous)) {
+    if (result->tested == 0 || (quality->acceptable && !result->accepted) ||
+        (quality->acceptable == result->accepted && quality->score < result->quality.score)) {
         result->selected = *candidate;
         result->quality = *quality;
         result->accepted = quality->acceptable;
     }
+    result->tested += (unsigned)CAL_REPEATS;
 }
 
 static int Try(const TNgConfig *candidate, TNgGainCalibration *result, TNgError *error)
 {
-    TNgGainQuality quality;
-    if (result->tested >= CAL_MAX) return NG_OK;
-    if (Measure(candidate, &quality, error) != NG_OK) return NG_ERROR;
+    TNgGainQuality measurements[CAL_REPEATS], quality;
+    unsigned accepted = 0, i;
+    if (Measure(candidate, measurements, error) != NG_OK) return NG_ERROR;
+    for (i = 0; i < (unsigned)CAL_REPEATS; ++i)
+        accepted += (unsigned)(measurements[i].acceptable != 0);
+    quality.rmsFraction = Median3(measurements[0].rmsFraction,
+                                  measurements[1].rmsFraction,
+                                  measurements[2].rmsFraction);
+    quality.clippedFraction = Median3(measurements[0].clippedFraction,
+                                      measurements[1].clippedFraction,
+                                      measurements[2].clippedFraction);
+    quality.gaussianError = Median3(measurements[0].gaussianError,
+                                    measurements[1].gaussianError,
+                                    measurements[2].gaussianError);
+    quality.dcFraction = Median3(measurements[0].dcFraction,
+                                 measurements[1].dcFraction,
+                                 measurements[2].dcFraction);
+    quality.iqImbalance = Median3(measurements[0].iqImbalance,
+                                  measurements[1].iqImbalance,
+                                  measurements[2].iqImbalance);
+    quality.score = Median3(measurements[0].score,
+                            measurements[1].score,
+                            measurements[2].score);
+    quality.acceptable = accepted >= 2u;
     Consider(candidate, &quality, result);
     return NG_OK;
 }
@@ -157,8 +210,6 @@ static int Try(const TNgConfig *candidate, TNgGainCalibration *result, TNgError 
 int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgError *error)
 {
     TNgConfig candidate;
-    unsigned i;
-    static const int percent[] = {0, 25, 50, 75, 100};
     if (!config || !result || config->frontend == NG_FRONTEND_FILE ||
         !NgFrontendAvailable(config->frontend))
         return NgFail(error, "Select an available live SDR for gain calibration");
@@ -166,91 +217,41 @@ int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgErro
     result->selected = *config;
     if (NgFrontendCapabilities(config, &result->capabilities, error) != NG_OK) return NG_ERROR;
     if (config->frontend == NG_FRONTEND_HACKRF) {
-        static const unsigned lna[] = {0,8,8,16,24,16,24,32,24,32,40,40,40};
-        static const unsigned vga[] = {0,8,24,16,8,32,24,16,40,32,24,40,62};
-        unsigned a;
-        /* Prefer the documented balanced 16/16 starting region. Test comparable
-         * total gains with different stage splits; do not assume they are equivalent. */
-        for (a = 0; a < sizeof(lna)/sizeof(lna[0]); ++a) {
-            int amp;
-            for (amp = 0; amp <= 1; ++amp) {
-                candidate = *config;
-                candidate.lnaGainDb = lna[a];
-                candidate.vgaGainDb = vga[a];
-                candidate.rfAmp = amp;
-                if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
-            }
-        }
-        if (result->tested) {
-            int delta;
-            for (delta = -8; delta <= 8; delta += 16) {
-                int nextLna = (int)result->selected.lnaGainDb + delta;
-                int nextVga = (int)result->selected.vgaGainDb + delta;
-                if (nextLna >= 0 && nextLna <= 40) {
-                    candidate = result->selected;
-                    candidate.lnaGainDb = (unsigned)nextLna;
-                    if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
-                }
-                if (nextVga >= 0 && nextVga <= 62) {
-                    candidate = result->selected;
-                    candidate.vgaGainDb = (unsigned)nextVga;
+        unsigned lna, vga;
+        int amp;
+        /* Every supported gain split, with and without the separate RF amp. */
+        for (amp = 0; amp <= 1; ++amp) {
+            for (lna = 0; lna <= 40u; lna += 8u) {
+                for (vga = 0; vga <= 62u; vga += 2u) {
+                    candidate = *config;
+                    candidate.lnaGainDb = lna;
+                    candidate.vgaGainDb = vga;
+                    candidate.rfAmp = amp;
                     if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
                 }
             }
         }
     } else if (config->frontend == NG_FRONTEND_RTLSDR) {
         size_t count = result->capabilities.tunerGainCount;
-        size_t bestManualIndex = 0;
-        double bestManualScore = 0;
-        int haveManual = 0;
-        int bestManualAccepted = 0;
+        size_t i;
         candidate = *config;
         candidate.rtlAutoGain = 1;
         if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
-        for (i = 0; i < 5; ++i) {
-            size_t index;
-            TNgGainQuality quality;
-            if (!count) break;
-            index = (count - 1) * (size_t)percent[i] / 100u;
+        for (i = 0; i < count; ++i) {
             candidate = *config;
             candidate.rtlAutoGain = 0;
-            candidate.rtlGainTenthsDb = result->capabilities.tunerGains[index];
-            /* Track the manual optimum independently; the overall winner may
-             * be automatic, but manual neighbors still deserve comparison. */
-            if (Measure(&candidate, &quality, error) != NG_OK) return NG_ERROR;
-            if (!haveManual || (quality.acceptable && !bestManualAccepted) ||
-                (quality.acceptable == bestManualAccepted && quality.score < bestManualScore)) {
-                bestManualIndex = index;
-                bestManualScore = quality.score;
-                bestManualAccepted = quality.acceptable;
-                haveManual = 1;
-            }
-            Consider(&candidate, &quality, result);
-        }
-        if (haveManual) {
-            size_t k = bestManualIndex;
-            for (i = 1; i <= 2; ++i) {
-                if (k >= i) { candidate = *config; candidate.rtlAutoGain = 0; candidate.rtlGainTenthsDb = result->capabilities.tunerGains[k-i]; if (Try(&candidate,result,error) != NG_OK) return NG_ERROR; }
-                if (k+i < count) { candidate = *config; candidate.rtlAutoGain = 0; candidate.rtlGainTenthsDb = result->capabilities.tunerGains[k+i]; if (Try(&candidate,result,error) != NG_OK) return NG_ERROR; }
-            }
+            candidate.rtlGainTenthsDb = result->capabilities.tunerGains[i];
+            if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
         }
     } else if (config->frontend == NG_FRONTEND_BLADERF) {
         int min = result->capabilities.gainMinDb, max = result->capabilities.gainMaxDb;
         int step = result->capabilities.gainStepDb;
-        int levels;
+        int64_t gain;
         if (step <= 0 || max < min) return NgFail(error, "bladeRF reports invalid gain limits");
-        levels = (max - min) / step + 1;
-        for (i = 0; i < 5; ++i) {
+        for (gain = min; gain <= max; gain += step) {
             candidate = *config;
-            candidate.bladeGainDb = min + ((levels - 1) * percent[i] / 100) * step;
+            candidate.bladeGainDb = (int)gain;
             if (Try(&candidate, result, error) != NG_OK) return NG_ERROR;
-        }
-        if (result->tested) {
-            int k = (result->selected.bladeGainDb - min) / step;
-            for (i = 1; i <= 2; ++i) {
-                if (k >= (int)i) { candidate = *config; candidate.bladeGainDb = min+(k-(int)i)*step; if (Try(&candidate,result,error) != NG_OK) return NG_ERROR; }
-                if (k+(int)i < levels) { candidate = *config; candidate.bladeGainDb = min+(k+(int)i)*step; if (Try(&candidate,result,error) != NG_OK) return NG_ERROR; }
-            }
         }
     }
     if (!result->tested) return NG_ERROR;

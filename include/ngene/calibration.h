@@ -21,8 +21,13 @@ typedef struct {
     int accepted;
 } TNgGainCalibration;
 
-/** Analyze native complex samples; a non-Gaussian, clipped or weak input is rejected. */
+/** Analyze native ADC levels, independent of the receiver's display histogram bins.
+ * Reject non-Gaussian, clipped, DC-biased or weak input distributions.
+ */
 int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *quality, TNgError *error);
-/** Briefly sample the selected SDR while the receiver remains stopped. */
+/** Test every gain setting exposed by the selected live SDR while stopped.
+ * Three independent 32768-pair windows are compared per setting; this may take
+ * several minutes for a frontend with many combinations (HackRF: 384).
+ */
 int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgError *error);
 #endif

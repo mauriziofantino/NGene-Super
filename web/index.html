@@ -58,7 +58,7 @@
 <div class="settings-context"><div><h3 id="settingsTitle">Front end</h3><p id="settingsHint" class="muted">Choose the input source, sample format, RF tuning and gain before starting.</p></div><span id="settingsMode" class="badge">Before start</span></div>
 <div class="settings-content">
 <div class="preset-row" id="sourcePresets"><button id="browseReplay">Browse I/Q files…</button><button id="filePreset">Recorded I/Q</button><button id="hackrfPreset">HackRF L1</button><button id="rtlPreset">RTL-SDR L1</button><button id="bladePreset">bladeRF L1</button><button id="deviceLimits">Query device limits</button><button id="calibrateGains" type="button">Calibrate gains</button></div>
-<p class="muted" id="calibrationStatus" role="status">Calibrate samples the live SDR while the receiver is stopped. Review the suggested gains, then Apply &amp; save the profile.</p>
+<p class="muted" id="calibrationStatus" role="status">Calibrate compares every supported gain setting while the receiver is stopped. It analyses native ADC levels independently of the display histogram bins. Review the suggestion, then Apply &amp; save the profile.</p>
 <div id="gnssSettings" class="hidden"></div>
 <form id="configForm"><div id="fields"></div></form>
 

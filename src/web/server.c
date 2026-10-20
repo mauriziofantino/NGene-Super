@@ -1208,6 +1208,9 @@ static int Handle(struct mg_connection *connection, void *context)
                     return Failure(connection, 400, "Expected GPS PRN 1..32");
                 prn = (unsigned)parsed;
             }
+            /* A visible CAF fetch renews only its own optional producer lease.
+             * Status WebSocket replies may be delayed by a busy SDR receiver. */
+            NgControlDiagnosticInterest(control, 4u);
             return JsonReply(connection, 200, AcquisitionCafJson(control, prn));
         }
         if (strcmp(path, "/api/v1/analysis/config") == 0) {
