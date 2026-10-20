@@ -456,7 +456,7 @@ function positive(value) {
 }
 function frequency(value, suffix, scale = 1e6) {
   const result = positive(value);
-  return result === null ? UNAVAILABLE : `${(result / scale).toFixed(6)} ${suffix}`;
+  return result === null ? UNAVAILABLE : `${(result / scale).toFixed(scale === 1e9 ? 9 : 6)} ${suffix}`;
 }
 
 /**
@@ -811,7 +811,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     }
     const values = {
       sourceName: source, format, formatDetail: format === UNAVAILABLE ? 'No format available' : `${format} · ${started ? 'receiver run' : 'configured input'}`,
-      sampleRate: frequency(rate, 'Msps (nominal)'), signalFrequency: frequency(signal, 'MHz'),
+      sampleRate: frequency(rate, 'Msps (nominal)'), signalFrequency: frequency(signal, 'GHz', 1e9),
       processed: live ? counter(live.processed_samples) : '—', windowsDetail: live ? `${counter(live.windows)} common windows` : 'Waiting for receiver telemetry',
       receiverState: state, connection: connected ? 'Connected' : 'Disconnected', connectionDetail: connected ? 'Connected receiver service' : 'Current receiver state unknown',
       recordingState: record, recordingName: live?.recording_name || 'No recording session', profileState, revision: revision || UNAVAILABLE,

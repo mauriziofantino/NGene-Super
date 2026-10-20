@@ -1165,6 +1165,11 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngModuleParametersJs, ngModuleParametersJsLength);
             return 200;
         }
+        if (strcmp(path, "/frequency-units.js") == 0) {
+            Headers(connection, 200, "text/javascript; charset=utf-8", ngFrequencyUnitsJsLength);
+            mg_write(connection, ngFrequencyUnitsJs, ngFrequencyUnitsJsLength);
+            return 200;
+        }
         if (strcmp(path, "/api/v1/module-schema") == 0)
             return JsonReply(connection, 200, cJSON_Duplicate(server->moduleSchema, 1));
         if (strcmp(path, "/style.css") == 0) {

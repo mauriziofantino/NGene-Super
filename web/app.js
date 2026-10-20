@@ -1,6 +1,7 @@
 import {createReceiverWorkspace} from './workspace.js';
 import {createReceiverConfiguration} from './receiver-config.js';
 import {moduleParameters} from './module-parameters.js';
+import {frequencyUnits, frequencyToHz, frequencyFromHz} from './frequency-units.js';
 
 const selectedSession = 'receiver';
 const sessionPrefix = () => '';
@@ -119,11 +120,14 @@ function profileFieldError(input) {
   if (input.type !== 'number') return moduleForm?.error(input.name, values) || '';
   const title = fields.find(field => field[1] === input.name)?.[2] || input.name;
   const descriptor = moduleForm?.definitions.get(input.name);
-  const integer = descriptor ? (descriptor.integer ? 'decimal' : false) : input.name === 'receiver.run_seconds' ? false : ['rtlsdr.ppm','bladerf.gain_db'].includes(input.name) ? true : 'decimal';
+  const scaledFrequency = frequencyUnits(input.name);
+  const integer = scaledFrequency ? false : descriptor ? (descriptor.integer ? 'decimal' : false) : input.name === 'receiver.run_seconds' ? false : ['rtlsdr.ppm','bladerf.gain_db'].includes(input.name) ? true : 'decimal';
   const message = numericFieldError(input, title, Object.hasOwn(values, input.name), integer);
   if (message) return message;
-  const rate = Number(input.value);
-  if (input.name === 'frontend.sample_rate_hz' && values['frontend.type'] === 'rtlsdr' && rate > 300000 && rate <= 900000) return 'RTL-SDR sample rate must be (225000,300000] or (900000,3200000] pairs/s.';
+  if (scaledFrequency && frequencyToHz(input.name, input.value) === null)
+    return `${title}: use decimal notation with a resolution of 1 Hz (${10 ** -scaledFrequency.decimals} ${scaledFrequency.unit}).`;
+  const rate = Number(values[input.name]);
+  if (input.name === 'frontend.sample_rate_hz' && values['frontend.type'] === 'rtlsdr' && rate > 300000 && rate <= 900000) return 'RTL-SDR sample rate must be (0.225,0.3] or (0.9,3.2] Msps.';
   return moduleForm?.error(input.name, values) || '';
 }
 function refreshProfileErrors(force = false) {
@@ -228,7 +232,8 @@ function buildForm() {
     }
     const wrapper = document.createElement('label'), title = document.createElement('span'), units = document.createElement('span');
     wrapper.className = `field${['frontend.serial', 'frontend.center_frequency_hz', 'recording.prefix', 'recording.directory', 'recording.point', 'recording.enabled', 'buffer.overflow_policy', 'replay.path'].includes(key) ? ' full' : ''}`;
-    title.textContent = label; units.className = 'unit'; units.textContent = unit || ''; title.append(units); wrapper.append(title);
+    const scaledFrequency = frequencyUnits(key);
+    title.textContent = label; units.className = 'unit'; units.textContent = scaledFrequency?.unit || unit || ''; title.append(units); wrapper.append(title);
     const nativeBandwidth = key === 'hackrf.bandwidth_hz' && values['frontend.type'] !== 'hackrf';
     const input = document.createElement(type === 'select' && !nativeBandwidth ? 'select' : 'input'); input.name = key;
     if (type === 'select' && !nativeBandwidth) {
@@ -248,9 +253,14 @@ function buildForm() {
       input.step = descriptor.integer ? '1' : 'any';
       input.min = descriptor.min ?? ''; input.max = descriptor.max ?? '';
     }
+    if (scaledFrequency) {
+      input.step = String(10 ** -scaledFrequency.decimals);
+      if (input.min !== '') input.min = String(Number(input.min) / scaledFrequency.scale);
+      if (input.max !== '') input.max = String(Number(input.max) / scaledFrequency.scale);
+    }
     input.id = `config_${key.replaceAll('.', '_')}`;
-    input.value = values[key] ?? ''; input.addEventListener('input', () => {
-      values[key] = input.value.trim();
+    input.value = frequencyFromHz(key, values[key]); input.addEventListener('input', () => {
+      values[key] = frequencyToHz(key, input.value) ?? input.value.trim();
       if (key === 'rtlsdr.auto_gain' && input.value === 'false' && deviceCaps?.source === 'rtlsdr') {
         const gains = deviceCaps.tuner_gains_tenths_db || [];
         if (gains.length && !gains.some(gain => String(gain) === values['rtlsdr.gain_tenths_db'])) {
@@ -272,7 +282,7 @@ function updateSourceFields() {
   const caps = deviceCaps && deviceCaps.source === source && deviceCaps.serial === (values['frontend.serial'] || '') && deviceCaps.tuning === values['frontend.center_frequency_hz'] && (source !== 'bladerf' || deviceCaps.precision === values['bladerf.format']) ? deviceCaps : null;
   if (!caps) deviceCaps = null;
   const rate=document.querySelector('[name="frontend.sample_rate_hz"]');
-  if(rate) { rate.min=caps?.sample_rate_min_hz || (source==='hackrf'?2000000:source==='rtlsdr'?225001:1); rate.max=caps?.sample_rate_max_hz || (source==='hackrf'?20000000:source==='rtlsdr'?3200000:61440000); }
+  if(rate) { rate.min=(caps?.sample_rate_min_hz || (source==='hackrf'?2000000:source==='rtlsdr'?225001:1))/1e6; rate.max=(caps?.sample_rate_max_hz || (source==='hackrf'?20000000:source==='rtlsdr'?3200000:61440000))/1e6; }
   const gain=document.querySelector('[name="bladerf.gain_db"]');
   if(gain){
     gain.min=source==='bladerf' && caps ? caps.gain_min_db : -100;
@@ -284,7 +294,7 @@ function updateSourceFields() {
   if(rtlGain)rtlGain.disabled=!editable()||source!=='rtlsdr'||values['rtlsdr.auto_gain']!=='false'||!caps;
   const ppm=document.querySelector('[name="rtlsdr.ppm"]');if(ppm){ppm.min=-1000;ppm.max=1000;ppm.step=1;}
   const tuning=document.querySelector('[name="frontend.center_frequency_hz"]');
-  if(tuning){tuning.min=caps?.frequency_min_hz||0;tuning.max=caps?.frequency_max_hz||(source==='rtlsdr'?4294967295:6000000000);}
+  if(tuning){tuning.min=(caps?.frequency_min_hz||0)/1e6;tuning.max=(caps?.frequency_max_hz||(source==='rtlsdr'?4294967295:6000000000))/1e6;}
   for (const group of document.querySelectorAll('[data-group]')) {
     const kind = {'HackRF':'hackrf','RTL-SDR':'rtlsdr','bladeRF':'bladerf','File replay':'file'}[group.dataset.group];
     group.classList.toggle('hidden', Boolean(kind && source !== kind));
@@ -359,7 +369,7 @@ function renderStatus(next) {
   const source = savedValues['frontend.type'] || '—', fs = Number(savedValues['frontend.sample_rate_hz'] || 0), rf = Number(savedValues['frontend.center_frequency_hz'] || 0);
   const hardware=next.hardware_frequency_hz||rf, signal=next.signal_frequency_hz||Number(savedValues['frontend.signal_frequency_hz'])||hardware, actual=next.actual_sample_rate_hz||fs;
   const sourceName={hackrf:'HackRF',rtlsdr:'RTL-SDR',bladerf:'bladeRF',file:'Recorded I/Q'}[source]||source;
-  $('streamDescription').textContent = `${sourceName} · Signal ${(signal/1e6).toFixed(6)} MHz · SDR ${(hardware/1e6).toFixed(6)} MHz · Digital IF ${((signal-hardware)/1e6).toFixed(6)} MHz · Fs ${(actual/1e6).toFixed(6)} Msps (configured nominal) · ${next.sample_format||'Unknown format'}`;
+  $('streamDescription').textContent = `${sourceName} · Signal ${frequencyFromHz('frontend.signal_frequency_hz', signal)} GHz · SDR ${(hardware/1e6).toFixed(6)} MHz · Digital IF ${((signal-hardware)/1e6).toFixed(6)} MHz · Fs ${(actual/1e6).toFixed(6)} Msps (configured nominal) · ${next.sample_format||'Unknown format'}`;
   $('processed').textContent = pairs(next.processed_samples); $('windows').textContent = `${pairs(next.windows)} common windows`;
   let rate = null;
   if (lastSample && next.wall_seconds > lastSample.time) rate = Number(BigInt(next.received_samples) - lastSample.samples) / (next.wall_seconds - lastSample.time);
@@ -1036,9 +1046,9 @@ async function inspectReplaySelection(path) {
   const settings = parseIni(result.ini);
   const lines = [['Samples', pairs(result.samples)], ['Format', 'Signed int8 · I,Q interleaved']];
   if (result.metadata_available) {
-    lines.push(['Metadata', result.metadata_path], ['Sample rate', `${settings['frontend.sample_rate_hz']} complex pairs/s (nominal)`],
-      ['SDR tuning', `${settings['frontend.center_frequency_hz']} Hz`], ['Signal centre', `${settings['frontend.signal_frequency_hz']} Hz`],
-      ['Digital IF', `${Number(settings['frontend.signal_frequency_hz']) - Number(settings['frontend.center_frequency_hz'])} Hz`],
+    lines.push(['Metadata', result.metadata_path], ['Sample rate', `${frequencyFromHz('frontend.sample_rate_hz', settings['frontend.sample_rate_hz'])} Msps (nominal)`],
+      ['SDR tuning', `${frequencyFromHz('frontend.center_frequency_hz', settings['frontend.center_frequency_hz'])} MHz`], ['Signal centre', `${frequencyFromHz('frontend.signal_frequency_hz', settings['frontend.signal_frequency_hz'])} GHz`],
+      ['Digital IF', `${(Number(settings['frontend.signal_frequency_hz']) - Number(settings['frontend.center_frequency_hz'])) / 1e6} MHz`],
       ['Saved samples', result.recording_point], ['Recorded conditioner', result.recorded_conditioning],
       ['Completion', result.complete ? 'Complete' : 'Incomplete / interrupted'], ['Stream gaps', result.has_gaps ? 'Present — see sample index' : 'See session sample index'],
       ['Replay conditioner', 'Bypass — saved sample values are preserved']);

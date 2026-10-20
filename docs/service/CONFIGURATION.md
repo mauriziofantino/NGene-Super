@@ -10,7 +10,10 @@ sixteen-bit components (default), while `bladerf.format=CI8` requests native SC8
 transfer with one byte per I/Q component. See [native formats and ring buffering](NATIVE_IQ_PERFORMANCE.md).
 
 The dependency-free C parser treats keys and section names as case-sensitive. Integers use
-base 10 and frequencies use Hz. Whitespace around `=` and full-line comments beginning
+base 10 and frequencies use Hz. The GUI presents the GNSS signal reference in GHz,
+SDR tuning and bandwidth in MHz, and sample rate in Msps; import/export and saved
+profiles retain Hz with 1 Hz resolution. Doppler parameters remain in Hz.
+Whitespace around `=` and full-line comments beginning
 with `#` or `;` are allowed. Quoting, trailing comments, variable expansion, `~` expansion
 and includes are not supported. Relative paths are resolved against the process working
 directory, rather than the INI file's directory. Unknown/duplicate keys and non-finite

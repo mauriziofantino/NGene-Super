@@ -6,6 +6,12 @@ The English GUI is included in the same project and C executable as the kernel. 
 
 ## Parameters and persistence
 
+Frequency inputs use GHz for the GNSS signal reference (`1.57542` for GPS L1),
+MHz for SDR tuning and analogue bandwidth, and Msps for the complex sample rate.
+Doppler spans and steps remain in Hz. The GUI converts these values to integer Hz
+for INI profiles and API requests, preserving 1 Hz resolution. Signal reference
+`0` follows the hardware tuning; bandwidth `0` retains automatic filter selection.
+
 Frontend, buffer, duration, recording base filename, and recording directory settings can be changed only in the `stopped` or `error` state, using the current revision. INI import/export supports reusable profiles. Validate checks syntax and bounds; Apply & save normalizes the path and writes the profile. Actual capture-file permissions are checked when the recorder opens; Validate does not certify disk space or USB availability.
 
 The Folder on receiver computer field accepts a filesystem path on the NGene process's computer, rather than the browser's filesystem. The final directory is created if its parent exists. A receiver-side folder browser is available for replay selection; the recording destination retains its directory field. Relative paths resolve against the process working directory. Recording session displays the actual absolute path.

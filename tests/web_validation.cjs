@@ -95,24 +95,48 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     await page.locator('#showConfiguration').click();
     await page.locator('#rtlPreset').click();
     const rate = field('frontend.sample_rate_hz');
-    await rate.fill('16000000');
+    assert.equal(await rate.inputValue(), '2.4');
+    const signal = field('frontend.signal_frequency_hz');
+    assert.equal(await signal.inputValue(), '1.57542');
+    await signal.fill('1.5754200001');
+    await signal.blur();
+    await invalidField(signal);
+    const beforeSubHertz = profilePosts;
+    await page.locator('#apply').click();
+    assert.equal(profilePosts, beforeSubHertz, 'Sub-hertz RF input must not reach the integer-Hz backend');
+    await signal.fill('1.575420001');
+    await correctedField(signal);
+    assert.match(await page.locator('#iniEditor').inputValue(), /^signal_frequency_hz=1575420001$/m, 'GHz reference preserves a one-hertz offset exactly');
+    await signal.fill('0');
+    await correctedField(signal);
+    assert.match(await page.locator('#iniEditor').inputValue(), /^signal_frequency_hz=0$/m, 'Zero retains follow-hardware semantics');
+    await signal.fill('1.57542');
+    await correctedField(signal);
+    const tuning = field('frontend.center_frequency_hz');
+    await tuning.fill('1575.420001');
+    await tuning.blur();
+    await correctedField(tuning);
+    assert.match(await page.locator('#iniEditor').inputValue(), /^center_frequency_hz=1575420001$/m, 'MHz tuning preserves a one-hertz offset exactly');
+    await tuning.fill('1575.42');
+    await correctedField(tuning);
+    await rate.fill('16');
     const beforeInvalidRate = profilePosts;
     await page.locator('#apply').click();
     await invalidField(rate);
     await stableError('configMessage', rate);
     assert.equal(profilePosts, beforeInvalidRate, 'An unsupported RTL-SDR sample rate reached the backend');
-    await rate.fill('2400000');
+    await rate.fill('2.4');
     await correctedField(rate);
     assert(!(await page.locator('#configMessage').evaluate(node => node.classList.contains('error'))));
 
     // The RTL2832U clock also excludes a range inside its minimum/maximum limits.
-    for (const value of ['300001', '500000', '900000']) {
+    for (const value of ['0.300001', '0.5', '0.9']) {
       await rate.fill(value);
       await page.locator('#apply').click();
       await invalidField(rate);
       assert.equal(profilePosts, beforeInvalidRate, `Unsupported RTL-SDR rate ${value} reached the backend`);
     }
-    for (const value of ['225001', '300000', '900001', '3200000', '2400000']) {
+    for (const value of ['0.225001', '0.3', '0.900001', '3.2', '2.4']) {
       await rate.fill(value);
       await correctedField(rate);
       assert(await rate.evaluate(input => input.checkValidity()), `Supported RTL-SDR rate ${value} was rejected`);

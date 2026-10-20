@@ -1,45 +1,266 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>NGene Evo GPS acquisition: implementation review</title>
+<html lang="it"><head><meta charset="utf-8">
+<title>NGene Evo — Anatomia algoritmica dell’acquisitore GPS L1 C/A</title>
 <style>
-@page { size: A4; margin: 18mm 17mm; } body { font: 10.5pt/1.42 Arial, sans-serif; color:#18232e; }
-h1 {font-size:22pt; color:#083d50; margin-bottom:4mm} h2 {font-size:14pt; color:#08617a; margin:7mm 0 2mm; break-after:avoid}
-h3 {font-size:11pt; color:#08617a; margin:4mm 0 1mm; break-after:avoid} p {margin:1.5mm 0 2.5mm}
-table {border-collapse:collapse; width:100%; margin:3mm 0; font-size:9pt} th,td {border:1px solid #c1d3dc; padding:2mm; vertical-align:top}
-th {background:#e8f4f7} code,pre {font-family:Consolas,monospace} pre {background:#eef5f7; padding:3mm; white-space:pre-wrap}
-.note {background:#fff3d8; border-left:3px solid #d6981b; padding:3mm; margin:3mm 0}
-.small {font-size:9pt; color:#455d6d} a {color:#08617a} li {margin:1mm 0}
+@page {size:A4; margin:15mm 16mm} * {box-sizing:border-box}
+body {margin:0;color:#172b3b;font:10.2pt/1.43 'Segoe UI',Arial,sans-serif}
+.page {break-after:page} .page:last-child {break-after:auto}
+h1 {font-size:29pt;line-height:1.13;color:#073e55;margin:8mm 0 5mm} h2 {font-size:19pt;line-height:1.18;color:#073e55;margin:0 0 5mm} h3 {font-size:11.8pt;color:#096578;margin:4mm 0 2mm}
+p {margin:2mm 0 3mm} .kicker {color:#08788b;text-transform:uppercase;font-size:9pt;letter-spacing:1.4px;margin-bottom:4mm}
+.eq {font:12pt/1.65 'Cambria Math',Cambria,serif;background:#eef5f8;border-left:3px solid #22849a;padding:2.8mm 4mm;margin:3mm 0;break-inside:avoid}
+.eq.small {font-size:10.7pt} .note {background:#fff3d8;border-left:3px solid #d49a29;padding:3mm 4mm;margin:3mm 0;break-inside:avoid}
+.src {font-size:8.1pt;color:#506575;border-top:1px solid #bdcfd6;margin-top:4mm;padding-top:2mm;overflow-wrap:anywhere}
+code {font:8.5pt Consolas,monospace} pre {font:8.4pt/1.48 Consolas,monospace;background:#eef5f8;padding:3mm;white-space:pre-wrap;break-inside:avoid}
+table {width:100%;border-collapse:collapse;font-size:9pt;margin:3mm 0;break-inside:avoid} th,td {padding:2mm 2.5mm;border:1px solid #bfd0d8;text-align:left;vertical-align:top} th {background:#e5f1f5;color:#073e55}
+ul,ol {padding-left:5.5mm;margin:2mm 0 3mm} li {margin:1.4mm 0} .small {font-size:9pt} .subtitle {font-size:14pt;color:#526977}
+.flow {display:flex;align-items:stretch;gap:2mm;margin:4mm 0;break-inside:avoid}.block {background:#eaf3f6;border:1px solid #74a8b7;border-radius:2mm;padding:3mm;text-align:center;flex:1;font-size:9pt}.arrow {align-self:center;color:#08788b;font-size:17pt}.vertical {display:block}.vertical .block {margin:0 auto;width:86%;padding:2.5mm}.vertical .arrow {text-align:center;line-height:1.1}
+svg {width:100%;height:auto;margin:3mm 0} svg text {font-family:'Segoe UI',Arial,sans-serif;fill:#172b3b} .tag {font-size:8pt;color:#597382}
 </style></head><body>
-<h1>GPS acquisition in NGene Evo</h1>
-<p class="small">Implementation review against the bundled original NGene source · 19 October 2026 · GPS L1 C/A only</p>
-<div class="note"><b>Finding:</b> A complete cross-ambiguity surface is evidence that the search ran, not that a satellite was detected. The current implementation acquires a deterministic complex-I/Q signal at approximately 40 dB-Hz with eight noncoherent sums in an automated test. It has not been validated against the user's live RF capture. No unique cause of the reported failed live acquisition can be established from the screenshot alone.</div>
-<h2>1. Signal path and I/Q convention</h2>
-<pre>SDR or I/Q file → native complex pairs → optional conditioner → kernel windows
-             → acquisition channel (one PRN) → 1 ms private frame
-             → remove frame I/Q means → wipe off residual carrier
-             → compress complex samples → FFT correlation → detection/refinement</pre>
-<p>The original NGene frontend delivered real intermediate-frequency samples. Its coarse acquisition called <code>GenerateCarrier</code> and <code>CarrierComplexWipeOff</code> to create in-phase and quadrature streams before <code>SampleCompression</code>. NGene Evo's frontend already delivers simultaneous I and Q values. The acquisition module does not split a real stream or repeat the analog quadrature demodulation. It reads each native pair using <code>NgIqComponent</code>: signed CI8 directly, unsigned CU8 recentered by subtracting 128, or signed SC16/Q11 without truncating to 8 bits.</p>
-<p>Acquisition receives the <em>post-conditioner</em> kernel stream. With <code>bypass</code>, those are the frontend's original samples. With <code>dc_iir</code>, the continuous DC estimate has already been subtracted. In either case, the acquisition correlator also subtracts the mean I and Q of its own 1 ms frame before carrier mixing. This local centering does not alter the shared receiver stream.</p>
-<p>The frontend's configured signal centre minus its hardware tuning frequency is <code>digitalIfHz</code>. A Doppler hypothesis <code>fD</code> produces an NCO at <code>digitalIfHz + fD</code>. For input <code>x[n] = I[n] + jQ[n]</code>, the NCO computes <code>y[n] = (x[n] − mean) exp(−j2π(digitalIfHz + fD)n/Fs)</code>. If the hardware is tuned to nominal GPS L1, digital IF is zero: the NCO still removes the hypothesized residual Doppler. The code NCO is independent of the carrier NCO.</p>
-<h2>2. Coarse acquisition: what was preserved and changed</h2>
-<table><tr><th>Operation</th><th>Original NGene</th><th>NGene Evo</th></tr>
-<tr><td>Input and carrier</td><td>Real IF; generate cosine/sine, then form I/Q.</td><td>Native complex pairs; multiply by conjugate residual carrier NCO.</td></tr>
-<tr><td>Coherent period</td><td>GPS C/A code period, normally 1 ms.</td><td>One private 1 ms frame, assembled across arbitrary kernel windows.</td></tr>
-<tr><td>Compression</td><td>Short/long sample accumulation into a power-of-two FFT length.</td><td>Precomputed integer boundaries; accumulate both native I and Q after carrier wipe-off. No intermediate 8-bit narrowing.</td></tr>
-<tr><td>Code replica</td><td>Generate sampled C/A code; compress; cache its FFT per PRN.</td><td>Generate the same 1023-chip polarity; compress once for floor/ceil frame lengths; cache FFT per PRN.</td></tr>
-<tr><td>Correlation</td><td>FFT(signal) × conjugate FFT(code), inverse via another forward FFT and reversed indices.</td><td>Same algebra; Q14 FFT inputs are dynamically scaled and the scale is undone in reported power.</td></tr>
-<tr><td>Threshold</td><td>Variance estimated at a fake +30 kHz Doppler; false-alarm threshold from a noise model.</td><td>Per-Doppler off-peak delay background and finite-reference false-alarm factor. A +30 kHz warm-up still runs but is not the final local threshold.</td></tr>
-<tr><td>Search</td><td>Doppler bins and supplementary shifted compression origins; noncoherent sums increase over PRN cycles.</td><td>Same broad policy; each Doppler/shift/noncoherent dwell consumes successive live milliseconds.</td></tr></table>
-<p>For sample rate <code>Fs</code>, a code period contains approximately <code>Fs/1000</code> complex pairs. The configured FFT size is reduced to the largest allowed power of two at or below that count. At 2.4 Msps, a requested 4096-point FFT therefore becomes 2048 points. The compression partitions the 1 ms input into contiguous groups; each FFT input is the complex sum of its group's carrier-wiped samples. Supplementary shifted origins cover fractional code offsets that a single compression grid misses. The generated local code is summed over the same group boundaries.</p>
-<p>For each Doppler and shift, the correlator produces one power for every compressed code lag. Powers from <code>M</code> separate 1 ms frames are summed <em>noncoherently</em>; complex amplitudes are not added across those frames. The current detector compares the peak against a local off-peak mean multiplied by a factor calculated from the configured per-cell false-alarm probability. This factor assumes approximately independent white-noise cells; real interference, filtering and repeated searches can violate that assumption.</p>
-<h2>3. Refinement and confirmation</h2>
-<p>When the coarse peak exceeds its threshold, the module refines Doppler around that candidate using full-rate, 1 ms prompt correlations. It then refines code delay in native sample steps. For a prompt at code phase <code>τ</code>, it multiplies the carrier-wiped I/Q pair by the local ±1 C/A chip and sums I and Q across the frame. The prompt power is <code>(ΣI/N)² + (ΣQ/N)²</code>. The code rate is corrected by <code>1 + fD/1575.42 MHz</code>. The carrier phase is deliberately left invalid because GPS navigation-bit polarity gives a π ambiguity.</p>
-<p>Optional M-of-N confirmation uses later, separate frames, with 32 off-peak code shifts as its noise references. The default is 3 hits in 4 attempts. With confirmation disabled, a refined coarse detection is reported immediately; that is a weaker claim than a confirmed detection. Neither result implies tracking lock, navigation decoding or a position fix.</p>
-<h2>4. Kernel API, timing and the GUI surface</h2>
-<p>The kernel passes borrowed, immutable windows of complex pairs to acquisition channels. <code>NgAcquisitionProcess</code> copies only enough samples to form its next 1 ms private frame. A 5 ms window is therefore handled as five consecutive code periods; a shorter window may be joined with the next. Epoch changes or sample gaps reset partial coherent history and candidate state. Channel scheduling can process separate PRNs concurrently. The receiver starts with one noncoherent sum and raises it toward the configured maximum after PRN-list cycles; this follows the old NGene policy but can delay weak-signal detection.</p>
-<p>The 2D/3D cross-ambiguity plot is a bounded display cache, not the full detector. It max-pools measured coarse powers into at most 64 Doppler × 64 code-delay cells. Different Doppler rows come from different milliseconds. The colors and height are normalized to the strongest <em>displayed</em> cell; a yellow peak is not an acquisition decision. Hiding the plot skips this pooling but does not stop the correlation required for detection. In the supplied screenshot the plot says “Complete sweep”, “2 noncoherent 1 ms periods”, and “FFT 1024 points”; it shows a nearly flat surface and a relative peak, not a threshold crossing or confirmation.</p>
-<h2>5. What the present evidence does and does not prove</h2>
-<p>The existing synthetic tests check original C/A code hashes, FFT correlation against independent calculations, code and Doppler estimates, CI8/CU8/SC16 input, DC bias, no-antenna noise, sample-chunk invariance, and optional confirmation. A new test feeds approximately 40 dB-Hz complex CU8 GPS-like signal at 3.2 Msps, with an effective 2048-point FFT, quarter-chip supplementary step, eight noncoherent sums, <code>Pfa=10⁻⁹</code> and 3-of-4 confirmation; it passes. The synthetic model is idealized and does not reproduce analog filters, oscillator drift, multipath, interference or dropped USB samples.</p>
-<p>For live reception, the first items to check are: (1) <code>metric / threshold</code> for the selected PRN after a <em>completed</em> sweep, and the current noncoherent-sum count; (2) sample-gap/reset counters; (3) the actual RF centre error. A ±5 kHz Doppler window covers only about ±3.17 ppm of L1 centre-frequency error even before satellite Doppler is allowed for. A tuner offset of several ppm can put every satellite outside the configured search. Gain calibration checks ADC distribution; it does not calibrate L1 frequency or prove antenna reception. The screenshot alone provides none of these measurements, so attributing the failure to one cause would be speculation.</p>
-<h2>6. Source map</h2>
-<p class="small">Original: <code>Old NGene Code/acquisition/{coarseAcquisition,acquisition,refinement,confirmation,nonCoherentSumsManager}.c</code> and <code>Old NGene Code/utility/sampleCompression.c</code>. Current: <code>src/core/{receiver,acquisition_receiver,stream_info}.c</code>, <code>src/acquisition/acquisition.c</code>, <code>src/dsp/{acquisition_math,gps_ca,nco}.c</code>, <code>tests/test_acquisition.c</code>. All comparisons in this document refer to the bundled source, not to an external reconstruction.</p>
+
+<section class="page">
+<div class="kicker">NGene Evo / revisione tecnica / 20 ottobre 2026 / 01</div>
+<h1>Anatomia algoritmica<br>dell’acquisitore<br>GPS L1 C/A</h1>
+<p class="subtitle">Dall’antenna alla decisione di acquisizione.<br>Equazioni, flusso dei campioni e corrispondenza con il codice.</p>
+<p><b>Destinatario:</b> Maurizio Fantino, autore di <i>Study of Architectures and Algorithms for Software Galileo Receivers</i> e implementatore dell’acquisitore NGene.</p>
+<div class="note"><b>Stato di riferimento.</b> Implementazione locale sul branch <code>dev</code>, commit <code>d132585</code>. Il mancato funzionamento sull’ingresso reale è il problema da investigare. Questo documento esplicita le operazioni presenti nel codice; non certifica la correttezza dell’acquisizione live e non introduce modifiche al DSP.</div>
+<h3>Come leggere le formule</h3>
+<p>Le espressioni del modello RF sono un modello equivalente della catena fisica. Le formule numerate successive descrivono le operazioni del software; dove la virgola fissa, gli arrotondamenti o il campionamento cambiano l’operatore ideale, il dettaglio è riportato esplicitamente.</p>
+<div class="flow"><div class="block">RF e frontend<br>§2–3</div><div class="arrow">→</div><div class="block">Campioni e repliche<br>§4–7</div><div class="arrow">→</div><div class="block">Ricerca e soglia<br>§8–10</div><div class="arrow">→</div><div class="block">Raffinamento<br>§11–14</div></div>
+<p>Ambito effettivo: PRN GPS 1–32, codice C/A da 1023 chip, correlazioni coerenti di circa 1 ms e somme non coerenti. La tesi è usata per il confronto architetturale e statistico: il codice esaminato non implementa qui l’acquisizione Galileo BOC(1,1).</p>
+<p class="src">Fonti primarie locali: <code>src/acquisition/acquisition.c</code>, <code>src/dsp/acquisition_math.c</code>, frontend e scheduler; tesi <code>docs/references/PhD_Fantino070206.pdf</code>; sorgenti originali in <code>Old NGene Code/</code>. Riferimenti specifici in ogni pagina e confronto finale a p. 18.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Mappa di lettura / 02</div><h2>1. Convenzioni e percorso completo</h2>
+<table><tr><th>Simbolo</th><th>Significato e unità</th></tr>
+<tr><td>F<sub>s</sub>, L<sub>m</sub>, N</td><td>Rate applicato [coppie I/Q/s], campioni del frame m, dimensione FFT.</td></tr>
+<tr><td>f<sub>L1</sub>, R<sub>c</sub></td><td>1 575 420 000 Hz; 1 023 000 chip/s. Periodo nominale T<sub>c</sub> = 1 ms.</td></tr>
+<tr><td>p, c<sub>p</sub>[k]</td><td>PRN; sequenza periodica di 1023 valori ±1.</td></tr>
+<tr><td>f<sub>IF</sub>, f<sub>d</sub></td><td>IF digitale da metadati; ipotesi di residuo di portante chiamata Doppler dal codice [Hz].</td></tr>
+<tr><td>M, M<sub>max</sub></td><td>Somme non coerenti del tentativo coarse; massimo configurato, usato nei raffinamenti.</td></tr>
+<tr><td>b, s, ℓ</td><td>Indice Doppler, indice della griglia supplementare, lag della FFT.</td></tr>
+<tr><td>K, α<sub>M,K</sub></td><td>Numero di celle di riferimento e fattore della soglia a riferimenti finiti.</td></tr></table>
+<div class="flow vertical"><div class="block">Antenna → LNA / selezione RF → conversione analogica → ADC / DDC del dispositivo</div><div class="arrow">↓</div><div class="block">Driver SDR → ingresso con metadati → conditioner → finestre comuni nel ring</div><div class="arrow">↓</div><div class="block">Slot PRN → frame privato di 1 ms → sottrazione media → wipe-off complesso</div><div class="arrow">↓</div><div class="block">Compressione → FFT × replica coniugata → FFT e lag invertiti → potenza</div><div class="arrow">↓</div><div class="block">Somma di M potenze → picco / fondo locale → selezione candidato</div><div class="arrow">↓</div><div class="block">Raffinamento Doppler → raffinamento codice → conferma m-su-n → risultato</div></div>
+<p><b>Distinzione temporale:</b> tutti gli N lag di un singolo frame sono calcolati in parallelo. Doppler, griglie supplementari, punti dei raffinamenti e prove di conferma sono invece valutati su frame successivi. Non si congela un unico blocco per costruire l’intera matrice.</p>
+<p class="src">Funzioni guida: <code>NgReceiverRunScheduled</code>, <code>NgAcquisitionProcess</code>, <code>CoarseFrame</code>, <code>RefineFrame</code>, <code>ConfirmationFrame</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">RF → baseband / 03</div><h2>2. Antenna, conversione e IF digitale</h2>
+<p>Per un satellite, un modello equivalente del contributo GPS all’antenna è:</p>
+<div class="eq">r<sub>RF</sub>(t) = A d(t−τ) c<sub>p</sub>(t−τ) cos[2π(f<sub>L1</sub>+f<sub>D</sub>)t+φ] + η(t). <span class="tag">(1)</span></div>
+<p>Il segnale totale somma i satelliti, rumore, interferenti e multipath. L’antenna e l’eventuale LNA precedono il filtraggio e la conversione. Il software non osserva questi nodi analogici.</p>
+<div class="flow"><div class="block">Antenna<br>L1</div><div class="arrow">→</div><div class="block">LNA / filtro<br>RF</div><div class="arrow">→</div><div class="block">Mixer / LO<br>IF o baseband</div><div class="arrow">→</div><div class="block">ADC / DDC<br>filtri</div><div class="arrow">→</div><div class="block">I+jQ<br>driver</div></div>
+<p>Questo è uno schema funzionale equivalente: conversioni, IF interne, filtri e generazione I/Q dipendono dall’hardware. Per una conversione complessa ideale con LO f<sub>LO</sub>:</p>
+<div class="eq small">I(t) = LPF{2r<sub>RF</sub>(t) cos(2πf<sub>LO</sub>t)}<br>Q(t) = LPF{−2r<sub>RF</sub>(t) sin(2πf<sub>LO</sub>t)}<br>I(t)+jQ(t) = LPF{2r<sub>RF</sub>(t)e<sup>−j2πfLO t</sup>}. <span class="tag">(2a)</span></div>
+<p>Il filtraggio elimina l’immagine ad alta frequenza; ADC, DDC ed eventuale decimazione producono il rate finale. L’adapter C configura il dispositivo, senza implementare questi nodi analogici. RTL-SDR consegna già CU8 complesso, anche con IF reali interne.</p>
+<div class="eq small">x[n] ≈ A′ d[n] c<sub>p</sub>[n;τ] e<sup>j(2π(fIF+fD+εLO)n/Fs+φ′)</sup> + w[n] + o<sub>DC</sub>. <span class="tag">(2)</span></div>
+<p>ε<sub>LO</sub> raccoglie l’errore residuo di frequenza nella convenzione di segno dell’ingresso complesso. Il Doppler stimato dal software può includerlo; non è necessariamente il solo Doppler geometrico.</p>
+<div class="eq">f<sub>IF</sub> = signalFrequencyHz − centerFrequencyHz<br>f<sub>NCO</sub>(b) = f<sub>IF</sub> + f<sub>d,b</sub>. <span class="tag">(3)</span></div>
+<p>RTL-SDR imposta rate, tuning, guadagno, eventuali PPM, bandwidth e bias tee; poi rilegge rate e centro applicati. Se entrambi i centri sono L1, <code>digitalIfHz=0</code>. Il wipe-off software resta necessario per cercare il residuo Doppler.</p>
+<div class="note">Con 1 ppm di errore su L1 il residuo vale circa 1575,42 Hz. La ricerca deve contenere la somma algebrica degli errori e del Doppler del satellite. La calibrazione di ampiezza del frontend non misura questo errore di frequenza.</div>
+<p class="src"><code>src/frontend/rtlsdr.c</code>: chiamate <code>rtlsdr_set_*</code>; <code>src/core/stream_info.c: NgCarrierFromDoppler</code>. Tesi: cap. 6, p. 49 ss. (PDF p. 77 ss.).</p>
+</section>
+
+<section class="page">
+<div class="kicker">Contratto dei campioni / 04</div><h2>3. Lettura nativa e conditioning</h2>
+<ol><li>Il driver riempie i blocchi di ingresso. L’infrastruttura conserva indice iniziale, numero di coppie, epoch e informazioni su gap.</li><li><code>NgIqComponent(view,n,q)</code> interpreta il componente nel formato nativo, senza ridurlo preventivamente a 8 bit.</li><li>Il conditioner produce lo stream di acquisizione. Ring e dispatcher distribuiscono la stessa finestra immutabile ai canali.</li></ol>
+<table><tr><th>Ingresso</th><th>Conversione del componente per il DSP</th></tr><tr><td>RTL-SDR / CU8</td><td>byte unsigned − 128; intervallo −128…127.</td></tr><tr><td>HackRF / CI8</td><td>byte con segno; intervallo −128…127.</td></tr><tr><td>bladeRF / SC16 Q11</td><td>signed little-endian a 16 bit; livelli ADC nativi, senza divisione per 2048 in questa funzione.</td></tr></table>
+<h3>Conditioner opzionale <code>dc_iir</code></h3>
+<p>Per ciascun componente, la forma equivalente prima degli arrotondamenti è:</p>
+<div class="eq">y[n] = sat<sub>ADC</sub>(x[n] − round(μ[n]))<br>μ[n+1] = μ[n] + 2<sup>−q</sup>(x[n]−μ[n]), &nbsp; q ∈ [4,24]. <span class="tag">(4)</span></div>
+<p>Lo stato è Q32, continuo tra blocchi; l’uscita usa la media precedente all’aggiornamento. Gap, cambio epoch o discontinuità dell’indice azzerano lo stimatore. La saturazione segue i rail del formato. Con <code>bypass</code> i campioni passano invariati.</p>
+<h3>Centratura aggiuntiva interna al correlatore</h3>
+<div class="eq">μ<sub>I,m</sub> = (1/L<sub>m</sub>) Σ<sub>n=0…Lₘ−1</sub> I<sub>m</sub>[n], &nbsp; μ<sub>Q,m</sub> analoga<br>x̃<sub>m</sub>[n] = (I<sub>m</sub>[n]−μ<sub>I,m</sub>) + j(Q<sub>m</sub>[n]−μ<sub>Q,m</sub>). <span class="tag">(5)</span></div>
+<p>Coarse, raffinamento e conferma chiamano le varianti <i>centered</i>. La sottrazione avviene sul frame privato anche con conditioner bypass. Non modifica i campioni condivisi. È una proiezione che elimina la componente costante sul frame; entra quindi anche nel modello del rumore correlato.</p>
+<p class="src"><code>src/stream/format.c: NgIqComponent</code>; <code>src/conditioning/dc.c: Process, RemoveDc</code>; <code>src/dsp/acquisition_math.c: ComponentMeans</code>; <code>src/core/receiver.c: NgReceiverRunScheduled, Dispatch</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Segmentazione temporale / 05</div><h2>4. Costruzione del millisecondo privato</h2>
+<p>Una finestra del kernel non coincide necessariamente con una integrazione. <code>NgAcquisitionProcess</code> copia solo i campioni necessari a completare il frame corrente; una finestra lunga può completare più frame e una corta può lasciarne uno parziale.</p>
+<div class="eq">L<sub>0</sub> = ⌊F<sub>s</sub>/1000⌋, &nbsp; r = F<sub>s</sub> mod 1000<br>a ← a+r; &nbsp; L<sub>m</sub> ← L<sub>0</sub><br>se a ≥ 1000: &nbsp; L<sub>m</sub> ← L<sub>0</sub>+1; &nbsp; a ← a−1000. <span class="tag">(6)</span></div>
+<p><code>frameRemainder</code> parte da zero dopo un reset. Per F<sub>s</sub> non multiplo di 1000, si alternano floor e ceil: durata di 1 ms in media, con errore di bordo inferiore a un campione rispetto al reticolo ideale durante una sequenza senza skip.</p>
+<svg viewBox="0 0 680 155" role="img" aria-label="Finestre kernel e frame privati"><text x="4" y="20" font-size="13">Finestre kernel (esempio: 1,5 ms per finestra)</text><rect x="10" y="35" width="315" height="30" fill="#dcecf2" stroke="#36849a"/><rect x="325" y="35" width="315" height="30" fill="#eaf3f6" stroke="#36849a"/><text x="150" y="55" font-size="12">W₀</text><text x="475" y="55" font-size="12">W₁</text><path d="M220 70 V95 M430 70 V95" stroke="#36849a" stroke-dasharray="4"/><g fill="#d6eee8" stroke="#328975"><rect x="10" y="97" width="210" height="30"/><rect x="220" y="97" width="210" height="30"/><rect x="430" y="97" width="210" height="30"/></g><g font-size="12"><text x="72" y="117">frame m</text><text x="272" y="117">frame m+1</text><text x="482" y="117">frame m+2</text></g><text x="10" y="149" font-size="11">Il frame m+1 unisce la coda di W₀ e l’inizio di W₁.</text></svg>
+<h3>Controllo della continuità</h3>
+<p>Il contesto verifica <code>epoch</code>, <code>firstSample==expectedSample</code>, flag <code>NG_BLOCK_GAP</code> e <code>missingBefore</code>. Una discontinuità chiama <code>ClearSearch</code>: frame parziale, potenze, candidato e progressione vengono invalidati. Il receiver adapter può inoltre azzerare la banca dei risultati e riportare M a 1.</p>
+<h3>Skip di allineamento</h3>
+<p>Dopo coarse→raffinamento Doppler e dopo raffinamento codice→conferma, il canale salta privatamente <code>round(codeDelaySamples)</code> campioni. L’intento è iniziare vicino all’origine del codice e limitare i frame che attraversano transizioni dei bit dati; non è una sincronizzazione esplicita del bit da 20 ms. Il ring comune prosegue senza spostamenti.</p>
+<p class="src"><code>src/acquisition/acquisition.c: NgAcquisitionProcess, ProcessFrame, ClearSearch</code>; <code>src/core/acquisition_receiver.c: Process</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Piano immutabile / 06</div><h2>5. Replica C/A e griglia di compressione</h2>
+<p><code>NgAcquisitionPlanCreate</code> sceglie N riducendo per fattori due la FFT richiesta finché N ≤ ⌊F<sub>s</sub>/1000⌋. Si preparano una o due varianti della replica per i possibili L del frame.</p>
+<h3>Generazione del codice</h3>
+<p><code>NgGpsCaGenerate</code> usa G1 e G2 a 10 stadi, inizializzati a tutti 1. I feedback, con numerazione dei bit C da zero, sono G1[2] XOR G1[9] e G2[1] XOR G2[2] XOR G2[5] XOR G2[7] XOR G2[8] XOR G2[9]. L’uscita combina G1[9] e i due tap G2 del PRN.</p>
+<div class="eq">c<sub>p</sub>[k] = 2 bit<sub>p</sub>[k] − 1<br>ĉ<sub>p</sub>[n] = c<sub>p</sub>[⌊n R<sub>c</sub>/F<sub>s</sub>⌋ mod 1023]. <span class="tag">(7)</span></div>
+<p>La polarità XOR 1→+1 mantiene quella del sorgente NGene incluso. La replica coarse è campionata a rate nominale R<sub>c</sub>; il Doppler di codice non è applicato alla replica FFT.</p>
+<h3>Compressione per somme short/long</h3>
+<div class="eq">B<sub>j</sub> = ⌈j L/N⌉, &nbsp; j=0,…,N<br>v<sub>p</sub>[j] = Σ<sub>n=Bⱼ…Bⱼ₊₁−1</sub> ĉ<sub>p</sub>[n]<br>E<sub>v</sub> = Σ<sub>j=0…N−1</sub> v<sub>p</sub>[j]². <span class="tag">(8)</span></div>
+<p>Non si divide per la lunghezza del gruppo: sono somme, non medie. Ogni gruppo contiene ⌊L/N⌋ oppure ⌈L/N⌉ campioni. Gli stessi confini sono usati per il segnale dopo il wipe-off.</p>
+<table><tr><th>Esempio F<sub>s</sub>=2,4 Msps</th><th>Valore effettivo</th></tr><tr><td>FFT richiesta / scelta</td><td>4096 / 2048</td></tr><tr><td>L / primi confini B<sub>j</sub></td><td>2400 / 0, 2, 3, 4, 5, 6, 8, …</td></tr><tr><td>Passo medio del lag FFT</td><td>1,171875 campioni = 0,4995117 chip</td></tr></table>
+<p class="src"><code>src/dsp/gps_ca.c: NgGpsCaGenerate</code>; <code>src/dsp/acquisition_math.c: NgAcqMathCreate</code>; <code>src/acquisition/acquisition.c: NgAcquisitionPlanCreate</code>. Legacy: <code>utility/sampleCompression.c</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Operatore su un frame / 07</div><h2>6. Wipe-off e origine supplementare</h2>
+<p>Per un’ipotesi Doppler b e una griglia supplementare s, l’offset intero è o<sub>s</sub> = sΔn. Si centra prima il frame intero, poi lo si legge in ordine circolare da o<sub>s</sub>.</p>
+<div class="eq small">q(n) = (o<sub>s</sub>+n) mod L<br>u<sub>b,s</sub>[j] = Σ<sub>n=Bⱼ…Bⱼ₊₁−1</sub> x̃[q(n)] e<sup>−j2π(fIF+fd,b)q(n)/Fs</sup>. <span class="tag">(9)</span></div>
+<p>La formula rappresenta anche il wrap: il codice ripristina la fase NCO iniziale quando l’indice del campione torna a zero. Non continua la fase come se il frame fosse un tratto futuro della registrazione.</p>
+<div class="eq">I′ = (I−μ<sub>I</sub>) cos θ + (Q−μ<sub>Q</sub>) sin θ<br>Q′ = (Q−μ<sub>Q</sub>) cos θ − (I−μ<sub>I</sub>) sin θ. <span class="tag">(10)</span></div>
+<p>Il segno corrisponde a (I+jQ)e<sup>−jθ</sup>. Il controllore passa fase iniziale zero per ogni frame: conserva |R|², senza accumulare coerentemente fasi di millisecondi diversi.</p>
+<h3>NCO numerico</h3>
+<p>La fase è modulo 2<sup>64</sup>; lo step rappresenta f<sub>NCO</sub>/F<sub>s</sub> cicli/campione. Una LUT di 4096 punti, ampiezza Q30, interpola linearmente con 20 bit di frazione. L’esponenziale ideale è approssimato da LUT e quantizzazione della fase.</p>
+<h3>Numero di griglie supplementari</h3>
+<div class="eq small">ρ = 1023/N, &nbsp; δ = codeStepChips<br>S = 1 se δ&gt;ρ, altrimenti max(1,⌈ρ/δ⌉)<br>Δn = ⌊F<sub>s</sub>δ/R<sub>c</sub>+0,5⌋; &nbsp; se Δn=0 si forza S=1. <span class="tag">(11)</span></div>
+<div class="note">“0,25 chip” non garantisce un reticolo uniforme con quel passo: Δn è intero. A 2,4 Msps Δn=1 campione, ossia 0,42625 chip. Le griglie spostano l’origine di compressione, senza interpolazione dei campioni.</div>
+<p class="src"><code>src/dsp/acquisition_math.c: Correlate</code>; <code>src/dsp/nco.c: NgNcoInit, Components, NgNcoRotateF64</code>; <code>src/acquisition/acquisition.c: NgAcquisitionPlanCreate</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Correlatore FFT / 08</div><h2>7. FFT, prodotti e normalizzazione</h2>
+<p>Sia D(z)[k] = Σ<sub>j</sub>z[j]e<sup>−j2πkj/N</sup>. <code>NgFftExecute</code> realizza circa D/N: ogni stadio divide per due, con coefficienti Q14, floor e saturazioni int16.</p>
+<div class="flow"><div class="block">u[j]<br>Q(a<sub>x</sub>) → FFT/N</div><div class="arrow">→</div><div class="block">X[k] C*[k]<br>Q(a<sub>z</sub>)</div><div class="arrow">→</div><div class="block">FFT/N<br>indice −ℓ mod N</div><div class="arrow">→</div><div class="block">guadagno g<br>I²+Q²</div></div>
+<div class="eq small">Q<sub>a</sub>(z) = round(a z), &nbsp; a = 16000 / max(|Re z|, |Im z|)<br>X = FFT<sub>Q14</sub>(Q<sub>aₓ</sub>(u)), &nbsp; C = FFT<sub>Q14</sub>(Q<sub>aᵥ</sub>(v))<br>Z<sub>R</sub> = X<sub>R</sub>C<sub>R</sub>+X<sub>I</sub>C<sub>I</sub>, &nbsp; Z<sub>I</sub> = X<sub>I</sub>C<sub>R</sub>−X<sub>R</sub>C<sub>I</sub><br>W = FFT<sub>Q14</sub>(Q<sub>a𝓏</sub>(Z)), &nbsp; g = N²/(a<sub>x</sub>a<sub>v</sub>a<sub>z</sub>E<sub>v</sub>)<br>P[ℓ] = g² { W<sub>R</sub>[(−ℓ) mod N]² + W<sub>I</sub>[(−ℓ) mod N]² }. <span class="tag">(12)</span></div>
+<p>Scala e spettro della replica sono in cache. Le scale del segnale e del prodotto sono ricalcolate a ogni correlazione. Un vettore tutto zero produce potenza nulla. Il massimo per la quantizzazione considera separatamente tutte le componenti reali e immaginarie.</p>
+<h3>Operatore equivalente senza errori numerici</h3>
+<div class="eq">R[ℓ] = Σ<sub>j=0…N−1</sub> u[j] v*[(j−ℓ) mod N]<br>P[ℓ] ≈ |R[ℓ]/E<sub>v</sub>|². <span class="tag">(13)</span></div>
+<p>La seconda FFT forward restituisce la correlazione con lag invertiti. Il riordino −ℓ mod N recupera il ritardo positivo, senza una IFFT separata. Una coniugazione globale non cambia la potenza. N² compensa le FFT scalate e il prodotto; E<sub>v</sub> normalizza l’ampiezza rispetto alla replica compressa.</p>
+<div class="note">La (13) opera sul segnale <b>compresso</b>. Con gruppi short/long e shift frazionari non è identica alla correlazione full-rate del prompt. Potenze coarse e prompt richiedono ciascuna il proprio fondo.</div>
+<p class="src"><code>src/dsp/acquisition_math.c: Quantize, Correlate</code>; <code>src/dsp/fft/fft.c: ReferenceButterflies, NgFftExecute</code>. Tesi §9.2, fig. 9.2, p. 89 (PDF p. 117).</p>
+</section>
+
+<section class="page">
+<div class="kicker">Ricerca grossolana / 09</div><h2>8. Ordine dei cicli e integrazione</h2>
+<div class="eq">D = ⌊2 f<sub>max</sub>/Δf + 0,5⌋+1<br>f<sub>d,b</sub> = −f<sub>max</sub>+bΔf, &nbsp; b=0,…,D−1<br>A<sub>b,s</sub>[ℓ] = Σ<sub>m=0…M−1</sub> P<sub>b,s,m</sub>[ℓ]. <span class="tag">(14)</span></div>
+<p>Si sommano potenze di M frame, non ampiezze complesse. Per ogni (b,s), <code>coarseStartSample</code> registra il primo frame del dwell; <code>accumulatedPower</code> viene azzerato a fine dwell.</p>
+<pre>assegna PRN e M del tentativo
+1 frame: correlazione di warm-up a fIF + 30 kHz
+per b = 0 ... D-1:
+    per s = 0 ... S-1:
+        A[0:N] = 0
+        per m = 0 ... M-1:
+            acquisisci il NUOVO frame di circa 1 ms
+            A += potenza_FFT(frame, PRN, b, s)
+        calcola picco, fondo, soglia e score
+        conserva il candidato se score maggiore
+finita la griglia: candidato positivo o NOT_FOUND</pre>
+<svg viewBox="0 0 680 115" role="img" aria-label="Dwell successivi nel tempo"><text x="5" y="18" font-size="12">M=2, S=2: ogni rettangolo consuma due millisecondi nuovi</text><g fill="#e1eff4" stroke="#438b9f"><rect x="10" y="35" width="155" height="40"/><rect x="175" y="35" width="155" height="40"/><rect x="340" y="35" width="155" height="40"/><rect x="505" y="35" width="155" height="40"/></g><g font-size="12"><text x="35" y="60">b=0, s=0</text><text x="200" y="60">b=0, s=1</text><text x="365" y="60">b=1, s=0</text><text x="530" y="60">b=1, s=1</text><text x="10" y="101">t →</text></g></svg>
+<p>La durata coarse è circa (1+D S M) ms. La matrice cresce nel tempo: rumore, bit dati, fase di codice e portante possono cambiare fra righe. Non c’è riallineamento esplicito del code Doppler tra gli M vettori coarse prima della somma.</p>
+<p>D arrotonda il numero di passi; l’estremo positivo non è necessariamente +f<sub>max</sub>. Con ±5000 Hz e 667 Hz si hanno 16 bin da −5000 a +5005 Hz.</p>
+<p class="src"><code>src/acquisition/acquisition.c: GridCount, CoarseFrame</code>. Il warm-up imposta una soglia provvisoria: la decisione usa il fondo locale della pagina seguente.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Decisione coarse / 10</div><h2>9. Fondo locale e falso allarme</h2>
+<p>Terminato il dwell (b,s), si trova il massimo ℓ*. Si escludono attorno ad esso i lag entro G bin, con distanza circolare.</p>
+<div class="eq small">ℓ* = arg max<sub>ℓ</sub> A[ℓ], &nbsp; G = ⌈2N/1023⌉, &nbsp; K = N−2G−1<br>𝒥 = {ℓ : min(|ℓ−ℓ*|, N−|ℓ−ℓ*|) &gt; G}<br>β̂ = (1/(K M)) Σ<sub>ℓ∈𝒥</sub> A[ℓ]<br>H = α<sub>M,K</sub> β̂, &nbsp; score = A[ℓ*]/H. <span class="tag">(15)</span></div>
+<p>Si conserva il candidato con score massimo su tutte le coppie (b,s), non quello con maggiore potenza ADC. A fine sweep si richiede <code>metric &gt; threshold</code> e potenza positiva. La riga a +30 kHz non fornisce la soglia finale.</p>
+<h3>Formula invertita da <code>NgAcqMathThreshold</code></h3>
+<p>Nel modello nominale, una somma S<sub>0</sub> di M potenze di rumore è Gamma(M,β); la somma R<sub>0</sub> di K celle di riferimento è Gamma(KM,β), indipendente da S<sub>0</sub>. Si considera l’incertezza del fondo stimato:</p>
+<div class="eq small">Q<sub>M,K</sub>(x) = Pr{S<sub>0</sub> &gt; x R<sub>0</sub>/(KM)}<br>= (1+x/(KM))<sup>−KM</sup> Σ<sub>h=0…M−1</sub> [ (KM)<sup>‾h</sup>/h! ] [x/(KM+x)]<sup>h</sup><br>Q<sub>M,K</sub>(α<sub>M,K</sub>) = P<sub>fa</sub>. <span class="tag">(16)</span></div>
+<p>(KM)<sup>‾h</sup> è il prodotto crescente KM(KM+1)…(KM+h−1), uguale a 1 per h=0. Il codice valuta la somma in dominio logaritmico, raddoppia il limite alto fino a racchiudere la soluzione e applica 72 bisezioni.</p>
+<div class="note">P<sub>fa</sub> è nominale per cella nel modello. Le celle condividono campioni, sono colorate da filtri e compressione e il fondo esclude un massimo scelto dai dati. Il parametro non è il falso allarme globale dello sweep o del receiver su ricerche ripetute.</div>
+<p>La tesi, eq. (10.35), considera varianza nota: e<sup>−x</sup>Σ<sub>h=0…M−1</sub>x<sup>h</sup>/h!. La (16) tende a questa forma per K→∞; Evo usa la variante a riferimenti finiti.</p>
+<p class="src"><code>acquisition.c: CoarseFrame, NgAcquisitionAssign</code>; <code>acquisition_math.c: ReferenceSurvival, NgAcqMathThreshold</code>. Tesi §10.4 p. 103, PDF p. 131.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Stato del candidato / 11</div><h2>10. Dal lag FFT all’origine del codice</h2>
+<p>Quando una riga migliora lo score, il contesto memorizza Doppler e origine di codice. Il riferimento temporale è il primo campione dell’<b>ultimo frame</b> di quel dwell, non <code>coarseStartSample</code>.</p>
+<div class="eq">n<sub>ref</sub> = view.meta.firstSample<br>o = wrap(ℓ* L/N + sΔn, L)<br>R̂<sub>c</sub> = R<sub>c</sub>(1+f̂<sub>d</sub>/f<sub>L1</sub>). <span class="tag">(17)</span></div>
+<p><code>originReference=nref</code> e <code>originOffset=o</code> definiscono l’origine nominale al campione n<sub>ref</sub>+o. L’offset può essere frazionario anche se lo spostamento supplementare è intero.</p>
+<div class="eq">ψ(n) = wrap(((n−n<sub>ref</sub>)−o) R̂<sub>c</sub>/F<sub>s</sub>, 1023)<br>d(n) = wrap(−ψ(n), 1023) F<sub>s</sub>/R̂<sub>c</sub>. <span class="tag">(18)</span></div>
+<p><code>CodePhase</code> restituisce ψ, la fase del codice locale al campione richiesto. <code>UpdateReference</code> pubblica <code>codePhaseChips</code> e il ritardo fino alla prossima origine <code>codeDelaySamples=d</code>, riferiti alla fine del frame appena processato. Non sono un indice di picco immutabile.</p>
+<h3>Passaggio al raffinamento</h3>
+<ol><li>Il coarse completa tutti i bin; non esce al primo superamento della soglia.</li><li>Con esito positivo si inizializza il rate della (17), si azzerano gli accumulatori e si entra in <code>DOPPLER_REFINEMENT</code>.</li><li><code>ProcessFrame</code> aggiorna il riferimento alla fine del frame e programma lo skip arrotondato d(n) per il frame seguente.</li></ol>
+<div class="note">La correzione di rate assume che il residuo di portante stimato sia compatibile con il Doppler di codice. Un errore LO o di clock non deve necessariamente propagarsi al codice con questo identico rapporto: Evo non stima separatamente tali contributi.</div>
+<p>Con f̂<sub>d</sub>=5000 Hz la correzione è circa 3,247 chip/s. Un riferimento vecchio di un secondo richiede una propagazione accurata; il raffinamento Doppler può durare oltre un secondo con i default.</p>
+<p class="src"><code>src/acquisition/acquisition.c: CoarseFrame, CodePhase, UpdateReference, ProcessFrame</code>. Tesi §4.5: Doppler sul PRN; qui il modello usa il valore stimato dal software.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Prompt full-rate / 12</div><h2>11. Raffinamento Doppler</h2>
+<p>Si abbandona la FFT compressa e si usa il prompt full-rate. Il codice locale di ogni frame parte da ψ(n<sub>first</sub>), propagata dal riferimento coarse.</p>
+<div class="eq small">f<sub>h</sub> = f̂<sub>d,coarse</sub> − F<sub>ref</sub> + h Δf<sub>ref</sub><br>z<sub>h,m</sub> = (1/L<sub>m</sub>) Σ<sub>n=0…Lₘ−1</sub> x̃<sub>m</sub>[n] e<sup>−j2π(fIF+fₕ)n/Fs</sup><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; × c<sub>p</sub>[⌊wrap(ψ(n<sub>first,m</sub>)+nR̂<sub>c</sub>/F<sub>s</sub>,1023)⌋]<br>J<sub>h</sub> = Σ<sub>m=0…Mmax−1</sub> |z<sub>h,m</sub>|², &nbsp; h* = arg max<sub>h</sub> J<sub>h</sub>. <span class="tag">(19)</span></div>
+<p>La formula della fase di codice è ideale: l’NCO usa Q32; con rate e frequenza di campionamento interi usa un accumulatore razionale esatto ai bordi dei chip. Il rate corretto del raffinamento è normalmente non intero e usa Q32.</p>
+<ol><li>Ipotesi Doppler: ⌊2F<sub>ref</sub>/Δf<sub>ref</sub>+0,5⌋+1.</li><li>Ogni frequenza consuma M<sub>max</sub> nuovi millisecondi, anche se il coarse aveva usato M=1.</li><li>Si seleziona il massimo della potenza prompt. <code>refinementNoise</code> accumula energia d’ingresso/L, ma non viene usato nella scelta.</li><li>Alla fine si aggiorna f̂<sub>d</sub>, quindi f<sub>NCO</sub> e R̂<sub>c</sub>. Durante la scansione il rate di codice resta quello del candidato coarse.</li></ol>
+<div class="note">Il passo di 10 Hz è la spaziatura dei punti interrogati. Con coerenza di 1 ms la risposta ha scala circa 1 kHz; non si ottiene automaticamente precisione di 10 Hz. Inoltre i punti sono misurati su dati diversi.</div>
+<p>La perdita ideale da residuo Δf, per segnale rettangolare con codice allineato, è L<sub>f</sub>=|sin(πΔfT)/(πΔfT)|². Con T=1 ms e Δf=333,5 Hz vale circa 0,684 (−1,65 dB). È un riferimento analitico, non una compensazione implementata.</p>
+<p class="src"><code>src/acquisition/acquisition.c: RefineFrame, StartRefinement</code>; <code>src/dsp/acquisition_math.c: Prompt</code>; <code>src/dsp/gps_ca.c: NgGpsCaNcoInit, NgGpsCaNext</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Ricerca locale del ritardo / 13</div><h2>12. Raffinamento del codice</h2>
+<p>Si fissa la portante stimata e si ripete il prompt full-rate su offset espressi in campioni nativi.</p>
+<div class="eq">A<sub>c</sub> = ⌊refinementCodeSpanChips · F<sub>s</sub>/R<sub>c</sub>+0,5⌋<br>q<sub>i</sub> = −A<sub>c</sub> + i Δq<br>ψ<sub>i</sub>(n<sub>first</sub>) = ψ(n<sub>first</sub>) − q<sub>i</sub>R̂<sub>c</sub>/F<sub>s</sub>. <span class="tag">(20)</span></div>
+<p>Δq è <code>refinementCodeStepSamples</code>. I punti sono ⌊2A<sub>c</sub>/Δq+0,5⌋+1; l’estremo superiore può non coincidere con il limite richiesto.</p>
+<div class="eq">z<sub>i,m</sub> = prompt(x̃<sub>m</sub>, f̂<sub>NCO</sub>, ψ<sub>i</sub>, R̂<sub>c</sub>)<br>i* = arg max<sub>i</sub> Σ<sub>m=0…Mmax−1</sub> |z<sub>i,m</sub>|²<br>originOffset ← originOffset + q<sub>i*</sub>. <span class="tag">(21)</span></div>
+<p>Un offset positivo ritarda l’origine; per questo la fase viene diminuita nella (20). Non si interpola il massimo né si adatta lo step al lobo. Si può mantenere una fase iniziale frazionaria, ma gli incrementi della ricerca sono campioni interi.</p>
+<div class="flow"><div class="block">Portante fissata<br>dal raffinamento Doppler</div><div class="arrow">→</div><div class="block">Offset q<sub>i</sub><br>M<sub>max</sub> frame nuovi</div><div class="arrow">→</div><div class="block">Massimo prompt<br>aggiorna origine</div></div>
+<h3>Uscita del raffinamento</h3>
+<p>Le potenze prompt non sostituiscono la coppia metrica/soglia coarse. Il risultato ripristina <code>coarseMaximum</code>, <code>coarseThreshold</code> e M del coarse finché una prova di conferma pubblica una nuova coppia omogenea.</p>
+<p>Con <code>confirmation=none</code> si entra direttamente in <code>ACQUIRED</code>. Altrimenti si entra in <code>CONFIRMATION</code> e si pianifica lo skip verso l’origine aggiornata.</p>
+<div class="note">A 2,4 Msps, ±1 chip diventa ±2 campioni; un campione vale 0,42625 chip. I cinque punti sono −2, −1, 0, +1, +2 campioni: range effettivo ±0,8525 chip.</div>
+<p class="src"><code>src/acquisition/acquisition.c: NgAcquisitionPlanCreate, RefineFrame, ProcessFrame</code>. Prompt: <code>NgAcqMathPromptCentered</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Verifica indipendente nel tempo / 14</div><h2>13. Conferma m-su-n e fondo filtrato</h2>
+<p>Si usano nuovi frame, portante e origine raffinate. Ogni frame produce il prompt z<sub>m</sub> e 32 correlazioni di controllo con lo stesso mixer e la stessa fase frazionaria del codice, ma chip traslati.</p>
+<div class="eq small">k[n] = ⌊fase codice al campione n⌋<br>δ<sub>r</sub> = 16+31r, &nbsp; r=0,…,31<br>z<sub>r,m</sub> = (1/L<sub>m</sub>) Σ<sub>n</sub> x̃<sub>m</sub>[n] e<sup>−j2πf̂NCO n/Fs</sup> c<sub>p</sub>[(k[n]+δ<sub>r</sub>) mod 1023]<br>ν<sub>m</sub> = (1/32) Σ<sub>r=0…31</sub> |z<sub>r,m</sub>|². <span class="tag">(22)</span></div>
+<p>Il fondo non è energia ADC/L. Viene misurato dopo mixer e despreading per includere il filtraggio del candidato. I controlli condividono il frame: l’indipendenza è un’approssimazione statistica.</p>
+<div class="eq">T<sub>trial</sub> = Σ<sub>m=0…M−1</sub> |z<sub>m</sub>|²<br>H<sub>trial</sub> = α<sub>M,32</sub> (1/M) Σ<sub>m=0…M−1</sub> ν<sub>m</sub><br>hit ⇔ T<sub>trial</sub> &gt; H<sub>trial</sub> e T<sub>trial</sub> &gt; 0. <span class="tag">(23)</span></div>
+<p>Si riusa M del coarse, non M<sub>max</sub> dei raffinamenti. Ogni trial aggiorna <code>metric</code>, <code>threshold</code>, prove e successi.</p>
+<table><tr><th>Condizione</th><th>Transizione</th></tr><tr><td>hit ≥ successi richiesti</td><td><code>ACQUIRED</code> immediato.</td></tr><tr><td>prove esaurite o restanti insufficienti</td><td><code>NOT_FOUND</code> immediato.</td></tr><tr><td>Altrimenti</td><td>nuovo trial su M frame successivi.</td></tr></table>
+<p>Con 3-su-4 si termina dopo tre prove positive o si anticipa il fallimento dopo due negative. <code>carrierPhaseValid=0</code>: la fase di portante per il tracking non viene stimata dall’acquisitore; resta l’ambiguità della polarità dei dati GPS.</p>
+<p class="src"><code>src/acquisition/acquisition.c: ConfirmationFrame</code>; <code>src/dsp/acquisition_math.c: Prompt, NgAcqMathPromptWithNoise</code>; <code>include/ngene/dsp/acquisition_math.h: NG_ACQ_NOISE_REFERENCES</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Controllo del receiver / 15</div><h2>14. Stati, PRN e rappresentazione CAF</h2>
+<div class="flow vertical"><div class="block">IDLE → assegnazione PRN → COARSE_NOISE (1 frame)</div><div class="arrow">↓</div><div class="block">COARSE: D × S × M frame → soglia non superata: NOT_FOUND</div><div class="arrow">↓ candidato positivo</div><div class="block">DOPPLER_REFINEMENT → CODE_REFINEMENT</div><div class="arrow">↓</div><div class="block">CONFIRMATION → successo: ACQUIRED / fallimento: NOT_FOUND<br>Senza conferma: CODE_REFINEMENT → ACQUIRED</div></div>
+<h3>Assegnazione e politica M</h3>
+<p><code>SelectPrn</code> percorre un cursore su 32 PRN rispettando maschera, prenotazioni e acquisiti. M parte da 1 e cresce di uno a ogni wrap, fino al massimo. Il valore di un tentativo è fissato all’assegnazione. Con più slot la progressione segue il cursore, non una barriera globale di fine sweep.</p>
+<p>Un PRN <code>NOT_FOUND</code> viene liberato; lo slot riceve una nuova assegnazione alla chiamata successiva. Un PRN <code>ACQUIRED</code> resta prenotato. L’adapter conserva il risultato e non trasforma autonomamente lo slot in un tracking loop.</p>
+<p>La banca usa fino a quattro worker. Con carico di tracking T, il limite di slot di ricerca diventa circa ⌈C/(T+1)⌉. Uno slot sospeso restituisce il PRN incompleto e ripartirà da una nuova ricerca.</p>
+<h3>CAF mostrata dalla GUI</h3>
+<p>Il correlatore valuta N lag per riga, ma il display conserva al massimo 64×64 celle. La riduzione è un <i>max pooling</i>: più lag, griglie e talvolta Doppler confluiscono nella stessa cella. Le coordinate rappresentano i contenitori, non necessariamente il punto esatto del massimo.</p>
+<div class="note">“Complete sweep” significa che i bin coarse sono stati visitati. La normalizzazione grafica al massimo può evidenziare un picco sotto soglia. <code>ACQUIRED</code>, score e conferma sono i dati decisionali. Nascondere la CAF disabilita il pooling, non il correlatore.</div>
+<p class="src"><code>src/core/acquisition_receiver.c: SelectPrn, Process, SetTrackingLoad, NgAcquisitionReceiverExecution</code>; <code>src/acquisition/acquisition.c: ClearCaf, CoarseFrame</code>.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Esecuzione numerica / 16</div><h2>15. Un tentativo completo a 2,4 Msps</h2>
+<p>Si assumono F<sub>s</sub>=2 400 000 Hz, IF=0 e i parametri di <code>NgAcquisitionDefaults</code>, con acquisizione abilitata. È un esempio del piano, non la configurazione live misurata dell’utente.</p>
+<table><tr><th>Parametro / operazione</th><th>Valore calcolato</th></tr><tr><td>L; FFT richiesta → N</td><td>2400; 4096 → 2048.</td></tr><tr><td>Doppler</td><td>16 bin, −5000…5005 Hz, passo 667 Hz.</td></tr><tr><td>Griglie supplementari</td><td>S=⌈(1023/2048)/0,25⌉=2; offset 0 e 1 campione.</td></tr><tr><td>Guardia / riferimenti coarse</td><td>G=5; K=2037.</td></tr><tr><td>Raffinamento Doppler</td><td>134 punti, offset −667…+663 Hz, passo 10 Hz.</td></tr><tr><td>Raffinamento codice</td><td>5 punti, offset −2…+2 campioni.</td></tr><tr><td>Somme per punto dei raffinamenti</td><td>M<sub>max</sub>=8, anche con coarse M=1.</td></tr></table>
+<h3>Tempo di segnale consumato da un candidato positivo</h3>
+<div class="eq">T<sub>coarse</sub> ≈ 1+16·2·M = 1+32M ms<br>T<sub>ref,f</sub> ≈ 134·8 = 1072 ms<br>T<sub>ref,c</sub> ≈ 5·8 = 40 ms<br>T<sub>confirm</sub> ≈ 3M…4M ms per esito positivo. <span class="tag">(24)</span></div>
+<p>M=1: circa <b>1148–1149 ms</b>, più skip. M=8: circa <b>1393–1401 ms</b>, più skip. Un candidato può consumare quasi tutto questo tempo e fallire la conferma. Il tempo di calendario può aumentare per CPU, carico o sospensioni.</p>
+<h3>Esempio di recupero del ritardo</h3>
+<p>Con ℓ*=426 e s=1: o=426·2400/2048+1=<b>500,21875 campioni</b>, ossia 213,21824 chip nominali. È l’offset rispetto al frame di riferimento della riga vincente. I valori pubblicati successivamente vanno propagati al loro <code>referenceSample</code> con la (18).</p>
+<div class="note">Il raffinamento Doppler usa oltre un secondo di dati: i punti sono sequenziali e la fase di codice deve restare coerente con un’origine ormai distante nel tempo.</div>
+<p class="src">Valori derivati da <code>NgAcquisitionDefaults</code>, <code>GridCount</code>, <code>NgAcquisitionPlanCreate</code> e contatori di <code>RefineFrame</code>. Tempi senza scheduling di altri PRN.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Revisione del mancato aggancio / 17</div><h2>16. Dove misurare per trovare il guasto</h2>
+<p>Il codice identifica verifiche precise, non una causa dimostrata del guasto live. Occorre una cattura ripetibile, seguendo lo stesso PRN lungo gli stati.</p>
+<table><tr><th>Nodo / misura</th><th>Controllo e significato</th></tr><tr><td>Frontend<br>F<sub>s</sub>, centro, IF, formato, PPM</td><td>Valori applicati; ordine e segno I/Q, distribuzione ADC, saturazione, presenza RF. I livelli ADC non provano la ricezione GPS.</td></tr><tr><td>Continuità<br>epoch, indici, gap, reset</td><td>I reset possono impedire il completamento del tentativo o del lungo raffinamento. Separare perdita campioni da mancata rivelazione.</td></tr><tr><td>Wipe-off<br>tono noto / sintetico</td><td>Verificare e<sup>−jθ</sup>, IF e segno Doppler. Allargare la ricerca su cattura se il budget di errore LO lo richiede.</td></tr><tr><td>Coarse<br>N, S, Δn, M, β̂, H, score</td><td>Registrare ogni (b,s). Separare assenza di superamento soglia da candidato che fallisce nelle fasi successive.</td></tr><tr><td>Origine / codice<br>n<sub>ref</sub>, o, R̂<sub>c</sub>, ψ</td><td>Confronto full-rate sugli stessi dati: wrap, segno lag, propagazione e associazione all’ultimo frame del dwell.</td></tr><tr><td>Raffinamenti<br>J e timestamp</td><td>Verificare massimi dovuti a variazioni temporali di potenza o rumore; misurare la deriva di codice durante la scansione.</td></tr><tr><td>Conferma<br>T, H, controlli, hit/trial</td><td>Separare candidato spurio, perdita prompt e fondo elevato. Riportare la causa di NOT_FOUND.</td></tr></table>
+<h3>Punti da sottoporre a verifica quantitativa</h3>
+<p>Griglia supplementare a campioni interi; perdita da compressione; fondo con riferimenti correlati; Doppler contaminato dal LO; vettori coarse non riallineati per deriva; confronto sequenziale di potenze su oltre un secondo. Sono proprietà del codice da misurare sul caso reale.</p>
+<p><b>Traccia proposta:</b> per PRN/stato salvare <code>firstSample, referenceSample, M, b, s, peakIndex, metric, threshold, dopplerHz, codePhaseChips, codeDelaySamples, confirmationHits/Trials</code>; aggiungere β̂ e potenze dei controlli con strumentazione dedicata. Questi dettagli interni non sono tutti esposti oggi dalla GUI.</p>
+<p class="src">Test esistenti: <code>TestFftCorrelationOracle</code>, <code>TestCenteredNoiseOracle</code>, <code>TestChunkInvariance</code>, <code>TestReceiverLevelSensitivity</code>, <code>TestCu8NoAntennaRejection</code> in <code>tests/test_acquisition.c</code>. Non sono stati rieseguiti per questa revisione documentale e non sostituiscono una misura live.</p>
+</section>
+
+<section class="page">
+<div class="kicker">Tracciabilità / 18</div><h2>17. Confronto con tesi e NGene originale</h2>
+<table><tr><th>Riferimento della tesi</th><th>Corrispondenza e differenza in Evo</th></tr><tr><td>Cap. 6, p. 49 ss.<br>PDF p. 77 ss.</td><td>Conversione RF/IF e ADC. Evo riceve l’uscita complessa del driver; la catena analogica non è implementata nel C.</td></tr><tr><td>§7.1, fig. 7.1, eq. (7.1)<br>pp. 63–64 / PDF 91–92</td><td>La tesi crea rami sin/cos dal campione reale. Evo parte da I+jQ e applica una rotazione complessa coniugata.</td></tr><tr><td>§7.2, eq. (7.9)<br>p. 68 / PDF 96</td><td>Correlazione circolare. Qui il lag positivo usa replica j−ℓ; confrontare il segno con n+m nella tesi.</td></tr><tr><td>§7.2 e §7.3<br>pp. 67–69 / PDF 95–97</td><td>Matrice sugli stessi dati e fase di campionamento. Evo avanza fra Doppler e griglie e comprime con gruppi non uniformi.</td></tr><tr><td>§9.2, fig. 9.2<br>pp. 88–89 / PDF 116–117</td><td>FFT × replica* → correlazione → somme non coerenti. Evo aggiunge compressione, scale e FFT forward con lag invertiti.</td></tr><tr><td>§10.1 e §10.4, eq. (10.35)<br>pp. 94, 103 / PDF 122, 131</td><td>Soglia Pfa. Evo usa potenza senza radice e fattore a riferimenti finiti (16), anziché la sola gamma a varianza nota.</td></tr></table>
+<h3>Confronto con il codice NGene incluso</h3>
+<p><code>Old NGene Code/acquisition/coarseAcquisition.c</code> contiene generazione portante, wipe-off del segnale reale, compressione, FFT, prodotto e somme non coerenti. <code>utility/sampleCompression.c</code> usa NCO Q16 short/long. Evo conserva la struttura di ricerca, con memoria privata e ingresso I/Q, ma soglia locale e recupero esplicito dei guadagni non sono una trascrizione invariata del rivelatore originale.</p>
+<h3>Mappa per la revisione</h3>
+<p class="small"><b>Driver:</b> <code>src/frontend/{rtlsdr,hackrf,bladerf}.c</code>, <code>src/core/stream_info.c</code>.<br><b>Stream:</b> <code>src/frontend/ingress.c</code>, <code>src/core/receiver.c</code>, <code>src/conditioning/dc.c</code>, <code>src/stream/format.c</code>.<br><b>Controllore:</b> <code>src/acquisition/acquisition.c</code>.<br><b>Matematica:</b> <code>src/dsp/acquisition_math.c</code>, <code>gps_ca.c</code>, <code>nco.c</code>, <code>fft/fft.c</code>.<br><b>Assegnazione:</b> <code>src/core/acquisition_receiver.c</code>.<br><b>Tesi:</b> Maurizio Fantino, maggio 2006, <i>Study of Architectures and Algorithms for Software Galileo Receivers</i>, Politecnico di Torino, <code>docs/references/PhD_Fantino070206.pdf</code>, 231 pagine. I numeri “PDF” sono ordinali da 1.</p>
+<p class="src">Derivato dal sorgente al commit d132585. Formule ideali, dettagli numerici e ipotesi statistiche sono esplicitati separatamente. Nessuna diagnosi live è dedotta dalla sola presenza di una CAF.</p>
+</section>
 </body></html>

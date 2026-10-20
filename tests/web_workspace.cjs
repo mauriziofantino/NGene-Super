@@ -289,7 +289,7 @@ histogram_update_hz=20
     await page.locator('#apply').click();
     assert.equal(writes.length, beforeInvalid, 'Invalid receiver settings must be blocked before any network mutation');
     assert.deepEqual(await get('config'), stoppedConfig, 'Invalid setup input must preserve saved configuration');
-    await rate.fill('100000'); await rate.blur();
+    await rate.fill('0.1'); await rate.blur();
     await page.locator('#apply').click();
     await until(() => page.locator('#configBadge').textContent().then(value => /^r\d+$/.test(value)), 'valid profile saved');
     const applied = await get('config');
