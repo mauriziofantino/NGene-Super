@@ -3,7 +3,6 @@
 #define NGENE_CONFIG_H
 #include "ngene/types.h"
 #include "ngene/analysis.h"
-#include "ngene/acquisition.h"
 #include <stdio.h>
 
 /** @brief Implemented independent stream source kinds. */
@@ -79,8 +78,6 @@ typedef struct {
     int recordingPreConditioning;
     /** Optional diagnostic settings or an owned diagnostic snapshot. */
     TNgAnalysisConfig analysis;
-    /** GPS L1 C/A module configuration, frozen for each receiver run. */
-    TNgAcquisitionConfig acquisition;
     /** Capture filename prefix; CLI may include a path when no directory is set. */
     char recordingPrefix[512];
     /** Optional receiver-side directory; empty preserves legacy CLI prefix paths. */

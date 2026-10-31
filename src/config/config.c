@@ -57,7 +57,6 @@ void NgConfigDefaults(TNgConfig *config)
     memset(config, 0, sizeof(*config));
     config->frontend = NG_FRONTEND_FILE;
     NgAnalysisDefaults(&config->analysis);
-    NgAcquisitionDefaults(&config->acquisition);
     config->rtlAutoGain = 1;
     config->bladeGainDb = 30;
     config->bladeFormat = NG_FORMAT_SC16_Q11;
@@ -224,14 +223,8 @@ static int CopyText(char *out, size_t capacity, const char *text)
 static int Apply(TNgConfig *c, const char *key, const char *value)
 {
     uint64_t n;
-    if (strcmp(key, "acquisition.search_method") == 0) return strcmp(value, "ngene_fft") == 0 ? NG_OK : NG_ERROR;
-    if (strcmp(key, "acquisition.detector") == 0) return strcmp(value, "pfa") == 0 ? NG_OK : NG_ERROR;
-    if (strcmp(key, "acquisition.confirmation") == 0) {
-        if (strcmp(value, "m_of_n") == 0) c->acquisition.confirmation = NG_ACQ_CONFIRM_M_OF_N;
-        else if (strcmp(value, "none") == 0) c->acquisition.confirmation = NG_ACQ_CONFIRM_NONE;
-        else return NG_ERROR;
-        return NG_OK;
-    }
+    /* Retired acquisition profiles remain readable, but cannot enable processing. */
+    if (strncmp(key, "acquisition.", 12) == 0) return NG_OK;
     if (strcmp(key, "frontend.type") == 0) {
         if (strcmp(value, "hackrf") == 0) {
             c->frontend = NG_FRONTEND_HACKRF;
@@ -254,21 +247,6 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     if (strcmp(key, "frontend.serial") == 0) {
         return CopyText(c->serial, sizeof(c->serial), value);
     }
-    BOOL_KEY("acquisition.enabled", acquisition.enabled)
-    UINT_KEY("acquisition.gps_prn_mask", acquisition.gpsPrnMask)
-    UINT_KEY("acquisition.gps_channels", acquisition.gpsChannels)
-    SIZE_KEY("acquisition.fft_size", acquisition.fftSize)
-    REAL_KEY("acquisition.doppler_max_hz", acquisition.dopplerMaxHz)
-    REAL_KEY("acquisition.doppler_step_hz", acquisition.dopplerStepHz)
-    REAL_KEY("acquisition.code_step_chips", acquisition.codeStepChips)
-    REAL_KEY("acquisition.false_alarm_probability", acquisition.falseAlarmProbability)
-    UINT_KEY("acquisition.noncoherent_sums", acquisition.nonCoherentSums)
-    UINT_KEY("acquisition.confirmation_attempts", acquisition.confirmationAttempts)
-    UINT_KEY("acquisition.confirmation_successes", acquisition.confirmationSuccesses)
-    REAL_KEY("acquisition.refinement_doppler_span_hz", acquisition.refinementDopplerSpanHz)
-    REAL_KEY("acquisition.refinement_doppler_step_hz", acquisition.refinementDopplerStepHz)
-    REAL_KEY("acquisition.refinement_code_span_chips", acquisition.refinementCodeSpanChips)
-    UINT_KEY("acquisition.refinement_code_step_samples", acquisition.refinementCodeStepSamples)
     UINT_KEY("frontend.sample_rate_hz", sampleRateHz)
     U64_KEY("frontend.center_frequency_hz", centerFrequencyHz)
     U64_KEY("frontend.signal_frequency_hz", signalFrequencyHz)
@@ -557,12 +535,6 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (NgAnalysisValidate(&config->analysis, error) != NG_OK) {
         return NG_ERROR;
     }
-    if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK) {
-        return NG_ERROR;
-    }
-    if (config->acquisition.enabled && config->sampleRateHz < 1023000u) {
-        return NgFail(error, "GPS acquisition requires at least 1023000 complex pairs/s");
-    }
     if ((config->dcRemoval != 0 && config->dcRemoval != 1) || config->dcShift < 4 ||
         config->dcShift > 24) {
         return NgFail(error, "DC estimator shift must be 4..24");
@@ -765,23 +737,5 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             (config->analysis.density) != 0 ? "dbfs_hz" : "dbfs_bin",
             NgTemporalName(config->analysis.temporal), config->analysis.temporalFrames,
             config->analysis.smoothingAlpha);
-    fprintf(output,
-            "\n[acquisition]\nenabled=%s\ngps_prn_mask=%" PRIu32
-            "\ngps_channels=%u\nfft_size=%zu\ndoppler_max_hz=%.17g\ndoppler_step_hz=%.17g"
-            "\ncode_step_chips=%.17g\nfalse_alarm_probability=%.17g\nnoncoherent_sums=%u"
-            "\nsearch_method=ngene_fft\ndetector=pfa\nconfirmation=%s"
-            "\nconfirmation_attempts=%u\nconfirmation_successes=%u"
-            "\nrefinement_doppler_span_hz=%.17g\nrefinement_doppler_step_hz=%.17g"
-            "\nrefinement_code_span_chips=%.17g\nrefinement_code_step_samples=%u\n",
-            config->acquisition.enabled ? "true" : "false", config->acquisition.gpsPrnMask,
-            config->acquisition.gpsChannels, config->acquisition.fftSize,
-            config->acquisition.dopplerMaxHz, config->acquisition.dopplerStepHz,
-            config->acquisition.codeStepChips, config->acquisition.falseAlarmProbability,
-            config->acquisition.nonCoherentSums,
-            config->acquisition.confirmation == NG_ACQ_CONFIRM_NONE ? "none" : "m_of_n",
-            config->acquisition.confirmationAttempts,
-            config->acquisition.confirmationSuccesses, config->acquisition.refinementDopplerSpanHz,
-            config->acquisition.refinementDopplerStepHz, config->acquisition.refinementCodeSpanChips,
-            config->acquisition.refinementCodeStepSamples);
     return (ferror(output)) != 0 ? NgFail(error, "Config write failed") : NG_OK;
 }

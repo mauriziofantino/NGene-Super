@@ -490,51 +490,6 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     /* Deliberate deep copy before telemetry. Snapshot arrays are values, not borrowed pointers. */
     telemetry = status.analysis;
     cJSON_AddItemToObject(object, "analysis", AnalysisJson(&telemetry, mask));
-    {
-        cJSON *acquisition = cJSON_CreateObject();
-        cJSON *satellites = cJSON_CreateArray();
-        unsigned i;
-        cJSON_AddBoolToObject(acquisition, "enabled", status.acquisition.enabled);
-        Number(acquisition, "channel_count", status.acquisition.channelCount);
-        Number(acquisition, "search_limit", status.acquisition.searchLimit);
-        Number(acquisition, "tracking_channels", (double)status.acquisition.trackingChannels);
-        Counter(acquisition, "deferred_windows", status.acquisition.deferredWindows);
-        Number(acquisition, "fft_size", (double)status.acquisition.fftSize);
-        Number(acquisition, "coherent_ms", 1);
-        Number(acquisition, "noncoherent_sums", status.acquisition.nonCoherentSums);
-        Number(acquisition, "attempted_prn_mask", status.acquisition.attemptedPrnMask);
-        Number(acquisition, "acquired_prn_mask", status.acquisition.acquiredPrnMask);
-        Counter(acquisition, "cycles", status.acquisition.cycles);
-        Counter(acquisition, "resets", status.acquisition.resets);
-        for (i = 0; i < 32; ++i) {
-            const TNgAcquisitionResult *result = &status.acquisition.satellites[i];
-            cJSON *satellite;
-            if (result->prn == 0) continue;
-            satellite = cJSON_CreateObject();
-            Number(satellite, "prn", result->prn);
-            String(satellite, "phase", NgAcquisitionPhaseName(result->phase));
-            Counter(satellite, "sequence", result->sequence);
-            Counter(satellite, "epoch", result->epoch);
-            Counter(satellite, "reference_sample", result->referenceSample);
-            Counter(satellite, "processed_samples", result->processedSamples);
-            Number(satellite, "doppler_hz", result->dopplerHz);
-            Number(satellite, "carrier_hz", result->carrierHz);
-            Number(satellite, "code_rate_hz", result->codeRateHz);
-            Number(satellite, "code_delay_samples", result->codeDelaySamples);
-            Number(satellite, "code_phase_chips", result->codePhaseChips);
-            Number(satellite, "metric", result->metric);
-            Number(satellite, "threshold", result->threshold);
-            Number(satellite, "noncoherent_sums", result->nonCoherentSums);
-            Number(satellite, "confirmation_trials", result->confirmationTrials);
-            Number(satellite, "confirmation_hits", result->confirmationHits);
-            String(satellite, "confirmation_method", result->confirmation == NG_ACQ_CONFIRM_NONE ? "none" : "m_of_n");
-            Number(satellite, "doppler_index", (double)result->dopplerIndex);
-            Number(satellite, "doppler_count", (double)result->dopplerCount);
-            cJSON_AddItemToArray(satellites, satellite);
-        }
-        cJSON_AddItemToObject(acquisition, "satellites", satellites);
-        cJSON_AddItemToObject(object, "acquisition", acquisition);
-    }
     Number(object, "hardware_frequency_hz", (double)status.hardwareFrequencyHz);
     Number(object, "signal_frequency_hz", (double)status.signalFrequencyHz);
     Number(object, "digital_if_hz", (double)status.digitalIfHz);
@@ -597,62 +552,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     return object;
 }
 
-/** Serialize only an explicitly requested, bounded coarse GPS search surface.
- * The axis tiles contain maxima of measured powers, with null for unvisited
- * cells; successive Doppler rows use successive native-I/Q frames.
- */
-static cJSON *AcquisitionCafJson(TNgControl *control, unsigned prn)
-{
-    TNgAcquisitionCaf caf;
-    cJSON *object = cJSON_CreateObject();
-    cJSON *delays, *dopplers, *powers;
-    size_t i;
-    NgControlAcquisitionCafSnapshot(control, prn, &caf);
-    cJSON_AddBoolToObject(object, "available", caf.available);
-    if (!caf.available) return object;
-    Number(object, "prn", caf.prn);
-    Counter(object, "sequence", caf.sequence);
-    Counter(object, "epoch", caf.epoch);
-    Counter(object, "reference_sample", caf.referenceSample);
-    Number(object, "code_bins", (double)caf.codeBins);
-    Number(object, "doppler_bins", (double)caf.dopplerBins);
-    Number(object, "completed_doppler_bins", (double)caf.completedDopplerBins);
-    Number(object, "total_doppler_bins", (double)caf.totalDopplerBins);
-    cJSON_AddBoolToObject(object, "complete", caf.complete);
-    Number(object, "noncoherent_sums", caf.nonCoherentSums);
-    Number(object, "fft_size", (double)caf.fftSize);
-    Number(object, "max_power", caf.maxPower);
-    String(object, "source", "coarse_fft");
-    String(object, "aggregation", "max");
-    delays = cJSON_CreateArray();
-    dopplers = cJSON_CreateArray();
-    powers = cJSON_CreateArray();
-    for (i = 0; i < caf.codeBins; ++i)
-        cJSON_AddItemToArray(delays, cJSON_CreateNumber(caf.codeDelaySamples[i]));
-    for (i = 0; i < caf.dopplerBins; ++i)
-        cJSON_AddItemToArray(dopplers, cJSON_CreateNumber(caf.dopplerHz[i]));
-    for (i = 0; i < caf.dopplerBins * caf.codeBins; ++i)
-        cJSON_AddItemToArray(powers, caf.power[i] >= 0.0f ?
-                             cJSON_CreateNumber(caf.power[i]) : cJSON_CreateNull());
-    cJSON_AddItemToObject(object, "code_delay_samples", delays);
-    cJSON_AddItemToObject(object, "doppler_hz", dopplers);
-    cJSON_AddItemToObject(object, "power", powers);
-    return object;
-}
 
-/**
- * @brief Serialize a profile into a bounded text buffer.
- *
- * @details
- * Uses a temporary C stream owned by this helper, checks reads/writes and closes it. This work
- * stays on HTTP threads.
- *
- * @param config Read-only configuration.
- * @param text Writable destination for NUL-terminated INI.
- * @param capacity Destination capacity in bytes.
- *
- * @return NG_OK if serialization fits; NG_ERROR otherwise.
- */
 static int ConfigText(const TNgConfig *config, char *text, size_t capacity)
 {
     FILE *file = tmpfile();
@@ -1193,30 +1093,12 @@ static int Handle(struct mg_connection *connection, void *context)
             cJSON_AddBoolToObject(reply, "bladerf", NgFrontendAvailable(NG_FRONTEND_BLADERF));
             cJSON_AddBoolToObject(reply, "single_source", 1);
             cJSON_AddBoolToObject(reply, "periodogram", 1);
-            cJSON_AddBoolToObject(reply, "gps_acquisition", 1);
+            cJSON_AddBoolToObject(reply, "gps_acquisition", 0);
             String(reply, "fft_backend", NgFftBackend());
             return JsonReply(connection, 200, reply);
         }
         if (strcmp(path, "/api/v1/status") == 0) {
             return JsonReply(connection, 200, StatusJson(control, 3u));
-        }
-        if (strcmp(path, "/api/v1/acquisition/caf") == 0) {
-            unsigned prn = 0;
-            const char *query = request->query_string;
-            if (query != NULL && query[0] != '\0') {
-                char *end;
-                unsigned long parsed;
-                if (strncmp(query, "prn=", 4) != 0 || query[4] < '1' || query[4] > '9')
-                    return Failure(connection, 400, "Expected GPS PRN 1..32");
-                parsed = strtoul(query + 4, &end, 10);
-                if (*end != '\0' || parsed < 1ul || parsed > 32ul)
-                    return Failure(connection, 400, "Expected GPS PRN 1..32");
-                prn = (unsigned)parsed;
-            }
-            /* A visible CAF fetch renews only its own optional producer lease.
-             * Status WebSocket replies may be delayed by a busy SDR receiver. */
-            NgControlDiagnosticInterest(control, 4u);
-            return JsonReply(connection, 200, AcquisitionCafJson(control, prn));
         }
         if (strcmp(path, "/api/v1/analysis/config") == 0) {
             return AnalysisConfigReply(control, connection);
@@ -1564,7 +1446,7 @@ static int Handle(struct mg_connection *connection, void *context)
 struct TNgWebSession {
     /** Monotonic time of the most recent response on this connection. */
     double lastReply;
-    /** Independent PSD/histogram/CAF request bits for this client. */
+    /** Independent PSD/histogram request bits for this client. */
     unsigned mask;
     /** Next live session; protected by the server JSON mutex. */
     TNgWebSession *next;
@@ -1574,19 +1456,19 @@ struct TNgWebSession {
 static void UpdateDiagnosticInterest(TNgWebServer *server, double now)
 {
     TNgWebSession *session;
-    double until[3] = {0, 0, 0};
+    double until[2] = {0, 0};
     unsigned kind;
     for (session = server->sessions; session != NULL; session = session->next) {
         double expires = session->lastReply + 2.0;
         if (expires > now) {
-            for (kind = 0; kind < 3; ++kind) {
+            for (kind = 0; kind < 2; ++kind) {
                 if ((session->mask & (1u << kind)) != 0 && expires > until[kind]) {
                     until[kind] = expires;
                 }
             }
         }
     }
-    for (kind = 0; kind < 3; ++kind) {
+    for (kind = 0; kind < 2; ++kind) {
         NgControlDiagnosticInterestUntil(server->control, 1u << kind, until[kind]);
     }
 }
@@ -1692,7 +1574,7 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
         return 1;
     }
     if (((bits) & (128)) == 0 || (length != 6 && length != 8) || memcmp(data, "status", 6) != 0 ||
-        (length == 8 && (data[6] != ':' || data[7] < '0' || data[7] > '7'))) {
+        (length == 8 && (data[6] != ':' || data[7] < '0' || data[7] > '3'))) {
         return 0;
     }
     mask = length == 8 ? (unsigned)(data[7] - '0') : 3u;

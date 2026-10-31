@@ -25,9 +25,10 @@ typedef struct {
  * Reject non-Gaussian, clipped, DC-biased or weak input distributions.
  */
 int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *quality, TNgError *error);
-/** Test every gain setting exposed by the selected live SDR while stopped.
- * Three independent 32768-pair windows are compared per setting; this may take
- * several minutes for a frontend with many combinations (HackRF: 384).
+/** Test live SDR gains while stopped; HackRF VGA sweeps stop at overload.
+ * Three independent 32768-pair windows must pass per setting. RX stops before
+ * statistical analysis; this may take
+ * several minutes for a frontend with many combinations (HackRF: up to 384).
  */
 int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgError *error);
 #endif

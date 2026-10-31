@@ -1,5 +1,10 @@
 # Native bladeRF precision, ring buffering and waterfall views
 
+> October 31 design update: the [DSP options plan](DSP_OPTIONS_PLAN.md) evaluates
+> common CI8/CI16 stream profiles, exact byte-XOR correlation and optional square
+> carrier/one-bit approximations using isolated measurements. These are proposed
+> options, not changes to the operational native-format pipeline described below.
+
 > Engineering report from the October 2026 native-format and waterfall work. Measurements and verification statements apply to the documented builds and test environments. See the [current operator manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Home).
 
 ## Storage and native transfer formats

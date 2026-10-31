@@ -11,10 +11,12 @@ let analysisRevision=1;
 const analysis={spectrum_enabled:true,histogram_enabled:true,units:'dbfs_bin',window:'hann',averages:1,spectrum_source:'post',histogram_source:'post'};
 const server=http.createServer((request,response)=>{
   response.setHeader('Content-Security-Policy',policy);
+  for(const name of ['module-parameters.js','frequency-units.js'])assets.set('/'+name,[name,'text/javascript']);
   const asset=assets.get(request.url);
   if(asset){response.setHeader('Content-Type',asset[1]);response.end(fs.readFileSync(path.join(root,'web',asset[0])));return;}
   response.setHeader('Content-Type','application/json');
-  if(request.url==='/api/v1/bootstrap')response.end(JSON.stringify({token:'plot-fixture',os:'fixture',architecture:'browser',version:'test'}));
+  if(request.url==='/api/v1/module-schema')response.end(fs.readFileSync(path.join(root,'web','module-parameters.json'),'utf8'));
+  else if(request.url==='/api/v1/bootstrap')response.end(JSON.stringify({token:'plot-fixture',os:'fixture',architecture:'browser',version:'test'}));
   else if(request.url==='/api/v1/config')response.end(JSON.stringify({revision:'1',ini:fs.readFileSync(path.join(root,'config','replay.ini'),'utf8')}));
   else if(request.url==='/api/v1/analysis/config'&&request.method==='GET')response.end(JSON.stringify({revision:String(analysisRevision),analysis}));
   else if(request.url==='/api/v1/analysis/config'&&request.method==='POST'){
@@ -92,62 +94,17 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     assert.equal(await page.locator('#spectrumPanel').getAttribute('aria-modal'),null);
     assert.equal(await page.locator('#waterfallHeight').inputValue(),'510');
     assert.equal(await page.locator('#spectrumHeight').inputValue(),'350');
-    await page.locator('#waterfallMode').selectOption('3d');
-    const initial3D=await snapshot(),initialCamera=initial3D.waterfall.camera;
-    assert(initial3D.waterfall.rows>1&&initial3D.waterfall.rows<=48);assert(initial3D.waterfall.columns>1&&initial3D.waterfall.columns<=192);
-    assert.notEqual(await image(),flat);
-    const defaultImage=await image();
-    // Manually entered bounds can exceed HTML min/max; clipping must never invert
-    // or collapse the power/colour scale used by the 3D projection.
-    for(const [minimum,maximum] of [['dbMin','dbMax'],['colourMin','colourMax']]){
-      for(const [lo,hi] of [[200,300],[-400,-300],[100,200],[-300,-250]]){
-        await page.evaluate(({minimum,maximum,lo,hi})=>{
-          document.getElementById(minimum).value=lo;document.getElementById(maximum).value=hi;
-          document.getElementById(maximum).dispatchEvent(new Event('change'));
-        },{minimum,maximum,lo,hi});
-        assert((await image())===defaultImage,`${minimum}: invalid clipped scale ${lo}..${hi} must use the default range`);
-      }
-      await page.evaluate(({minimum,maximum})=>{
-        document.getElementById(minimum).value=-100;document.getElementById(maximum).value=0;
-        document.getElementById(maximum).dispatchEvent(new Event('change'));
-      },{minimum,maximum});
-    }
-    await page.locator('#waterfallRight').click();await page.locator('#waterfallUp').click();
-    await until(async()=>{const camera=(await snapshot()).waterfall.camera;return camera.yaw===initialCamera.yaw+10&&camera.pitch===initialCamera.pitch+5;},'Arrow controls did not rotate the waterfall');
-    assert.notEqual(await image(),defaultImage,'Rotating camera did not change the rendered projection');
-    await waterfall.scrollIntoViewIfNeeded();let box=await waterfall.boundingBox();
-    await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
-    await page.mouse.move(box.x+box.width/2+100,box.y+box.height/2+30,{steps:6});await page.mouse.up();
-    await until(async()=>(await snapshot()).waterfall.camera.yaw>initialCamera.yaw+30,'Mouse drag did not change camera yaw');
-    await waterfall.focus();await page.keyboard.press('ArrowLeft');await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('Home');
-    await until(async()=>JSON.stringify((await snapshot()).waterfall.camera)===JSON.stringify(initialCamera),'Home did not reset camera');
-    assert.equal(await image(),defaultImage,'Reset did not restore exact projection of paused history');
-    for(let i=0;i<30;i++)await page.locator('#waterfallUp').click();
-    await until(async()=>(await snapshot()).waterfall.camera.pitch===78,'Tilt did not stop at its upper bound');
-    await page.locator('#waterfallReset').click();
-    assert.deepEqual((await snapshot()).history,original.history,'Plot interactions mutated PSD history');
-    if(process.env.NGENE_SCREENSHOTS){fs.mkdirSync(process.env.NGENE_SCREENSHOTS,{recursive:true});await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'plot-interactions-desktop.png')});}
-    await page.setViewportSize({width:390,height:844});await page.locator('#waterfallMode').scrollIntoViewIfNeeded();
+    const fixed=await snapshot();
+    assert(fixed.waterfall3D.rows>1&&fixed.waterfall3D.rows<=64);
+    assert(fixed.waterfall3D.columns>1&&fixed.waterfall3D.columns<=256);
+    assert.equal(await page.locator('#waterfallMode,#waterfallOrbit').count(),0);
+    await page.locator('#waterfall3DHeight').fill('400');
+    assert.equal(await page.locator('#waterfall3DResize').getAttribute('aria-valuenow'),'400');
+    await page.setViewportSize({width:390,height:844});
+    await page.locator('#waterfall3D').scrollIntoViewIfNeeded();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile plot controls overflowed');
-    await page.locator('#waterfallHeight').fill('270');await waterfall.scrollIntoViewIfNeeded();box=await waterfall.boundingBox();
-    const beforeTouch=(await snapshot()).waterfall.camera;
-    const cdp=await context.newCDPSession(page);
-    const x=box.x+box.width/2,y=box.y+box.height/2;
-    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
-    await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+60,y:y+20}]});
-    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
-    await until(async()=>(await snapshot()).waterfall.camera.yaw!==beforeTouch.yaw,'Touch drag did not rotate camera');
-    await page.locator('#expandPlots').click();
-    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Expanded mobile plots overflowed');
-    await page.locator('#expandPlots').click();
-    await page.locator('#waterfallMode').selectOption('2d');
-    assert(await page.locator('#waterfallOrbit').isHidden());
-    assert.equal(await waterfall.evaluate(canvas=>getComputedStyle(canvas).touchAction),'auto','2D waterfall prevents touch scrolling');
-    assert.equal(await waterfall.getAttribute('tabindex'),'-1');
-    assert.deepEqual((await snapshot()).history,original.history,'Mode changes or mobile resizing mutated PSD history');
-    await page.locator('#waterfallMode').selectOption('3d');await page.locator('#waterfallReset').click();
-    if(process.env.NGENE_SCREENSHOTS)await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'plot-interactions-mobile.png')});
+    assert.deepEqual((await snapshot()).history,original.history,'Resizing mutated PSD history');
+    await page.locator('#showWaterfall3D').uncheck();
     const enabledHeight=(await page.locator('#spectrumPanel').boundingBox()).height;
     await page.locator('#showSpectrum').uncheck();
     assert(await page.locator('#spectrumBody').isHidden()&&await page.locator('#waterfallBody').isVisible(),'Mobile spectrum enable also hid the waterfall');
@@ -163,6 +120,6 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     await page.locator('#showWaterfall').check();
     assert.deepEqual((await snapshot()).history,[],'A changed FFT configuration must clear history before fresh receiver data');
     assert.deepEqual(errors,[]);
-    console.log('PASS: live plot sizing, mouse/keyboard resize, viewport expand/restore and focus, 3D depth-sorted orbit via mouse/touch/arrows/keyboard/reset, bounded tilt/mesh, mobile layout/2D scroll and unchanged paused PSD history under production CSP.');
+    console.log('PASS: live plot sizing, mouse/keyboard resize, viewport expand/restore and focus, fixed 3D view, bounded mesh, independent height and mobile layout and unchanged paused PSD history under production CSP.');
   }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

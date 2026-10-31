@@ -1,0 +1,23 @@
+﻿{
+    "study_date":  "2026-10-31",
+    "host_identifier":  "Intel64 Family 6 Model 186 Stepping 3, GenuineIntel",
+    "logical_processors":  "12",
+    "platform":  "Windows x64",
+    "compiler":  "MSVC 19.51.36260.0",
+    "configuration":  "Release /O2 /W4 /WX; no fast-math; no native ISA option",
+    "explicit_backend":  "SSE2",
+    "affinity":  "OS scheduler; unpinned",
+    "repeats":  2,
+    "replica_generation":  "production gps_ca.c; carrier coefficients prepared outside timing",
+    "scalar_reference":  "No explicit SIMD; compiler auto-vectorization allowed; --verify numerical comparison",
+    "sources_and_binaries_sha256":  {
+                                        "src/dsp/gps_ca.c":  "6D17AFAB853698FBCB7A74F6071271FFAFB308824FD4755EC48802210D6EFE1D",
+                                        "build/dsp-options-reference/Release/dsp_options.exe":  "4834011B067A5FF161C8A9F94BC45B7F0211910CD4A56DBF8F25CDA6B52FDB78",
+                                        "src/core/error.c":  "8973AAF6BDB37CD980C6253B22D4B0DD8C706882BE6D56089C67180EA1570EAB",
+                                        "benchmarks/dsp-options/experiment.c":  "AA82E892439DBC33FD1F1101B1F7B8DD3FCE93757602F0A33C8B21585DF8C311",
+                                        "build/msvc-x64-multisdr/Release/ngene.exe":  "2B0BD5FD70709FE9E30F0561DC2E75B2B94203CF68AD3433A0F79A5AC3ABEF55",
+                                        "build/dsp-options/Release/dsp_options.exe":  "E1F9FC79EF3E0B52519A035AA375868A5DE0D4709983E6CFAF3DA679EA8065E5",
+                                        "src/platform/platform.c":  "FFBEED92163E5C196C5099A21613756B6C315607A3FC5DDCE04EBC75A5634F09",
+                                        "benchmarks/dsp-options/CMakeLists.txt":  "182037D0948E680B42078B4B2361BA6512BE99608048D56BEC45B8D434597DF9"
+                                    }
+}

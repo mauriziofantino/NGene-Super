@@ -175,6 +175,8 @@ histogram_update_hz=30
       return result;
     };
     const toggle = async (id, enabled) => {
+      // This suite isolates the two primary plots; the eight-combination suite covers 3D.
+      if(await page.locator('#showWaterfall3D').isChecked())await page.locator('#showWaterfall3D').uncheck();
       const before = await get('analysis/config'), requestCount = analysisRequests.length;
       await page.locator(`#${id}`).setChecked(enabled);
       await until(async () => (await page.locator(`#${id}`).isChecked()) === enabled && await page.locator(`#${id}`).isEnabled(), `${id} settled ${enabled}`);

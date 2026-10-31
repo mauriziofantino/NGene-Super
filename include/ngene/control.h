@@ -1,7 +1,6 @@
 /** @file control.h @brief Thread-safe lifecycle control, independent of HTTP and GUI. */
 #ifndef NGENE_CONTROL_H
 #define NGENE_CONTROL_H
-#include "ngene/acquisition_receiver.h"
 #include "ngene/receiver.h"
 
 /** @brief Opaque owned TNgControl handle; release with the matching destroy operation. */
@@ -40,8 +39,6 @@ typedef struct {
     TNgRecordingStats recording;
     /** Optional diagnostic settings or an owned diagnostic snapshot. */
     TNgAnalysisSnapshot analysis;
-    /** GPS acquisition stages and confirmed results; independent of optional RF plots. */
-    TNgAcquisitionReceiverStatus acquisition;
     /** Cumulative written pairs including completed capture sessions. */
     uint64_t totalWrittenSamples;
     /** Baseband filter bandwidth applied by the source, in hertz. */
@@ -151,7 +148,7 @@ int NgControlRequest(TNgControl *control, TNgCommand command, uint64_t revision,
  * dispatch or recording when plots become dormant.
  *
  * @param control Live controller.
- * @param mask Mask bits: 1 PSD, 2 histogram, 4 acquisition CAF.
+ * @param mask Mask bits: 1 PSD, 2 histogram.
  */
 void NgControlDiagnosticInterest(TNgControl *control, unsigned mask);
 /**
@@ -159,7 +156,7 @@ void NgControlDiagnosticInterest(TNgControl *control, unsigned mask);
  * @details Thread-safe; callers aggregate independent subscriptions before replacing a lane.
  * Zero revokes selected lanes immediately without changing receiver dispatch or recording.
  * @param control Live controller.
- * @param mask Selected lanes: 1 PSD, 2 histogram, 4 acquisition CAF.
+ * @param mask Selected lanes: 1 PSD, 2 histogram.
  * @param expiresSeconds Absolute monotonic lease deadline; zero revokes selected lanes.
  */
 void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double expiresSeconds);
@@ -174,12 +171,6 @@ void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double
  * @param status Receives a by-value status snapshot.
  */
 void NgControlSnapshot(TNgControl *control, TNgControlStatus *status);
-/** Copy a measured GPS coarse CAF from the active run or the most recent run.
- * prn=0 selects its latest measured PRN; other values select GPS PRN 1..32.
- * No live sample or DSP storage crosses the control boundary.
- */
-void NgControlAcquisitionCafSnapshot(TNgControl *control, unsigned prn,
-                                     TNgAcquisitionCaf *caf);
 /**
  * @brief Copy the current receiver configuration and revision.
  *

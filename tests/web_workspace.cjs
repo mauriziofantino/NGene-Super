@@ -165,7 +165,7 @@ histogram_update_hz=20
     };
     const configurationTopics = ['source', 'receiver', 'acquisition', 'tracking', 'navigation', 'recording', 'analysis', 'display', 'profile'];
     const referenceTopics = ['receiver', 'acquisition', 'tracking', 'navigation'];
-    const referenceOnlyTopics = ['tracking', 'navigation'];
+    const referenceOnlyTopics = ['acquisition', 'tracking', 'navigation'];
     const referencesDisabled = async () => {
       assert(await page.locator('[data-reference-param]').count() > 30, 'Original receiver configuration exposes meaningful GNSS parameters');
       assert.deepEqual(await page.locator('[data-reference-param]').evaluateAll(controls => controls
@@ -180,7 +180,7 @@ histogram_update_hz=20
         assert.equal(await page.locator(`[data-receiver-settings="${reference}"]`).isVisible(), reference === topic,
           `Only the selected GNSS configuration section is displayed (${topic}/${reference})`);
       }
-      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'recording'].includes(topic),
+      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'recording'].includes(topic),
         'Only topics with real receiver parameters expose the operational form');
       await referencesDisabled();
     };
@@ -219,7 +219,7 @@ histogram_update_hz=20
       `${name} must use the original NGene shipped example`);
     assert.equal(writes.length, beforeConfiguration, 'Browsing GNSS reference settings must not issue mutations');
     assert.deepEqual(await get('config'), stoppedConfig, 'Reference values are not silently applied to the receiver');
-    for (const [view, topic] of [['acquisition', 'acquisition'], ['acquisition', 'receiver'], ['tracking', 'tracking'], ['navigation', 'navigation'], ['pvt', 'navigation']]) {
+    for (const [view, topic] of [['tracking', 'tracking'], ['navigation', 'navigation'], ['pvt', 'navigation']]) {
       await select(view);
       await page.locator(`#${views[view]} [data-open-settings="${topic}"]`).first().click();
       await configurationShown(topic);
@@ -296,7 +296,7 @@ histogram_update_hz=20
     assert.match(applied.ini, /ring_blocks=32(?:\r?\n|$)/, 'Implemented receiver buffer change reaches the service');
     const referenceNames = await page.locator('[data-reference-param]').evaluateAll(controls => controls.map(control => control.dataset.referenceParam));
     for (const name of referenceNames) assert(!applied.ini.includes(`${name}=`), `Reference parameter ${name} must never enter the INI`);
-    assert.match(applied.ini, /^\[acquisition\]/m, 'Implemented GPS acquisition parameters enter the saved operational profile');
+    assert.doesNotMatch(applied.ini, /^\[acquisition\]/m, 'Retired acquisition parameters must not enter the saved profile');
     assert.doesNotMatch(applied.ini, /^\[(?:tracking|navigation|pvt)\]/m, 'Unimplemented modules do not enter the saved operational profile');
     assert.equal(await page.locator('#configForm [aria-invalid="true"]').count(), 0, 'Disabled GNSS references must not introduce hidden form validation errors');
 
@@ -374,8 +374,7 @@ histogram_update_hz=20
       assert(geometry.scrollWidth <= geometry.width + 1, `${key} must fit a 390px viewport: ${JSON.stringify(geometry)}`);
     }
     await select('rf');
-    await page.locator('#waterfallMode').selectOption('3d');
-    await until(async () => (await snapshot()).waterfall.mode === '3d', 'real 3D waterfall projection');
+    await until(async () => (await snapshot()).waterfall3D.mode === '3d', 'real 3D waterfall projection');
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), '3D RF view must fit the mobile viewport');
     await screenshot('workspace-rf-mobile-real-replay.png');
     await select('setup');

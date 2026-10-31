@@ -183,8 +183,8 @@ function dirtyState(changed) {
 }
 const settingsTopics = {
   source: ['Front end', 'Choose the live SDR or recorded input, sample format, tuning and gains.', 'Before start'],
-  receiver: ['Receiver & signals', 'Select GPS searches and PRNs, then configure execution, conditioning and buffers. Other constellations remain unavailable.', 'Before start'],
-  acquisition: ['Acquisition', 'Configure GPS L1 C/A coarse acquisition, Doppler/code refinement and optional confirmation. Coherent processing follows the NGene 1 ms baseline.', 'GPS available'],
+  receiver: ['Receiver & signals', 'Configure execution, conditioning and buffers. GNSS processing modules are unavailable.', 'Before start'],
+  acquisition: ['Acquisition', 'The previous acquisition implementation has been removed. No acquisition settings are applied.', 'Unavailable'],
   tracking: ['Tracking', 'Configure coherent integration, code and carrier loops, lock criteria and correlators.', 'Module unavailable'],
   navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
   recording: ['Capture to disk', 'Choose a name, receiver-side folder and pre/post capture point.', 'Before start'],
@@ -198,8 +198,8 @@ function selectSettings(topic) {
   selectedSettings = topic;
   document.querySelectorAll('[data-settings]').forEach(button => { const active = button.dataset.settings === topic; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
   const [title, hint, mode] = settingsTopics[topic]; $('settingsTitle').textContent = title; $('settingsHint').textContent = hint; $('settingsMode').textContent = mode;
-  $('configForm').classList.toggle('hidden', !['source', 'receiver', 'acquisition', 'recording'].includes(topic) && ![...(moduleForm?.groups.values() || [])].some(g => g.topic === topic));
-  const groups = {source: ['Frontend', 'HackRF', 'RTL-SDR', 'bladeRF', 'File replay'], receiver: ['Receiver', 'Buffers', 'GPS receiver'], acquisition: ['GPS acquisition', 'Acquisition refinement'], recording: ['Recording']};
+  $('configForm').classList.toggle('hidden', !['source', 'receiver', 'recording'].includes(topic) && ![...(moduleForm?.groups.values() || [])].some(g => g.topic === topic));
+  const groups = {source: ['Frontend', 'HackRF', 'RTL-SDR', 'bladeRF', 'File replay'], receiver: ['Receiver', 'Buffers'], acquisition: [], recording: ['Recording']};
   document.querySelectorAll('#fields [data-group]').forEach(group => group.classList.toggle('topic-hidden', !(groups[topic] || []).includes(group.dataset.group) && moduleForm?.groups.get(group.dataset.group)?.topic !== topic));
   $('sourcePresets').classList.toggle('hidden', topic !== 'source');
   $('calibrationStatus').classList.toggle('hidden', topic !== 'source');
@@ -208,7 +208,7 @@ function selectSettings(topic) {
   for (const [id, key] of [['analysisSettings', 'analysis'], ['displaySettings', 'display'], ['profileSettings', 'profile']]) $(id).classList.toggle('hidden', topic !== key);
   updateSourceFields();
 }
-function referenceSettingsOnly() { return ['tracking', 'navigation'].includes(selectedSettings) && ![...(moduleForm?.groups.values() || [])].some(g => g.topic === selectedSettings); }
+function referenceSettingsOnly() { return ['acquisition', 'tracking', 'navigation'].includes(selectedSettings) && ![...(moduleForm?.groups.values() || [])].some(g => g.topic === selectedSettings); }
 function validateProfileFields() {
   refreshProfileErrors(true);
   const invalid = [...$('configForm').elements].find(input => profileErrors.has(input.name));
@@ -304,7 +304,7 @@ function updateSourceFields() {
 function controls() {
   const ready = editable(), running = connected() && status?.state === 'running';
   const commandPending = httpBusy || pendingCommand !== null;
-  for(const id of ['showSpectrum','showWaterfall'])$(id).disabled=commandPending||['starting','stopping'].includes(status?.state);
+  for(const id of ['showSpectrum','showWaterfall','showWaterfall3D'])$(id).disabled=commandPending||['starting','stopping'].includes(status?.state);
   for (const field of $('configForm').elements) field.disabled = !ready;
   for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
   $('calibrateGains').disabled = !ready || values['frontend.type'] === 'file' || !capabilities?.[values['frontend.type']];
@@ -497,22 +497,29 @@ const analysisFields = [
 let analysisDirty=false, analysisSnapshot=null, analysisSequence='0', analysisRevision='', waterfallHistory=[];
 let waterfallTime=-Infinity, skippedDisplay=0, rejectedFrames=0, histogramSequence='', analysisConfig=null;
 let analysisConfigRevision='0', plotConfigBusy=false, lastSpectrumComputation=null;
-let previousPlotSelection={spectrum:true,waterfall:true};
-function diagnosticVisibility(){return document.hidden||activeWorkspaceView!=='rf'?0:(($('showSpectrum').checked||$('showWaterfall').checked)?1:0)|($('showHistogram').checked?2:0);}
+const plotIds=['spectrum','waterfall','waterfall3D'];
+const plotToggle=id=>$(id==='spectrum'?'showSpectrum':id==='waterfall'?'showWaterfall':'showWaterfall3D');
+const plotSelection=()=>Object.fromEntries(plotIds.map(id=>[id,plotToggle(id).checked]));
+const anyPlotEnabled=()=>plotIds.some(id=>plotToggle(id).checked);
+let previousPlotSelection=plotSelection();
+let waterfall3DHistory=[],waterfall3DTime=-Infinity;
+const plotWork={spectrum:0,waterfall:0,waterfall3D:0};
+let waterfall3DRender={mode:'3d',rows:0,columns:0};
+function diagnosticVisibility(){return document.hidden||activeWorkspaceView!=='rf'?0:(anyPlotEnabled()?1:0)|($('showHistogram').checked?2:0);}
 function diagnosticEnabled(name){const value=analysisConfig?.[name]??savedValues[`analysis.${name}`];return value!==false&&value!=='false';}
-function plotEnabled(id){return diagnosticEnabled('spectrum_enabled')&&$(id==='spectrum'?'showSpectrum':'showWaterfall').checked;}
+function plotEnabled(id){return diagnosticEnabled('spectrum_enabled')&&plotToggle(id).checked;}
 function syncPlotVisibility(){
   const computation=diagnosticEnabled('spectrum_enabled');
   if(!plotConfigBusy&&computation!==lastSpectrumComputation){
     if(!computation){
-      if($('showSpectrum').checked||$('showWaterfall').checked)previousPlotSelection={spectrum:$('showSpectrum').checked,waterfall:$('showWaterfall').checked};
-      $('showSpectrum').checked=false;$('showWaterfall').checked=false;
-    }else if(lastSpectrumComputation===false&&!$('showSpectrum').checked&&!$('showWaterfall').checked){
-      $('showSpectrum').checked=previousPlotSelection.spectrum;$('showWaterfall').checked=previousPlotSelection.waterfall;
+      if(anyPlotEnabled())previousPlotSelection=plotSelection();
+      for(const id of plotIds)plotToggle(id).checked=false;
+    }else if(lastSpectrumComputation===false&&!anyPlotEnabled()){
+      for(const id of plotIds)plotToggle(id).checked=previousPlotSelection[id];
     }
     lastSpectrumComputation=computation;
   }
-  for(const id of ['spectrum','waterfall']){
+  for(const id of ['spectrum','waterfall','waterfall3D']){
     const enabled=plotEnabled(id),message=$(`${id}Disabled`);
     $(`${id}Body`).classList.toggle('hidden',!enabled);
     message.classList.toggle('hidden',enabled);
@@ -524,8 +531,7 @@ function diagnosticMask(){
   const visible=diagnosticVisibility();
   return (visible&1&&diagnosticEnabled('spectrum_enabled')?1:0)|(visible&2&&diagnosticEnabled('histogram_enabled')?2:0);
 }
-function diagnosticInterest(){return (paused?0:diagnosticMask())|
-  (!document.hidden&&activeWorkspaceView==='acquisition'&&receiverWorkspace?.cafEnabled?4:0);}
+function diagnosticInterest(){return paused?0:diagnosticMask();}
 /** Apply current server settings without replacing unrelated profile or diagnostic drafts. */
 function acceptAnalysisConfig(result){
   const iniDraft=$('iniEditor').value,customIni=iniDraft!==toIni(values);
@@ -541,9 +547,9 @@ function acceptAnalysisConfig(result){
   dirtyState(true);if(customIni)$('iniEditor').value=iniDraft;resetAnalysis(result.analysis);
 }
 async function changePlotEnabled(event){
-  const id=event.target.id,selection={spectrum:$('showSpectrum').checked,waterfall:$('showWaterfall').checked};
-  const before={...selection,[id==='showSpectrum'?'spectrum':'waterfall']:!event.target.checked};
-  const previousSelection={...previousPlotSelection},enabled=selection.spectrum||selection.waterfall;
+  const id=plotIds.find(id=>plotToggle(id)===event.target),selection=plotSelection();
+  const before={...selection,[id]:!event.target.checked};
+  const previousSelection={...previousPlotSelection},enabled=Object.values(selection).some(Boolean);
   if(enabled)previousPlotSelection={...selection};
   $('plotNotice').classList.add('hidden');
   syncPlotVisibility();requestStatus();
@@ -557,7 +563,7 @@ async function changePlotEnabled(event){
     acceptAnalysisConfig(result);
     log(`Spectrum FFT computation ${enabled?'enabled':'disabled'} for this session.`);
   }catch(error){
-    $('showSpectrum').checked=before.spectrum;$('showWaterfall').checked=before.waterfall;previousPlotSelection=previousSelection;
+    for(const id of plotIds)plotToggle(id).checked=before[id];previousPlotSelection=previousSelection;
     $('plotNotice').textContent=`Cannot change FFT computation: ${error.message}`;$('plotNotice').classList.remove('hidden');
     log(error.message,true);
   }finally{plotConfigBusy=false;httpBusy=false;syncPlotVisibility();controls();requestStatus();}
@@ -615,7 +621,7 @@ $('analysisForm').addEventListener('submit',async event=>{
   } catch(error){setAnalysisNotice(error.message,true);log(error.message,true);}
   finally{httpBusy=false;controls();}
 });
-function resetAnalysis(config=null){analysisSnapshot=null;analysisConfig=config;analysisSequence='0';histogramSequence='';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;skippedDisplay=0;rejectedFrames=0;syncPlotVisibility();drawAnalysis();}
+function resetAnalysis(config=null){analysisSnapshot=null;analysisConfig=config;analysisSequence='0';histogramSequence='';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;waterfall3DHistory=[];waterfall3DTime=-Infinity;skippedDisplay=0;rejectedFrames=0;syncPlotVisibility();drawAnalysis();}
 function psdIntegrity(a){
   if(!Array.isArray(a.dbfs)||a.dbfs.length>1024||a.dbfs.length!==Math.min(a.fft_size,1024))return false;
   let hash=2166136261,sum=0,min=Infinity,max=-Infinity;
@@ -637,12 +643,12 @@ function renderAnalysis(a,configRevision=null){
   const mask=diagnosticMask();
   if(!mask)return;
   if(a.sequence==='0'){if(analysisSequence!=='0')resetAnalysis(a.config);return;}
-  if(a.revision!==analysisRevision){waterfallHistory=[];waterfallTime=-Infinity;analysisSequence='0';histogramSequence='';analysisRevision=a.revision;}
+  if(a.revision!==analysisRevision){waterfallHistory=[];waterfallTime=-Infinity;waterfall3DHistory=[];waterfall3DTime=-Infinity;analysisSequence='0';histogramSequence='';analysisRevision=a.revision;}
   const incoming=a.sequence_id||'0';
   const spectrumChanged=Boolean(mask&1)&&incoming!==analysisSequence&&a.dbfs.length>0;
   const histogramIncoming=a.histogram_sequence??`${a.histogram_first_sample}:${a.histogram_count}`;
   const histogramChanged=Boolean(mask&2)&&histogramIncoming!==histogramSequence;
-  let waterfallChanged=false;
+  let waterfallChanged=false,waterfall3DChanged=false;
   if(spectrumChanged){
     if(BigInt(incoming)<BigInt(analysisSequence)||!psdIntegrity(a)){
       rejectedFrames++;$('frameIntegrity').textContent=`Rejected invalid/stale PSD: ${rejectedFrames}`;return;
@@ -658,6 +664,10 @@ function renderAnalysis(a,configRevision=null){
       waterfallChanged=true;
     }
   }
+  if(spectrumChanged&&plotEnabled('waterfall3D')&&a.produced_seconds-waterfall3DTime>=1/Math.max(0.1,Math.min(30,Number($('waterfallRate').value)))){
+    waterfall3DHistory.unshift({values:Object.freeze([...a.dbfs]),first:a.first_sample,epoch:a.epoch,sequence:incoming,produced:a.produced_seconds});
+    waterfall3DHistory.length=Math.min(waterfall3DHistory.length,historyRows());waterfall3DTime=a.produced_seconds;waterfall3DChanged=true;
+  }
   analysisSnapshot={...a,dbfs:spectrumChanged?[...a.dbfs]:(analysisSnapshot?.dbfs||[]),
     histogram_i:histogramChanged?a.histogram_i:(analysisSnapshot?.histogram_i||[]),histogram_q:histogramChanged?a.histogram_q:(analysisSnapshot?.histogram_q||[])};
   const unit=a.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin';
@@ -668,7 +678,7 @@ function renderAnalysis(a,configRevision=null){
     $('spectrumPeak').textContent=`Peak ${displayFrequency(a.peak_hz).toFixed(4)} ${frequencyUnit()} · ${a.peak_dbfs.toFixed(1)} ${unit}`;
     }
     $('frameIntegrity').textContent=`PSD #${incoming} · produced ${a.produced_seconds.toFixed(3)} s · min/max/mean ${a.min.toFixed(2)} / ${a.max.toFixed(2)} / ${a.mean.toFixed(2)} · NaN/Inf ${a.nan_count}/${a.inf_count} · hash ${a.checksum.toString(16)} · rejected ${rejectedFrames}`;
-    drawSpectrum();if(waterfallChanged)drawWaterfall();
+    drawSpectrum();if(waterfallChanged)drawWaterfall();if(waterfall3DChanged)drawWaterfall3D();
   }
   if(histogramChanged){
     histogramSequence=histogramIncoming;
@@ -708,38 +718,29 @@ function range(colour=false){
 function frequencyAxes(s){const {ctx,w,h,left,right}=s,[lo,hi]=frequencyRange();ctx.fillStyle='#8fa6ba';for(let j=0;j<=4;j++)ctx.fillText((lo+j*(hi-lo)/4).toFixed($('frequencyReference').value==='rf'?3:1),Math.min(w-58,Math.max(4,left+j*(right-left)/4-20)),h-10);ctx.fillText(frequencyUnit(),w-30,h-10);}
 function drawSpectrum(){
   if(!(diagnosticMask()&1)||!plotEnabled('spectrum'))return;
-  const s=surface('spectrum');if(!s)return;const [lo,hi]=range(),a=analysisSnapshot;
+  const s=surface('spectrum');if(!s)return;++plotWork.spectrum;const [lo,hi]=range(),a=analysisSnapshot;
   const {ctx,left,right,top,bottom}=s,[flo,fhi]=frequencyRange();
   ctx.fillStyle='#8fa6ba';ctx.fillText(a?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin',6,11);
   for(let j=0;j<=4;j++){const y=top+j*(bottom-top)/4;ctx.strokeStyle='#233446';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText((hi-j*(hi-lo)/4).toFixed(0),6,y+4);}
   frequencyAxes(s);if(!a?.dbfs.length){ctx.fillText('Waiting for a complete spectrum burst',left+20,top+35);return;}
-  ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.clip();ctx.strokeStyle='#39d5b0';ctx.lineWidth=1.5;ctx.beginPath();
-  a.dbfs.forEach((v,k)=>{const f=displayFrequency((k/a.dbfs.length-0.5)*a.sample_rate_hz),x=left+(f-flo)/(fhi-flo)*(right-left),y=bottom-Math.max(0,Math.min(1,(v-lo)/(hi-lo)))*(bottom-top);if(k)ctx.lineTo(x,y);else ctx.moveTo(x,y);});ctx.stroke();ctx.restore();
+  ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.clip();ctx.strokeStyle='#52edff';ctx.lineWidth=1.5;ctx.beginPath();
+  a.dbfs.forEach((v,k)=>{const f=displayFrequency((k/a.dbfs.length-0.5)*a.sample_rate_hz),x=left+(f-flo)/(fhi-flo)*(right-left),y=bottom-Math.max(0,Math.min(1,(v-lo)/(hi-lo)))*(bottom-top);if(k)ctx.lineTo(x,y);else ctx.moveTo(x,y);});ctx.stroke();ctx.lineTo(right,bottom);ctx.lineTo(left,bottom);ctx.closePath();const fill=ctx.createLinearGradient(0,top,0,bottom);fill.addColorStop(0,'#65f7ff');fill.addColorStop(0.55,'#007affaa');fill.addColorStop(1,'#001ab244');ctx.fillStyle=fill;ctx.fill();ctx.restore();
 }
 const waterfallBitmap=document.createElement('canvas');
 const waterfallPalette=Array.from({length:256},(_,n)=>{
-  const stops=[[8,17,35],[31,52,103],[41,112,165],[32,187,158],[224,211,98],[247,97,61]];
+  const stops=[[0,18,90],[0,70,215],[0,170,255],[65,245,224],[255,235,100],[255,65,25]];
   const x=n/255*(stops.length-1),i=Math.min(stops.length-2,Math.floor(x)),f=x-i;
   return stops[i].map((c,k)=>Math.round(c+(stops[i+1][k]-c)*f));
 });
 const waterfallCssPalette=waterfallPalette.map(colour=>`rgb(${colour.join(',')})`);
 let waterfallRender={mode:'2d',rows:0,columns:0};
-const waterfallDefaultCamera={yaw:-24,pitch:34};
-let waterfallCamera={...waterfallDefaultCamera};
 function drawWaterfall(){
   if(!(diagnosticMask()&1)||!plotEnabled('waterfall'))return;
-  const mode=$('waterfallMode').value,threeD=mode==='3d';
-  $('waterfall').setAttribute('aria-label',threeD?'3D spectrum waterfall: frequency, observation age and power; default view has newest observation at front. Drag or use arrow keys to rotate.':'Spectrum waterfall, newest observation at top');
-  $('waterfall').classList.toggle('waterfall-rotatable',threeD);
-  $('waterfall').tabIndex=threeD?0:-1;
-  if(threeD)$('waterfall').setAttribute('aria-describedby','waterfallHelp');else $('waterfall').removeAttribute('aria-describedby');
-  $('waterfallOrbit').classList.toggle('hidden',!threeD);
-  $('waterfallInfo').textContent=`${threeD?`3D · yaw ${Math.round(waterfallCamera.yaw)}° / tilt ${Math.round(waterfallCamera.pitch)}°`:'Newest at top'} · ${waterfallHistory.length} snapshots · display skips ${skippedDisplay}${analysisSnapshot?` · sample ${analysisSnapshot.first_sample}`:''}`;
+  $('waterfallInfo').textContent='Newest at top · '+waterfallHistory.length+' snapshots';
   const [lo,hi]=range(true);
   $('colourLegend').textContent=`Global colours ${lo} … ${hi} ${analysisSnapshot?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin'}`;
   const s=surface('waterfall');if(!s)return;
-  waterfallRender={mode,rows:0,columns:0};
-  if(threeD){drawWaterfall3D(s);return;}
+  waterfallRender={mode:'2d',rows:0,columns:0};++plotWork.waterfall;
   const {ctx,left,right,top,bottom}=s;
   const rows=historyRows(),columns=analysisSnapshot?.dbfs.length||1024;
   waterfallBitmap.width=columns;waterfallBitmap.height=rows;
@@ -754,80 +755,42 @@ function drawWaterfall(){
   bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2),[flo,fhi]=frequencyRange();
   ctx.drawImage(waterfallBitmap,(flo-fullLo)/(fullHi-fullLo)*columns,0,(fhi-flo)/(fullHi-fullLo)*columns,rows,left,top,right-left,bottom-top);
   ctx.fillStyle='#8fa6ba';ctx.fillText('New',6,top+9);ctx.fillText('Older',6,bottom);frequencyAxes(s);
-  waterfallRender={mode,rows:Math.min(rows,waterfallHistory.length),columns};
+  waterfallRender={mode:'2d',rows:Math.min(rows,waterfallHistory.length),columns};
 }
-/** Project the existing PSD history; bounded peak buckets keep browser work independent of history capacity. */
-function drawWaterfall3D(s){
-  const {ctx,w,h,left,right,top,bottom}=s,[lo,hi]=range(),[colourLo,colourHi]=range(true),[flo,fhi]=frequencyRange();
-  const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2);
-  const yaw=waterfallCamera.yaw*Math.PI/180,pitch=waterfallCamera.pitch*Math.PI/180;
-  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
-  const rotate=(frequency,depth,power)=>{
-    const x=(frequency-0.5)*2.2,z=(depth-0.5)*1.5,y=(power-0.5)*1.2,away=x*sy+z*cy;
-    return [x*cy-z*sy,y*cp+away*sp,away*cp-y*sp];
-  };
-  const corners=[];for(const x of [0,1])for(const z of [0,1])for(const y of [0,1])corners.push(rotate(x,z,y));
-  const minX=Math.min(...corners.map(p=>p[0])),maxX=Math.max(...corners.map(p=>p[0]));
-  const minY=Math.min(...corners.map(p=>p[1])),maxY=Math.max(...corners.map(p=>p[1]));
-  const scale=Math.min((right-left)/(maxX-minX),(bottom-top)/(maxY-minY));
-  const midX=(left+right)/2,midY=(top+bottom)/2;
-  const project=(frequency,depth,power)=>{const [x,y,z]=rotate(frequency,depth,power);return [midX+(x-(minX+maxX)/2)*scale,midY-(y-(minY+maxY)/2)*scale,z];};
-  const line=(a,b)=>{ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();};
-  const unit=analysisSnapshot?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin';
-  const label=(text,point,dx=0,dy=0)=>ctx.fillText(text,Math.max(4,Math.min(w-ctx.measureText(text).width-4,point[0]+dx)),Math.max(12,Math.min(h-4,point[1]+dy)));
-  ctx.fillStyle='#8fa6ba';ctx.strokeStyle='#293e52';
-  for(let j=0;j<=4;j++){
-    const x=j/4;line(project(x,0,0),project(x,1,0));
-    line(project(0,x,0),project(1,x,0));
-  }
-  const wall=cy>=0?1:0,side=sy>=0?1:0;
-  for(let j=0;j<=2;j++){
-    const level=j/2;line(project(side,0,level),project(side,1,level));
-    line(project(0,wall,level),project(1,wall,level));
-  }
-  const axes=()=>{
-    ctx.strokeStyle='#7190aa';ctx.fillStyle='#adc5d8';
-    line(project(0,0,0),project(1,0,0));line(project(1,0,0),project(1,1,0));line(project(0,0,0),project(0,0,1));
-    for(let j=0;j<=4;j++){const x=j/4;label((flo+x*(fhi-flo)).toFixed($('frequencyReference').value==='rf'?3:1),project(x,0,0),-12,15);}
-    for(let j=0;j<=2;j++)label((lo+j*(hi-lo)/2).toFixed(0),project(0,0,j/2),-30,0);
-    label(frequencyUnit(),project(0.5,0,0),0,29);label(unit,project(0,0,1),-20,-9);
-    label('New',project(1,0,0),8,0);
-    const span=waterfallHistory.length?Math.max(0,waterfallHistory[0].produced-waterfallHistory[waterfallHistory.length-1].produced):0;
-    label(`Older · ${span.toFixed(1)} s`,project(1,1,0),8,0);
-  };
-  if(!waterfallHistory.length){axes();ctx.fillText('Waiting for waterfall history',left+20,top+35);return;}
-  const oldest=waterfallHistory[waterfallHistory.length-1],newest=waterfallHistory[0];
-  const span=Math.max(0,newest.produced-oldest.produced);
-  // Each bucket retains its peak, including narrow carriers, across the selected frequency interval.
-  const bins=newest.values.length,start=Math.max(0,Math.min(bins-1,Math.floor((flo-fullLo)/(fullHi-fullLo)*bins)));
+/** Fixed front-facing surface: frequency stays aligned with the two plots above. */
+function drawWaterfall3D(){
+  if(!(diagnosticMask()&1)||!plotEnabled('waterfall3D'))return;
+  const s=surface('waterfall3D');if(!s)return;++plotWork.waterfall3D;
+  const {ctx,left,right,top,bottom}=s,[lo,hi]=range(),[colourLo,colourHi]=range(true),[flo,fhi]=frequencyRange();
+  const history=waterfall3DHistory,fs=analysisSnapshot?.sample_rate_hz||100000;
+  const fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2),height=bottom-top;
+  const stride=Math.ceil(historyRows()/64),depthRows=Math.ceil(historyRows()/stride),rows=Math.ceil(history.length/stride),bins=history[0]?.values.length||0;
+  const start=Math.max(0,Math.min(bins-1,Math.floor((flo-fullLo)/(fullHi-fullLo)*bins)));
   const end=Math.max(start+1,Math.min(bins,Math.ceil((fhi-fullLo)/(fullHi-fullLo)*bins)));
-  const columns=Math.min(end-start,192,Math.max(16,Math.floor((right-left)/5)));
-  const rows=Math.min(48,waterfallHistory.length),mesh=[];
+  const columns=Math.min(256,end-start,Math.max(16,Math.floor((right-left)/3)));
+  const point=(k,depth,power)=>[left+k/Math.max(1,columns-1)*(right-left),bottom-depth*height*0.58-Math.max(0,Math.min(1,(power-lo)/(hi-lo)))*height*0.4];
+  const mesh=[];
   for(let j=0;j<rows;j++){
-    const index=rows===1?0:Math.round(j*(waterfallHistory.length-1)/(rows-1)),row=waterfallHistory[index];
-    const depth=span>0?Math.max(0,Math.min(1,(newest.produced-row.produced)/span)):0,points=[];
+    // Fixed temporal buckets cover every snapshot, including brief events.
+    const bucket=history.slice(j*stride,Math.min((j+1)*stride,history.length)),points=[];
     for(let k=0;k<columns;k++){
-      const first=start+Math.floor(k*(end-start)/columns),last=start+Math.floor((k+1)*(end-start)/columns);
-      let peak=-Infinity;for(let bin=first;bin<last;bin++)peak=Math.max(peak,row.values[bin]);
-      const colour=waterfallCssPalette[Math.max(0,Math.min(255,Math.round(255*(peak-colourLo)/(colourHi-colourLo))))];
-      points.push({xy:project(columns===1?0.5:k/(columns-1),depth,Math.max(0,Math.min(1,(peak-lo)/(hi-lo)))),colour});
-    }
-    mesh.push(points);
+      const a=start+Math.floor(k*(end-start)/columns),b=start+Math.floor((k+1)*(end-start)/columns);let peak=-Infinity;
+      for(const row of bucket)for(let bin=a;bin<b;bin++)peak=Math.max(peak,row.values[bin]);
+      points.push({power:peak,xy:point(k,j/Math.max(1,depthRows-1),peak)});
+    }mesh.push(points);
   }
-  // Sort facets in camera space so rear observations also occlude correctly after rotation.
-  const facets=[];
-  for(let j=0;j<rows;j++)for(let k=0;k<columns-1;k++){
-    const a=mesh[j][k],b=mesh[j][k+1],points=j>0?[a,b,mesh[j-1][k+1],mesh[j-1][k]]:[a,b];
-    facets.push({points,colour:a.colour,depth:points.reduce((sum,p)=>sum+p.xy[2],0)/points.length});
+  // Draw distant observations first; no camera transforms or facet sorting.
+  for(let j=rows-1;j>=0;j--)for(let k=0;k<columns-1;k++){
+    const a=mesh[j][k],b=mesh[j][k+1],rear=j+1<rows?mesh[j+1]:null;
+    const points=rear?[a.xy,b.xy,rear[k+1].xy,rear[k].xy]:[a.xy,b.xy,[b.xy[0],bottom-j/Math.max(1,depthRows-1)*height*0.58],[a.xy[0],bottom-j/Math.max(1,depthRows-1)*height*0.58]];
+    ctx.beginPath();ctx.moveTo(...points[0]);for(const xy of points.slice(1))ctx.lineTo(...xy);ctx.closePath();const peak=Math.max(a.power,b.power,rear?rear[k].power:-Infinity,rear?rear[k+1].power:-Infinity);
+    const colour=waterfallCssPalette[Math.max(0,Math.min(255,Math.round(255*(peak-colourLo)/(colourHi-colourLo))))];
+    ctx.fillStyle=colour;ctx.fill();ctx.strokeStyle=colour;ctx.lineWidth=0.6;ctx.stroke();
   }
-  facets.sort((a,b)=>b.depth-a.depth);ctx.lineWidth=0.7;
-  for(const facet of facets){
-    ctx.beginPath();ctx.moveTo(facet.points[0].xy[0],facet.points[0].xy[1]);for(let n=1;n<facet.points.length;n++)ctx.lineTo(facet.points[n].xy[0],facet.points[n].xy[1]);
-    if(facet.points.length>2){ctx.closePath();ctx.fillStyle=facet.colour;ctx.fill();}
-    ctx.strokeStyle=facet.colour;ctx.stroke();
-  }
-  if(columns===1)for(const row of mesh){ctx.fillStyle=row[0].colour;ctx.fillRect(row[0].xy[0]-2,row[0].xy[1]-2,4,4);}
-  axes();waterfallRender={mode:'3d',rows,columns};
+  frequencyAxes(s);ctx.fillStyle='#8fa6ba';ctx.fillText('Older',5,top+12);ctx.fillText('New',5,bottom);
+  if(!rows)ctx.fillText('Waiting for 3D history',left+20,top+35);
+  $('waterfall3DInfo').textContent='Fixed perspective · '+history.length+' snapshots · newest at front';
+  waterfall3DRender={mode:'3d',rows,columns:rows?columns:0};
 }
 function drawHistogram(id,data,color){
   if(!(diagnosticMask()&2))return;
@@ -839,16 +802,15 @@ function drawHistogram(id,data,color){
   values.forEach((v,k)=>{const bh=(bottom-top)*Math.min(1,v/max);ctx.fillRect(left+k*dw,bottom-bh,Math.max(1,dw-1),bh);});
   ctx.fillStyle='#8fa6ba';for(let j=0;j<=4;j++)ctx.fillText(String(j===4?(analysisSnapshot?.histogram_max??127):Math.round((analysisSnapshot?.histogram_min??-128)+j*((analysisSnapshot?.histogram_max??127)-(analysisSnapshot?.histogram_min??-128)+1)/4)),Math.min(w-28,left+j*(right-left)/4-10),h-10);
 }
-function drawAnalysis(){drawSpectrum();drawWaterfall();drawHistogram('histogramI',analysisSnapshot?.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot?.histogram_q,'#62a6ff');}
-let plotDrawPending=false,waterfallDrawPending=false;
+function drawAnalysis(){drawSpectrum();drawWaterfall();drawWaterfall3D();drawHistogram('histogramI',analysisSnapshot?.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot?.histogram_q,'#62a6ff');}
+let plotDrawPending=false;
 function schedulePlotDraw(){if(plotDrawPending||!diagnosticMask())return;plotDrawPending=true;requestAnimationFrame(()=>{plotDrawPending=false;drawAnalysis();});}
-function scheduleWaterfallDraw(){if(waterfallDrawPending||!(diagnosticMask()&1)||!plotEnabled('waterfall'))return;waterfallDrawPending=true;requestAnimationFrame(()=>{waterfallDrawPending=false;drawWaterfall();});}
 function setPlotHeight(id,height){
   height=Math.max(180,Math.min(720,Math.round(height/10)*10));
   $(`${id}Wrap`).style.height=`${height}px`;$(`${id}Height`).value=height;$(`${id}HeightValue`).value=`${height} px`;
   $(`${id}Resize`).setAttribute('aria-valuenow',height);$(`${id}Resize`).setAttribute('aria-valuetext',`${height} pixels`);schedulePlotDraw();
 }
-for(const id of ['spectrum','waterfall']){
+for(const id of ['spectrum','waterfall','waterfall3D']){
   setPlotHeight(id,$(`${id}Wrap`).getBoundingClientRect().height);
   $(`${id}Height`).addEventListener('input',event=>setPlotHeight(id,Number(event.target.value)));
   const handle=$(`${id}Resize`);let drag=null;
@@ -884,37 +846,9 @@ document.addEventListener('keydown',event=>{
     else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
   }
 });
-function rotateWaterfall(yaw,pitch){
-  waterfallCamera={yaw:((yaw+180)%360+360)%360-180,pitch:Math.max(12,Math.min(78,pitch))};scheduleWaterfallDraw();
-}
-function resetWaterfallCamera(){waterfallCamera={...waterfallDefaultCamera};scheduleWaterfallDraw();}
-for(const [id,yaw,pitch] of [['waterfallLeft',-10,0],['waterfallRight',10,0],['waterfallUp',0,5],['waterfallDown',0,-5]])$(id).addEventListener('click',()=>rotateWaterfall(waterfallCamera.yaw+yaw,waterfallCamera.pitch+pitch));
-$('waterfallReset').addEventListener('click',resetWaterfallCamera);
-let waterfallDrag=null;
-$('waterfall').addEventListener('pointerdown',event=>{
-  if($('waterfallMode').value!=='3d'||!event.isPrimary||event.button!==0)return;
-  event.preventDefault();$('waterfall').focus({preventScroll:true});
-  waterfallDrag={pointer:event.pointerId,x:event.clientX,y:event.clientY,...waterfallCamera};$('waterfall').setPointerCapture(event.pointerId);$('waterfall').classList.add('dragging');
-});
-$('waterfall').addEventListener('pointermove',event=>{
-  if(!waterfallDrag||event.pointerId!==waterfallDrag.pointer)return;
-  rotateWaterfall(waterfallDrag.yaw+(event.clientX-waterfallDrag.x)*0.4,waterfallDrag.pitch+(event.clientY-waterfallDrag.y)*0.25);
-});
-function finishWaterfallDrag(event){
-  if(!waterfallDrag||event.pointerId!==waterfallDrag.pointer)return;
-  waterfallDrag=null;$('waterfall').classList.remove('dragging');if($('waterfall').hasPointerCapture(event.pointerId))$('waterfall').releasePointerCapture(event.pointerId);
-}
-for(const name of ['pointerup','pointercancel','lostpointercapture'])$('waterfall').addEventListener(name,finishWaterfallDrag);
-$('waterfall').addEventListener('keydown',event=>{
-  if($('waterfallMode').value!=='3d')return;
-  const direction={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,5],ArrowDown:[0,-5]}[event.key];
-  if(direction){event.preventDefault();rotateWaterfall(waterfallCamera.yaw+direction[0],waterfallCamera.pitch+direction[1]);}
-  else if(event.key==='Home'){event.preventDefault();resetWaterfallCamera();}
-});
-$('waterfall').addEventListener('dblclick',()=>{if($('waterfallMode').value==='3d')resetWaterfallCamera();});
 $('clearWaterfall').addEventListener('click',()=>{waterfallHistory=[];drawWaterfall();});
-$('waterfallMode').addEventListener('change',drawWaterfall);
-$('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());drawAnalysis();});
+$('clearWaterfall3D').addEventListener('click',()=>{waterfall3DHistory=[];drawWaterfall3D();});
+$('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());waterfall3DHistory.length=Math.min(waterfall3DHistory.length,historyRows());drawAnalysis();});
 for(const id of ['dbMin','dbMax','colourMin','colourMax','waterfallRate','frequencyMin','frequencyMax','histScale','histMax'])$(id).addEventListener('change',drawAnalysis);
 $('configForm').addEventListener('submit', event => event.preventDefault());
 $('apply').addEventListener('click', () => applyConfig()); $('validate').addEventListener('click', () => applyConfig(true));
@@ -943,11 +877,12 @@ $('calibrateGains').addEventListener('click', async () => {
   const current = () => keys.every((key,index) => (values[key] || '') === requested[index]);
   httpBusy = true; controls();
   $('calibrationStatus').textContent = values['frontend.type'] === 'hackrf' ?
-    'Checking all 384 HackRF gain settings, three I/Q windows each. This can take several minutes; display histogram bins stay unchanged.' :
+    'Checking HackRF gains from low gain; saturated VGA branches stop early. Three I/Q windows per setting; this can take several minutes.' :
     'Checking every supported gain setting, three I/Q windows each. Display histogram bins stay unchanged.';
   try {
     const result = await api('frontend/calibrate', {revision, ini: toIni(values)});
     if (!current()) throw new Error('Source settings changed during calibration.');
+    if (!result.accepted) throw new Error('No clean gain setting was found. Existing gains were kept; check the RF input and antenna before retrying.');
     const source = values['frontend.type'];
     if (source === 'hackrf') Object.assign(values, {'hackrf.lna_gain_db':String(result.lna_gain_db), 'hackrf.vga_gain_db':String(result.vga_gain_db), 'hackrf.rf_amp':String(result.rf_amp)});
     if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':String(result.rtl_auto_gain), 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db)});
@@ -983,8 +918,8 @@ $('deviceLimits').addEventListener('click', async () => {
 $('filePreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'file','replay.realtime':'true','replay.loop':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
 $('frequencyReference').addEventListener('change',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
 $('resetFrequency').addEventListener('click',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
-$('autoScale').addEventListener('click',()=>{if(!($('showSpectrum').checked||$('showWaterfall').checked)||!diagnosticEnabled('spectrum_enabled')||!analysisSnapshot?.dbfs.length)return;const lo=Math.floor(Math.min(...analysisSnapshot.dbfs)/10)*10,hi=Math.ceil(Math.max(...analysisSnapshot.dbfs)/10)*10+10;for(const id of ['dbMin','colourMin'])$(id).value=lo;for(const id of ['dbMax','colourMax'])$(id).value=hi;drawAnalysis();});
-for(const id of ['showSpectrum','showWaterfall'])$(id).addEventListener('change',changePlotEnabled);
+$('autoScale').addEventListener('click',()=>{if(!anyPlotEnabled()||!diagnosticEnabled('spectrum_enabled')||!analysisSnapshot?.dbfs.length)return;const lo=Math.floor(Math.min(...analysisSnapshot.dbfs)/10)*10,hi=Math.ceil(Math.max(...analysisSnapshot.dbfs)/10)*10+10;for(const id of ['dbMin','colourMin'])$(id).value=lo;for(const id of ['dbMax','colourMax'])$(id).value=hi;drawAnalysis();});
+for(const id of ['showSpectrum','showWaterfall','showWaterfall3D'])$(id).addEventListener('change',changePlotEnabled);
 $('histogramPanel').querySelector('.panel-heading').append($('showHistogram').parentElement);
 $('showHistogram').parentElement.classList.add('plot-toggle');
 $('showHistogram').parentElement.lastChild.textContent=' Enable';
@@ -1008,7 +943,7 @@ $('exit').addEventListener('click', async () => { if (!confirm('Stop the receive
 setInterval(() => { if (waiting && performance.now() - lastRequest > 4000) socket?.close(); else if (statusRequestPending||performance.now() - lastRequest >= Number($('refresh').value)) requestStatus(); }, 10);
 
 const plotResizeObserver=new ResizeObserver(schedulePlotDraw);
-for(const id of ['spectrum','waterfall','histogramI','histogramQ'])plotResizeObserver.observe($(id));
+for(const id of ['spectrum','waterfall','waterfall3D','histogramI','histogramQ'])plotResizeObserver.observe($(id));
 receiverWorkspace = createReceiverWorkspace({
   onViewChange(view) {
     activeWorkspaceView = view;
@@ -1017,7 +952,6 @@ receiverWorkspace = createReceiverWorkspace({
     if (view === 'rf') requestAnimationFrame(drawAnalysis);
   },
   onOpenSettings(topic) { showView('setup'); selectSettings(topic); },
-  onFetchCaf(prn) { return api(`acquisition/caf${prn ? `?prn=${encodeURIComponent(prn)}` : ''}`); },
   onPlotInterestChange() { requestStatus(); },
   onBrowseReplay() {
     if (!editable()) { notice('Stop the receiver before choosing another input file.', true); return; }
@@ -1027,7 +961,7 @@ receiverWorkspace = createReceiverWorkspace({
 connect();
 
 /* Read-only inspection for frame troubleshooting and browser regression tests. */
-export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:skippedDisplay,rejected:rejectedFrames,waterfall:{...waterfallRender,camera:{...waterfallCamera}},history:waterfallHistory.map(row=>({...row,values:[...row.values]}))};}
+export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:skippedDisplay,rejected:rejectedFrames,work:{...plotWork},waterfall:{...waterfallRender},waterfall3D:{...waterfall3DRender,history:waterfall3DHistory.length},history:waterfallHistory.map(row=>({...row,values:[...row.values]}))};}
 export {psdIntegrity, renderAnalysis, displayFrequency};
 
 document.querySelectorAll('[data-settings]').forEach(button => button.addEventListener('click', () => selectSettings(button.dataset.settings)));
