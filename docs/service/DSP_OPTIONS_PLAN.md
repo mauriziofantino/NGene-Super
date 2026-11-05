@@ -4,6 +4,11 @@ Status: October 31, 2026. Candidate experiments completed; operational receiver 
 UI unchanged. Evidence: [standalone DSP experiment](../../benchmarks/dsp-options/README.md).
 This supplements the historical [native IQ report](NATIVE_IQ_PERFORMANCE.md).
 
+Subsequent implementation of the common CI8/CI16 stream, SiGe adapter and DC-removal
+retirement is documented in [frontend stream decisions](FRONTEND_STREAM_DECISIONS.md).
+The unchanged-receiver statement above describes the standalone experiment only;
+approximate carrier/correlator profiles have not been integrated into the receiver.
+
 ## Findings that change the proposed architecture
 
 Keep the 8-bit and XOR alternatives. There are three independent decisions:

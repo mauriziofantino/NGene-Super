@@ -37,7 +37,7 @@ static const TNgFrontendOps ops={Start,Acquire,Release,Stop,NULL,NULL};
 int NgFrontendAvailable(TNgFrontendKind kind) { (void)kind; return 1; }
 int NgFrontendCapabilities(const TNgConfig *config,TNgFrontendCaps *caps,TNgError *error)
 { (void)config; (void)error; memset(caps,0,sizeof(*caps)); return NG_OK; }
-int NgFrontendOpen(const TNgConfig *config,TNgFrontend *frontend,TNgError *error)
+int NgFrontendOpenNative(const TNgConfig *config,TNgFrontend *frontend,TNgError *error)
 {
     (void)error; CHECK(!active); CHECK(config->vgaGainDb<=2); ++opens; fixtureVga=config->vgaGainDb;
     frontend->ops=&ops; frontend->info.format=NG_FORMAT_CI8; frontend->info.sampleRateHz=32768; return NG_OK;

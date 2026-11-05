@@ -411,7 +411,7 @@ int main(void)
         replayConfig.replayRealtime = 0;
         strcpy(replayConfig.replayPath, "ngene_hackrf_parallel_replay.cs8");
         CHECK(NgTestWriteTone(replayConfig.replayPath, 32, c.sampleRateHz) == NG_OK);
-        CHECK(NgFrontendOpen(&replayConfig, &replay, &e) == NG_OK);
+        CHECK(NgFrontendOpenNative(&replayConfig, &replay, &e) == NG_OK);
         CHECK(replay.ops->start(replay.context, &e) == NG_OK);
         CHECK(replay.ops->acquire(replay.context, &replayView, 0, &e) == NG_OK);
         CHECK(replayView.samples != v.samples && replayView.samples[0].i == 32);

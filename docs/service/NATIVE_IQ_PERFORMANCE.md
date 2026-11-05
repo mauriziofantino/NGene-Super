@@ -1,5 +1,10 @@
 # Native bladeRF precision, ring buffering and waterfall views
 
+> October 31 implementation update: [the frontend decision record](FRONTEND_STREAM_DECISIONS.md)
+> describes the implemented common-stream worker, aligned CI8/CI16 rings, native SiGe
+> adapter and removal of the streaming DC IIR. The native-format description below
+> records the preceding design.
+>
 > October 31 design update: the [DSP options plan](DSP_OPTIONS_PLAN.md) evaluates
 > common CI8/CI16 stream profiles, exact byte-XOR correlation and optional square
 > carrier/one-bit approximations using isolated measurements. These are proposed

@@ -49,10 +49,10 @@ static void CheckIndependentSources(const char *path)
     config.replayRealtime = 0;
     config.replayStartSample = 3;
     config.replaySampleLimit = 7;
-    CHECK(NgFrontendOpen(&config, &first, &error) == NG_OK);
+    CHECK(NgFrontendOpenNative(&config, &first, &error) == NG_OK);
     config.replayStartSample = 0;
     config.replaySampleLimit = 0;
-    CHECK(NgFrontendOpen(&config, &second, &error) == NG_OK);
+    CHECK(NgFrontendOpenNative(&config, &second, &error) == NG_OK);
     CHECK(first.ops->start(first.context, &error) == NG_OK);
     CHECK(second.ops->start(second.context, &error) == NG_OK);
     CHECK(first.ops->acquire(first.context, &firstView, 0, &error) == NG_OK);
@@ -102,7 +102,7 @@ static void CheckLoopAndValidation(const char *path)
     config.replaySampleLimit = 3;
     config.centerFrequencyHz = UINT64_C(1576420000);
     config.signalFrequencyHz = UINT64_C(1575420000);
-    CHECK(NgFrontendOpen(&config, &frontend, &error) == NG_OK);
+    CHECK(NgFrontendOpenNative(&config, &frontend, &error) == NG_OK);
     CHECK(frontend.info.digitalIfHz == -1000000);
     CHECK(frontend.ops->start(frontend.context, &error) == NG_OK);
     CHECK(frontend.ops->acquire(frontend.context, &view, 0, &error) == NG_OK);
@@ -115,19 +115,19 @@ static void CheckLoopAndValidation(const char *path)
     CHECK(frontend.ops->stop(frontend.context, &error) == NG_OK);
     NgFrontendDestroy(&frontend);
     config.replayStartSample = NG_TEST_PAIRS;
-    CHECK(NgFrontendOpen(&config, &frontend, &error) == NG_ERROR);
+    CHECK(NgFrontendOpenNative(&config, &frontend, &error) == NG_ERROR);
     config.replayStartSample = 0;
     CHECK(snprintf(badPath, sizeof(badPath), "%s.bad", path) > 0);
     CHECK(snprintf(config.replayPath, sizeof(config.replayPath), "%s", badPath) > 0);
     output = NgFopenExclusive(badPath);
     CHECK(output != NULL && fclose(output) == 0);
-    CHECK(NgFrontendOpen(&config, &frontend, &error) == NG_ERROR);
+    CHECK(NgFrontendOpenNative(&config, &frontend, &error) == NG_ERROR);
     output = fopen(badPath, "ab");
     CHECK(output != NULL && fputc(1, output) != EOF && fclose(output) == 0);
-    CHECK(NgFrontendOpen(&config, &frontend, &error) == NG_ERROR);
+    CHECK(NgFrontendOpenNative(&config, &frontend, &error) == NG_ERROR);
     CHECK(remove(badPath) == 0);
     config.replayPath[0] = '\0';
-    CHECK(NgFrontendOpen(&config, &frontend, &error) == NG_ERROR);
+    CHECK(NgFrontendOpenNative(&config, &frontend, &error) == NG_ERROR);
 }
 
 /** @brief Reject malformed or mismatched sidecars while preserving a caller's draft.

@@ -18,12 +18,12 @@ an over-the-air GNSS capture or a position solution.*
 
 ## Capabilities
 
-- Native HackRF, RTL-SDR and bladeRF RX0 inputs, plus recorded I/Q file replay.
-- Native CI8, CU8 and SC16 Q11 sample storage, preserving the selected frontend precision.
-- Optional continuous DC removal before a common stream is delivered to receiver channels.
+- Native HackRF, RTL-SDR, bladeRF RX0 and fixed-profile SiGe I/Q inputs, plus file replay.
+- Common signed CI8/CI16 rings, SIMD conversion and a dedicated source worker. Automatic precision preserves native ADC information.
+- No streaming DC removal. Old DC profile keys are retired and ignored.
 - GNSS acquisition is unavailable: the previous implementation has been removed.
-- Recording before or after conditioning, with segmentation, metadata and gap accounting.
-- Spectrum/PSD, 2D and fixed perspective 3D waterfalls, I/Q histograms and live receiver counters.
+- Common-stream recording with segmentation, format/ADC provenance and gap accounting.
+- Spectrum/PSD, synchronized 2D and rectangular relief waterfalls, I/Q histograms and live receiver counters.
 - Runtime diagnostic controls: switching off all three RF views stops their shared
   FFT/PSD production. Histograms can remain active independently.
 - Internal integer FFT and mathematical functions with compiler selected SSE2 or NEON
@@ -40,7 +40,8 @@ directory. The [operator manual](https://github.com/mauriziofantino/nav-ngene-ev
 | HackRF | CI8: signed 8-bit I and Q | Native libhackrf and a working USB driver |
 | RTL-SDR | CU8: unsigned 8-bit I and Q | Native librtlsdr and a compatible tuner/USB driver |
 | bladeRF RX0 | SC16 Q11, or CI8 when supported | Native libbladeRF and compatible device/FPGA configuration |
-| Recorded I/Q | CI8, CU8 or SC16 Q11 | Closed raw file and its stream parameters, preferably a metadata sidecar |
+| SiGe native I/Q | Marker-tagged one-bit I/Q, decoded to signed CI8 | Loaded native-I/Q firmware, VID/PID 16c0:072f and libusb; fixed Fs 8.1838 Msps and IF +38.4 kHz |
+| Recorded I/Q | CI8, CU8, SC16 Q11 or CI16 Q15 | Closed raw file and its stream parameters, preferably a metadata sidecar |
 
 Windows, Linux and macOS build paths are provided. Optimized FFT targets include x86-64,
 32-bit x86, ARM64 and ARMv7 with NEON, subject to OS and toolchain support. Building a target
@@ -58,7 +59,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -M
 .\build\msvc-x64-multisdr\Release\ngene.exe --web --port 8080
 ```
 
-The script configures and builds all three native SDR adapters and stages their DLLs.
+The script configures and builds all four native input adapters and stages their DLLs.
 The first build may download pinned dependencies. USB drivers and device firmware remain
 separate setup steps. See [Getting started](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Getting-Started) for replay-only
 setup and the first operating session. Additional platform build details are in the
@@ -75,7 +76,7 @@ ctest --test-dir build --output-on-failure
 ./build/ngene --web --port 8080
 ```
 
-Enable the required native adapters with `-DNGENE_WITH_HACKRF=ON`,
+Enable the required native adapters with `-DNGENE_WITH_SIGE=ON`, `-DNGENE_WITH_HACKRF=ON`,
 `-DNGENE_WITH_RTLSDR=ON` and/or `-DNGENE_WITH_BLADERF=ON`; their platform dependencies
 must be available. Python, Node.js, FFTW and SoapySDR are not runtime requirements.
 
@@ -116,22 +117,28 @@ an [acquisition] section remain readable; that retired section is ignored and om
 when saving. Tracking, navigation decoding and PVT are not integrated.
 
 RF observation has three independent, resizable views in order: spectrum, 2D waterfall,
-and a fixed perspective 3D surface. There are no orbit, drag or rotation controls.
-Each Enable switch stops that view's rendering and private history preparation. The views
-share one PSD producer: it is enabled while at least one is selected. Turning all three off
-also disables FFT production. Histograms, recording and input streaming remain independent.
-The 3D mesh is bounded to 64 rows and 256 columns; disabled views do not build a mesh or bitmap.
-Fixed temporal buckets pool maxima across every stored snapshot and frequency bin, preserving
-brief events while keeping a stable depth scale as history fills.
+and a rectangular blue/cyan relief waterfall inspired by the FNIRSI DPO350P display.
+The relief shades signal power on exactly the same frequency/time grid as 2D; it has no
+perspective camera or displaced observations. Both waterfalls use one FFT history, rate,
+frequency crop, power range and newest-at-top direction. Pause and either Clear button
+operate on that shared history. Reenabling a paused view redraws the cached history.
+Each Enable switch stops that view's bitmap preparation and rendering. History advances
+while either waterfall is enabled, up to 2048 rows and 1024 telemetry bins, with no extra
+temporal or frequency pooling. The views share one PSD producer: turning all three off
+disables FFT production. Histograms, recording and input streaming remain independent.
 
 Run tests/web_rf_views.cjs with Playwright and NGENE_EXECUTABLE pointing to the built receiver
-for all eight view combinations, per-canvas inactivity, private history inactivity,
+for all eight view combinations, per-canvas inactivity, shared history registration,
 all-off PSD production, profile compatibility, and desktop/mobile regression coverage.
 
 Gain calibration collects three native I/Q windows per setting and stops RX before statistical
 analysis. All three windows must pass. HackRF VGA sweeps stop at the first overloaded setting
 in each LNA/RF-amplifier branch. An unsuccessful calibration leaves the current GUI gains intact.
 These checks do not replace on-device RF/USB validation.
+
+The [frontend decision record](docs/service/FRONTEND_STREAM_DECISIONS.md) documents the
+common formats, worker ownership, SiGe USB setup, removed DC filter, recording semantics
+and alternatives considered.
 
 ## Documentation
 

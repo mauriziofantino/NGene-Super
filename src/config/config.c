@@ -241,6 +241,9 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
         if (strcmp(value, "bladerf") == 0) {
             c->frontend = NG_FRONTEND_BLADERF;
             return NG_OK;
+        } else if (strcmp(value, "sige") == 0) {
+            c->frontend = NG_FRONTEND_SIGE;
+            return NG_OK;
         }
         return NG_ERROR;
     }
@@ -250,7 +253,14 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("frontend.sample_rate_hz", sampleRateHz)
     U64_KEY("frontend.center_frequency_hz", centerFrequencyHz)
     U64_KEY("frontend.signal_frequency_hz", signalFrequencyHz)
-    UINT_KEY("conditioning.dc_shift", dcShift)
+    if (strcmp(key,"conditioning.dc_shift")==0) return NG_OK;
+    if (strcmp(key,"frontend.stream_format")==0) {
+        if(strcmp(value,"auto")==0)c->streamFormat=0;
+        else if(strcmp(value,"CI8")==0)c->streamFormat=NG_FORMAT_CI8;
+        else if(strcmp(value,"CI16")==0)c->streamFormat=NG_FORMAT_CI16;
+        else return NG_ERROR;
+        return NG_OK;
+    }
     UINT_KEY("hackrf.bandwidth_hz", bandwidthHz)
     UINT_KEY("hackrf.lna_gain_db", lnaGainDb)
     UINT_KEY("hackrf.vga_gain_db", vgaGainDb)
@@ -291,6 +301,8 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
             c->replayFormat = NG_FORMAT_CI8;
         } else if (strcmp(value, "CU8") == 0) {
             c->replayFormat = NG_FORMAT_CU8;
+        } else if (strcmp(value, "CI16") == 0) {
+            c->replayFormat = NG_FORMAT_CI16;
         } else if (strcmp(value, "SC16_Q11") == 0) {
             c->replayFormat = NG_FORMAT_SC16_Q11;
         } else {
@@ -298,17 +310,7 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
         }
         return NG_OK;
     }
-    if (strcmp(key, "conditioning.module") == 0) {
-        if (strcmp(value, "bypass") == 0) {
-            c->dcRemoval = 0;
-            return NG_OK;
-        }
-        if (strcmp(value, "dc_iir") == 0) {
-            c->dcRemoval = 1;
-            return NG_OK;
-        }
-        return NG_ERROR;
-    }
+    if (strcmp(key, "conditioning.module") == 0) return NG_OK; /* Retired; ignored on import. */
     SIZE_KEY("buffer.window_samples", windowSamples)
     SIZE_KEY("buffer.ingress_blocks", ingressBlocks)
     SIZE_KEY("buffer.ring_blocks", ringBlocks)
@@ -535,10 +537,12 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (NgAnalysisValidate(&config->analysis, error) != NG_OK) {
         return NG_ERROR;
     }
+    if (config->dcRemoval != 0 || (config->streamFormat != 0 && config->streamFormat != NG_FORMAT_CI8 && config->streamFormat != NG_FORMAT_CI16)) return NgFail(error,"DC removal is retired or common stream format is invalid");
     if ((config->dcRemoval != 0 && config->dcRemoval != 1) || config->dcShift < 4 ||
         config->dcShift > 24) {
         return NgFail(error, "DC estimator shift must be 4..24");
     }
+    if(config->frontend == NG_FRONTEND_SIGE && (config->sampleRateHz != NG_SIGE_RATE_HZ || config->centerFrequencyHz != NG_SIGE_CENTER_HZ || config->signalFrequencyHz != NG_SIGE_SIGNAL_HZ || config->bandwidthHz != 0)) return NgFail(error,"SiGe native IQ uses immutable rate, RF and IF parameters");
     if (config->signalFrequencyHz > NG_HACKRF_MAX_FREQUENCY_HZ ||
         (config->signalFrequencyHz != 0 &&
          fabs((double)config->signalFrequencyHz - (double)config->centerFrequencyHz) >=
@@ -549,7 +553,7 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (config->recordingPreConditioning != 0 && config->recordingPreConditioning != 1) {
         return NgFail(error, "Invalid recording point");
     }
-    if (config->frontend < NG_FRONTEND_FILE || config->frontend > NG_FRONTEND_BLADERF) {
+    if (config->frontend < NG_FRONTEND_FILE || config->frontend > NG_FRONTEND_SIGE) {
         return NgFail(error, "Unsupported frontend");
     }
     if (config->sampleRateHz == 0 ||
@@ -585,12 +589,17 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
         config->recordingQueueBlocks > 4096) {
         return NgFail(error, "Window must be 1..1048576 pairs and queues 2..4096 blocks");
     }
-    bytes = (uint64_t)config->windowSamples *
-            NgSampleBytes(config->frontend == NG_FRONTEND_BLADERF  ? config->bladeFormat
-                          : config->frontend == NG_FRONTEND_RTLSDR ? NG_FORMAT_CU8
-                          : config->frontend == NG_FRONTEND_FILE   ? config->replayFormat
-                                                                   : NG_FORMAT_CI8) *
-            (config->ingressBlocks + config->ringBlocks + config->recordingQueueBlocks + 2);
+    {
+        TNgSampleFormat native=config->frontend==NG_FRONTEND_BLADERF?config->bladeFormat:
+            config->frontend==NG_FRONTEND_RTLSDR?NG_FORMAT_CU8:
+            config->frontend==NG_FRONTEND_FILE?config->replayFormat:NG_FORMAT_CI8;
+        size_t nativeBytes=NgSampleBytes(native),commonBytes=config->streamFormat?
+            NgSampleBytes(config->streamFormat):(nativeBytes==4u?4u:2u);
+        bytes=((uint64_t)config->windowSamples*nativeBytes+63u)*config->ingressBlocks;
+        bytes+=((uint64_t)config->windowSamples*commonBytes+63u)*
+            (config->ingressBlocks+config->ringBlocks+config->recordingQueueBlocks+2u);
+        if(config->frontend==NG_FRONTEND_SIGE)bytes+=128u*8192u;
+    }
     if (bytes > UINT64_C(536870912)) {
         return NgFail(error, "Buffer plan exceeds the documented 512 MiB guard");
     }
@@ -673,6 +682,7 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     if (fprintf(output, "[frontend]\ntype=%s\nsample_rate_hz=%u\ncenter_frequency_hz=%" PRIu64 "\n",
                 config->frontend == NG_FRONTEND_HACKRF    ? "hackrf"
                 : config->frontend == NG_FRONTEND_RTLSDR  ? "rtlsdr"
+                : config->frontend == NG_FRONTEND_SIGE    ? "sige"
                 : config->frontend == NG_FRONTEND_BLADERF ? "bladerf"
                                                           : "file",
                 config->sampleRateHz, config->centerFrequencyHz) < 0) {
@@ -681,6 +691,7 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     if (config->serial[0] != 0) {
         fprintf(output, "serial=%s\n", config->serial);
     }
+    fprintf(output,"stream_format=%s\n",config->streamFormat ? NgSampleFormatName(config->streamFormat) : "auto");
     fprintf(output, "signal_frequency_hz=%" PRIu64 "\n", config->signalFrequencyHz);
     fprintf(output,
             "\n[hackrf]\nbandwidth_hz=%u\nlna_gain_db=%u\nvga_gain_db=%u\nrf_amp=%s\nantenna_power="
@@ -695,9 +706,9 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             config->bladeBiasTee ? "true" : "false", NgSampleFormatName(config->bladeFormat));
     fprintf(
         output,
-        "\n[conditioning]\nmodule=%s\ndc_shift=%u\n\n[buffer]\nwindow_samples=%zu\ningress_blocks=%"
+        "\n[buffer]\nwindow_samples=%zu\ningress_blocks=%"
         "zu\nring_blocks=%zu\noverflow_policy=%s\n",
-        (config->dcRemoval) != 0 ? "dc_iir" : "bypass", config->dcShift, config->windowSamples,
+        config->windowSamples,
         config->ingressBlocks, config->ringBlocks,
         config->overflowPolicy == NG_OVERFLOW_STOP ? "stop" : "drop_newest");
     fprintf(output, "\n[receiver]\nmode=%s\nrun_seconds=%.17g\nidle_timeout_ms=%u\n",
@@ -738,4 +749,11 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             NgTemporalName(config->analysis.temporal), config->analysis.temporalFrames,
             config->analysis.smoothingAlpha);
     return (ferror(output)) != 0 ? NgFail(error, "Config write failed") : NG_OK;
+}
+
+void NgConfigSige(TNgConfig *config)
+{
+    config->frontend=NG_FRONTEND_SIGE;config->sampleRateHz=NG_SIGE_RATE_HZ;
+    config->centerFrequencyHz=NG_SIGE_CENTER_HZ;config->signalFrequencyHz=NG_SIGE_SIGNAL_HZ;
+    config->bandwidthHz=0;config->lnaGainDb=config->vgaGainDb=0;config->rfAmp=config->antennaPower=0;
 }

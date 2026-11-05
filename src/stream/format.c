@@ -7,7 +7,7 @@
  */
 size_t NgSampleBytes(TNgSampleFormat format)
 {
-    return format == NG_FORMAT_SC16_Q11                                        ? 4u
+    return format == NG_FORMAT_SC16_Q11 || format == NG_FORMAT_CI16              ? 4u
            : format == 0 || format == NG_FORMAT_CI8 || format == NG_FORMAT_CU8 ? 2u
                                                                                : 0u;
 }
@@ -18,7 +18,8 @@ size_t NgSampleBytes(TNgSampleFormat format)
  */
 const char *NgSampleFormatName(TNgSampleFormat format)
 {
-    return format == NG_FORMAT_SC16_Q11             ? "SC16_Q11"
+    return format == NG_FORMAT_CI16                 ? "CI16"
+           : format == NG_FORMAT_SC16_Q11           ? "SC16_Q11"
            : format == NG_FORMAT_CU8                ? "CU8"
            : format == 0 || format == NG_FORMAT_CI8 ? "CI8"
                                                     : "invalid";
@@ -37,7 +38,7 @@ int NgIqComponent(const TNgIqView *view, size_t index, unsigned quadrature)
     const unsigned char *bytes = (const unsigned char *)(const void *)view->samples;
     size_t component = index * 2u + quadrature;
     unsigned value;
-    if (view->format == NG_FORMAT_SC16_Q11) {
+    if (view->format == NG_FORMAT_SC16_Q11 || view->format == NG_FORMAT_CI16) {
         value = (unsigned)bytes[component * 2u] | ((unsigned)bytes[component * 2u + 1u] << 8);
         return value >= 32768u ? (int)value - 65536 : (int)value;
     }
@@ -61,7 +62,7 @@ void NgIqStore(void *storage, TNgSampleFormat format, size_t index, unsigned qua
 {
     unsigned char *bytes = storage;
     size_t component = index * 2u + quadrature;
-    if (format == NG_FORMAT_SC16_Q11) {
+    if (format == NG_FORMAT_SC16_Q11 || format == NG_FORMAT_CI16) {
         uint16_t bits = (uint16_t)value;
         bytes[component * 2u] = (unsigned char)(bits & 255u);
         bytes[component * 2u + 1u] = (unsigned char)(bits >> 8);

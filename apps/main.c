@@ -85,15 +85,16 @@ int main(int argc, char **argv)
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
         printf("NGene %s %s/%s native-HackRF=%s; FFT=%s\n", NGENE_VERSION, NGENE_OS, NGENE_ARCH,
                (NgHackrfAvailable()) != 0 ? "yes" : "no", NgFftBackend());
-        printf("native-RTL-SDR=%s; native-bladeRF=%s\n",
+        printf("native-RTL-SDR=%s; native-bladeRF=%s; native-SiGe=%s\n",
                NgFrontendAvailable(NG_FRONTEND_RTLSDR) ? "yes" : "no",
-               NgFrontendAvailable(NG_FRONTEND_BLADERF) ? "yes" : "no");
+               NgFrontendAvailable(NG_FRONTEND_BLADERF) ? "yes" : "no",
+               NgFrontendAvailable(NG_FRONTEND_SIGE) ? "yes" : "no");
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--list-devices") == 0) {
         TNgFrontendKind kind;
         result = NG_OK;
-        for (kind = NG_FRONTEND_HACKRF; kind <= NG_FRONTEND_BLADERF;
+        for (kind = NG_FRONTEND_HACKRF; kind <= NG_FRONTEND_SIGE;
              kind = (TNgFrontendKind)(kind + 1)) {
             if (NgFrontendAvailable(kind) && NgFrontendList(kind, stdout, &error) != NG_OK) {
                 result = NG_ERROR;
@@ -215,13 +216,6 @@ int main(int argc, char **argv)
            NGENE_VERSION, NGENE_OS, NGENE_ARCH, frontend.info.sourceName,
            NgSampleFormatName(frontend.info.format), frontend.info.sampleRateHz,
            frontend.info.centerFrequencyHz, frontend.info.bandwidthHz, config.windowSamples);
-    if (config.dcRemoval != 0 &&
-        NgConditionerDcCreateFormat(config.windowSamples, config.dcShift, frontend.info.format,
-                                    &conditioner, &error) != NG_OK) {
-        fprintf(stderr, "%s\n", error.message);
-        NgFrontendDestroy(&frontend);
-        return 1;
-    }
     printf("signal=%" PRIu64 " Hz digital_IF=%" PRId64 " Hz conditioning=%s\n",
            frontend.info.signalFrequencyHz, frontend.info.digitalIfHz, conditioner.name);
     result = NgReceiverRun(&config, &frontend, &conditioner, NULL, 0,
@@ -231,7 +225,6 @@ int main(int argc, char **argv)
            " wall_seconds=%.6f\n",
            stats.windows, stats.processedSamples, stats.recording.samples, stats.gapEvents,
            stats.frontend.droppedSamples, stats.frontend.discardedOnStop, stats.wallSeconds);
-    NgConditionerDcDestroy(&conditioner);
     NgFrontendDestroy(&frontend);
     if (result != NG_OK) {
         fprintf(stderr, "%s\n", error.message);

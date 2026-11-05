@@ -127,6 +127,7 @@ int NgControlDeleteFile(TNgControl *control, const char *name, uint64_t expected
     }
     if (((n > 4 && (strcmp(name + n - 4, ".cs8") == 0 || strcmp(name + n - 4, ".cu8") == 0)) ||
          (n > 8 && strcmp(name + n - 8, ".sc16q11") == 0) ||
+         (n > 5 && strcmp(name + n - 5, ".ci16") == 0) ||
          (n > 9 && strcmp(name + n - 9, ".meta.ini") == 0) ||
          (n > 10 && strcmp(name + n - 10, ".index.csv") == 0)) == 0) {
         return NgFail(error, "Only capture data, index and metadata files can be deleted");
@@ -206,7 +207,7 @@ static int OpenRecording(TNgControl *c, TNgError *error)
              (int64_t)time(NULL), suffix);
     snprintf(config.recordingPrefix, sizeof(config.recordingPrefix), "%s", name);
     config.recordingEnabled = 1;
-    if (NgRecorderOpen(&config, &c->info, (config.dcRemoval) != 0 ? "dc_iir" : "bypass", &recorder,
+    if (NgRecorderOpen(&config, &c->info, "bypass", &recorder,
                        error) != NG_OK) {
         return NG_ERROR;
     }
@@ -298,6 +299,8 @@ static void Started(void *context, const TNgStreamInfo *info)
     c->status.actualBandwidthHz = info->bandwidthHz;
     c->status.actualSampleRateHz = info->sampleRateHz;
     c->status.sampleFormat = info->format;
+    c->status.nativeFormat = info->nativeFormat;
+    c->status.adcBits = info->adcBits;
     c->status.hardwareFrequencyHz = info->centerFrequencyHz;
     c->status.signalFrequencyHz = info->signalFrequencyHz;
     c->status.digitalIfHz = info->digitalIfHz;
@@ -402,15 +405,6 @@ static void ReceiverWorker(void *context)
     memset(&c->workerError, 0, sizeof(c->workerError));
     c->workerResult = NgFrontendOpen(&c->runConfig, &source, &c->workerError);
     if (c->workerResult == NG_OK) {
-        if (c->runConfig.dcRemoval != 0 &&
-            NgConditionerDcCreateFormat(c->runConfig.windowSamples, c->runConfig.dcShift,
-                                        source.info.format, &conditioner,
-                                        &c->workerError) != NG_OK) {
-            NgFrontendDestroy(&source);
-            c->workerResult = NG_ERROR;
-            NgAtomicSet(&c->done, 1);
-            return;
-        }
         (void)NgAnalysisSetSampleRate(c->analysis, source.info.sampleRateHz);
         /* Strings outlive source destruction while recorder headers are written. */
         snprintf(c->source, sizeof(c->source), "%s", source.info.sourceName);
@@ -433,7 +427,6 @@ static void ReceiverWorker(void *context)
         }
         NgFrontendDestroy(&source);
     }
-    NgConditionerDcDestroy(&conditioner);
     NgAtomicSet(&c->done, 1);
 }
 

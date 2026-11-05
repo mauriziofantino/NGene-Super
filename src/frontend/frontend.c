@@ -4,6 +4,9 @@
 #include "ngene/frontend.h"
 #include <string.h>
 #include "frontend/file.h"
+#ifdef NGENE_HAVE_SIGE
+#include "frontend/sige.h"
+#endif
 #ifdef NGENE_HAVE_HACKRF
 #include "frontend/hackrf_adapter.h"
 #endif
@@ -27,12 +30,19 @@
  *
  * Result: NG_OK on success; NG_ERROR for configuration, device or allocation errors.
  */
-int NgFrontendOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
+int NgFrontendOpenNative(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
 {
     if (frontend == NULL || NgConfigValidate(config, error) != NG_OK) {
         return NG_ERROR;
     }
     memset(frontend, 0, sizeof(*frontend));
+    if (config->frontend == NG_FRONTEND_SIGE) {
+#ifdef NGENE_HAVE_SIGE
+        return NgSigeOpen(config, frontend, error);
+#else
+        return NgFail(error, "SiGe support is not compiled in");
+#endif
+    }
     if (config->frontend == NG_FRONTEND_FILE) {
         return NgFileOpen(config, frontend, error);
     }
@@ -116,6 +126,13 @@ int NgFrontendListHackrf(FILE *output, TNgError *error)
  */
 int NgFrontendAvailable(TNgFrontendKind kind)
 {
+    if(kind == NG_FRONTEND_SIGE) {
+#ifdef NGENE_HAVE_SIGE
+        return 1;
+#else
+        return 0;
+#endif
+    }
     if (kind == NG_FRONTEND_FILE) {
         return 1;
     }
@@ -148,6 +165,9 @@ int NgFrontendList(TNgFrontendKind kind, FILE *output, TNgError *error)
     if (output == NULL) {
         return NgFail(error, "Missing enumeration output");
     }
+#ifdef NGENE_HAVE_SIGE
+    if(kind == NG_FRONTEND_SIGE) return NgSigeList(output,error);
+#endif
 #ifdef NGENE_HAVE_HACKRF
     if (kind == NG_FRONTEND_HACKRF) {
         return NgHackrfList(output, error);
@@ -193,6 +213,10 @@ int NgFrontendCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgEr
 #endif
     if (!NgFrontendAvailable(config->frontend)) {
         return NgFail(error, "Selected native frontend is disabled in this build");
+    }
+    if(config->frontend == NG_FRONTEND_SIGE) {
+        caps->format=NG_FORMAT_CI8;caps->sampleRateMinHz=caps->sampleRateMaxHz=NG_SIGE_RATE_HZ;
+        caps->frequencyMinHz=caps->frequencyMaxHz=NG_SIGE_CENTER_HZ;return NG_OK;
     }
     caps->format = config->frontend == NG_FRONTEND_FILE ? config->replayFormat : NG_FORMAT_CI8;
     caps->sampleRateMinHz =

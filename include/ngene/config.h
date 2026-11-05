@@ -10,7 +10,8 @@ typedef enum {
     NG_FRONTEND_FILE,
     NG_FRONTEND_HACKRF,
     NG_FRONTEND_RTLSDR,
-    NG_FRONTEND_BLADERF
+    NG_FRONTEND_BLADERF,
+    NG_FRONTEND_SIGE
 } TNgFrontendKind;
 
 /** @brief Mandatory stream-buffer overflow policy. */
@@ -28,9 +29,9 @@ typedef struct {
     uint64_t centerFrequencyHz;
     /** 0 follows hardware, for old profiles. */
     uint64_t signalFrequencyHz;
-    /** Enable the optional continuous DC estimator/remover. */
+    /** Reserved legacy field; must be zero. No DC remover is implemented. */
     int dcRemoval;
-    /** Continuous DC estimator coefficient = 2^-shift. */
+    /** Reserved legacy profile field; ignored on import and never serialized. */
     unsigned dcShift;
     /** Requested analogue baseband filter bandwidth; zero selects automatically. */
     uint32_t bandwidthHz;
@@ -58,6 +59,8 @@ typedef struct {
     TNgSampleFormat bladeFormat;
     /** IQ representation for replay without a sidecar; metadata overrides this selection. */
     TNgSampleFormat replayFormat;
+    /** Common stream: zero preserves native precision, CI8 explicitly narrows, CI16 widens. */
+    TNgSampleFormat streamFormat;
     /** Complex pairs in each shared engine window. */
     size_t windowSamples;
     /** Capacity of the bounded device-callback ingress queue, in windows. */
@@ -97,6 +100,13 @@ typedef struct {
     /** Repeat the selected range with monotonic sample indices. */
     int replayLoop;
 } TNgConfig;
+
+#define NG_SIGE_RATE_HZ 8183800u
+#define NG_SIGE_SIGNAL_HZ UINT64_C(1575420000)
+#define NG_SIGE_IF_HZ 38400
+#define NG_SIGE_CENTER_HZ (NG_SIGE_SIGNAL_HZ - NG_SIGE_IF_HZ)
+/** Apply the immutable SiGe native-IQ hardware profile. */
+void NgConfigSige(TNgConfig *config);
 
 /**
  * @brief Initialize a complete receiver configuration with supported defaults.

@@ -110,7 +110,7 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
     local.ingressBlocks = CAL_INGRESS_BLOCKS;
     local.ringBlocks = 2;
     local.overflowPolicy = NG_OVERFLOW_STOP;
-    if (NgFrontendOpen(&local, &frontend, error) != NG_OK) return NG_ERROR;
+    if (NgFrontendOpenNative(&local, &frontend, error) != NG_OK) return NG_ERROR;
     bytes = NgSampleBytes(frontend.info.format);
     if (!bytes || (samples = malloc(CAL_REPEATS * CAL_PAIRS * bytes)) == NULL) {
         NgFail(error, "Cannot allocate calibration sample buffer");
@@ -225,7 +225,7 @@ static int Try(const TNgConfig *candidate, TNgGainCalibration *result, int *over
 int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgError *error)
 {
     TNgConfig candidate;
-    if (!config || !result || config->frontend == NG_FRONTEND_FILE ||
+    if (!config || !result || (config->frontend == NG_FRONTEND_FILE || config->frontend == NG_FRONTEND_SIGE) ||
         !NgFrontendAvailable(config->frontend))
         return NgFail(error, "Select an available live SDR for gain calibration");
     memset(result, 0, sizeof(*result));

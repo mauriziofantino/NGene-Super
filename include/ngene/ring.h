@@ -86,6 +86,11 @@ void NgRingDestroy(TNgRing *ring);
  * closed ring.
  */
 int NgRingPush(TNgRing *ring, const TNgIqView *input);
+/** Convert directly into an aligned unused slot, without a temporary output copy. */
+int NgRingPushConverted(TNgRing *ring, const TNgIqView *input);
+/** Wait for reader capacity before conversion. Timeout returns NG_FULL; no
+ * unread slot is overwritten. The input lease must remain valid while waiting. */
+int NgRingPushConvertedWait(TNgRing *ring, const TNgIqView *input, unsigned timeoutMs);
 /**
  * @brief Borrow the next unread ring block without copying.
  *

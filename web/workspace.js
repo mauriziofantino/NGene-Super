@@ -17,10 +17,10 @@ const STAGES = [
   ['tracking', 'Tracking', 'Follow carrier and code lock, correlators and loop state.'],
   ['navigation', 'Navigation', 'Decode messages, satellite time and valid ephemerides.'],
   ['pvt', 'PVT solution', 'Inspect position, velocity, time and measurement quality.'],
-  ['record', 'Record & replay', 'Save native I/Q and return to a recorded input.']
+  ['record', 'Record & replay', 'Save common signed I/Q and return to a recorded input.']
 ];
 const SETTINGS = new Set(['source', 'receiver', 'acquisition', 'tracking', 'navigation', 'recording', 'analysis', 'display', 'profile']);
-const SOURCE_NAMES = {file: 'Recorded I/Q', hackrf: 'HackRF', rtlsdr: 'RTL-SDR', bladerf: 'bladeRF'};
+const SOURCE_NAMES = {file: 'Recorded I/Q', hackrf: 'HackRF', rtlsdr: 'RTL-SDR', sige:'SiGe native I/Q', bladerf: 'bladeRF'};
 const UNAVAILABLE = 'Unavailable';
 const badge = (text = 'Module unavailable') => `<span class="badge workspace-label">${text}</span>`;
 const field = (name, placeholder = UNAVAILABLE) => `<span data-workspace-field="${name}">${placeholder}</span>`;
@@ -100,7 +100,7 @@ function pvtMarkup() {
 
 function recordingMarkup() {
   return heading('STAGE 07 / RECORDING & REPLAY', 'Keep the signal, revisit the session',
-    'Record native I/Q on the receiver computer, transfer closed captures and select an existing file as the input source.',
+    'Record common signed I/Q on the receiver computer, transfer closed captures and select an existing file as the input source.',
     `${settingsButton('recording', 'Capture settings')}<button type="button" data-browse-replay data-workspace-replay>Choose recorded I/Q</button>${button('setup', 'Replay setup')}`) +
     `<div class="workspace-kpis">${kpi('CAPTURE STATE', field('recordingState'), field('recordingName'))}${kpi('CAPTURE POINT', field('capturePoint'), 'Original or conditioned I/Q')}${kpi('NATIVE FORMAT', field('format'), field('sampleRate'))}${kpi('REPLAY INPUT', field('replayState'), field('replayDetail'))}</div>` +
     `<div class="workspace-callout">Start and stop recording with the receiver controls above. Stopping capture drains the writer queue; Stop receiver also ends the input stream. Selecting a replay file prepares a profile draft and does not start reception.</div>`;
@@ -113,7 +113,7 @@ function healthMarkup() {
     `<div class="workspace-kpis">${kpi('CONNECTION', field('connection'), field('receiverState'))}${kpi('PLATFORM', field('architecture'), field('operatingSystem'))}${kpi('RECEIVER VERSION', field('version'), field('profileState'))}${kpi('INTEGER FFT', field('fftBackend'), 'Selected by this receiver build')}</div>` +
     `<div class="workspace-grid">${card('Available processing modules', 'The interface keeps source processing and GNSS solution states separate.',
       `<div class="workspace-module-list">${[
-        ['Native I/Q input and conditioning', 'module-input'], ['Spectrum / waterfall / I/Q statistics', 'module-analysis'], ['Native I/Q recording and replay', 'module-recording'], ['Satellite acquisition', 'module-acquisition'], ['Channel tracking and navigation decoding', 'module-gnss'], ['PVT / integrity / authentication', 'module-gnss']
+        ['Native input and common signed stream', 'module-input'], ['Spectrum / waterfall / I/Q statistics', 'module-analysis'], ['Native I/Q recording and replay', 'module-recording'], ['Satellite acquisition', 'module-acquisition'], ['Channel tracking and navigation decoding', 'module-gnss'], ['PVT / integrity / authentication', 'module-gnss']
       ].map(([title, key]) => `<div class="workspace-module-row"><strong>${title}</strong><span class="badge" data-workspace-field="${key}">${key === 'module-gnss' ? 'Not integrated' : 'Waiting for receiver'}</span></div>`).join('')}</div>`)}${card('Build and measurement capabilities', 'A supported frontend still requires a connected device and valid setup.', rows([
         ['File replay', field('fileSupport')], ['HackRF / RTL-SDR / bladeRF', field('frontendSupport')], ['Native sample format', field('format')], ['Device continuity', field('deviceContinuity')], ['Hardware-only loss counter', field('hardwareLoss')], ['CPU load / per-core timing', 'Unavailable — not reported by the receiver']
       ]))}</div>`;
@@ -259,9 +259,10 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     const live = connected && status ? status : null;
     const configuredSource = profile['frontend.type'];
     const source = SOURCE_NAMES[configuredSource] || configuredSource || UNAVAILABLE;
-    const configuredFormat = configuredSource === 'file' ? profile['replay.format'] : configuredSource === 'bladerf' ? profile['bladerf.format'] : {hackrf: 'CI8', rtlsdr: 'CU8'}[configuredSource];
+    const configuredFormat = configuredSource === 'file' ? profile['replay.format'] : configuredSource === 'bladerf' ? profile['bladerf.format'] : {hackrf: 'CI8', rtlsdr: 'CU8', sige:'CI8'}[configuredSource];
     const started = live && live.active_revision && live.active_revision !== '0';
-    const format = started ? live.sample_format || UNAVAILABLE : configuredFormat || UNAVAILABLE;
+    const commonFormat=profile['frontend.stream_format']==='CI8'?'CI8':profile['frontend.stream_format']==='CI16'?'CI16':['SC16_Q11','CI16'].includes(configuredFormat)?'CI16':'CI8';
+    const format = started ? live.sample_format || UNAVAILABLE : commonFormat;
     const rate = started ? live.actual_sample_rate_hz || profile['frontend.sample_rate_hz'] : profile['frontend.sample_rate_hz'];
     const hardware = started ? live.hardware_frequency_hz || profile['frontend.center_frequency_hz'] : profile['frontend.center_frequency_hz'];
     const signal = started ? live.signal_frequency_hz || positive(profile['frontend.signal_frequency_hz']) || hardware : positive(profile['frontend.signal_frequency_hz']) || hardware;
@@ -280,7 +281,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       architecture: capabilities?.architecture || UNAVAILABLE, operatingSystem: capabilities?.os || UNAVAILABLE,
       version: capabilities?.version ? `v${capabilities.version}` : UNAVAILABLE, fftBackend: capabilities?.fft_backend || UNAVAILABLE,
       fileSupport: capabilities ? 'Available' : UNAVAILABLE,
-      frontendSupport: capabilities ? ['hackrf', 'rtlsdr', 'bladerf'].map(name => `${SOURCE_NAMES[name]}: ${capabilities[name] === true ? 'supported' : 'not in this build'}`).join(' · ') : UNAVAILABLE,
+      frontendSupport: capabilities ? ['hackrf', 'rtlsdr', 'bladerf', 'sige'].map(name => `${SOURCE_NAMES[name]}: ${capabilities[name] === true ? 'supported' : 'not in this build'}`).join(' · ') : UNAVAILABLE,
       deviceContinuity: live?.device_continuity_state || UNAVAILABLE,
       hardwareLoss: live?.hardware_loss_state === 'valid' && live.hardware_lost_samples != null ? counter(live.hardware_lost_samples) : UNAVAILABLE,
       'module-input': capabilities ? 'Available' : 'Waiting for receiver',

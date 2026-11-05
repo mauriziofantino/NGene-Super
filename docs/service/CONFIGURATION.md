@@ -3,7 +3,8 @@
 The [current configuration reference](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Configuration-Reference) lists every key,
 default and bound from the implementation. This document retains the original profile
 contract and versioned development notes. Older two-session and CI8-only descriptions are
-historical; the current service has one active source and supports three native I/Q formats.
+historical; the current service has one active source and converts transport/replay formats
+to one signed CI8 or CI16 Q15 common stream per run.
 
 For native bladeRF precision, `bladerf.format=SC16_Q11` retains twelve ADC bits in
 sixteen-bit components (default), while `bladerf.format=CI8` requests native SC8 Q7
@@ -24,7 +25,8 @@ values are errors. ASCII paths are recommended for this version, including on Wi
 | `receiver.mode` | `capture` dispatches registered channels; `record` requires recording enabled and skips channels |
 | `receiver.run_seconds` | Host-time limit; 0 runs until EOF/Ctrl+C; default 2 |
 | `receiver.idle_timeout_ms` | Error if no samples arrive for this interval; 100..3600000; default 3000 |
-| `frontend.type` | `file`, `hackrf`, `rtlsdr` or `bladerf`, depending on compiled adapters |
+| `frontend.stream_format` | `auto` (preserve source precision), `CI8` (may discard wider ADC precision), or `CI16` (signed Q15) |
+| `frontend.type` | `file`, `hackrf`, `rtlsdr`, `bladerf` or `sige`, depending on compiled adapters |
 | `frontend.serial` | Device selector; may be omitted with one device; multiple devices are not silently selected |
 | `frontend.sample_rate_hz` | Complex pairs/s; default 16000000; HackRF range 2000000..20000000 |
 | `frontend.center_frequency_hz` | SDR hardware tuning frequency; default 1575420000 |
@@ -34,8 +36,6 @@ values are errors. ASCII paths are recommended for this version, including on Wi
 | `hackrf.vga_gain_db` | 0..62 in steps of 2; default 20 |
 | `hackrf.rf_amp` | true/false; default false |
 | `hackrf.antenna_power` | RF connector power; default false; enable only when required by the receiving setup |
-| `conditioning.module` | `bypass` (default) or continuous `dc_iir` |
-| `conditioning.dc_shift` | 4..24; default 16; DC estimator coefficient 2^-shift |
 | `buffer.window_samples` | Pairs per common window; 1..1048576; default 16000 |
 | `buffer.ingress_blocks` | Transport queue slots; default 128 |
 | `buffer.ring_blocks` | Central ring slots; default 16 |
@@ -92,7 +92,9 @@ it has been examined/removed. Atomic replacement is not a power-loss durability 
 
 ## v0.3 parameters
 
-`recording.point=pre|post` (default post) is changed while stopped. The `[analysis]` section
+`recording.point=pre|post` is retained for profile compatibility. Both values now record
+the common signed stream after transport conversion; the redundant UI selector is removed.
+The `[analysis]` section
 and its limits are described in [ANALYSIS.md](ANALYSIS.md). These settings can be applied at
 runtime through the dedicated API; **Apply & save** persists the complete profile only while
 stopped. Earlier versions provided an independent replay controller alongside the primary
@@ -101,20 +103,23 @@ controller; this has been removed from the current service. The default replay p
 
 The GUI provides LNA 0..40 dB in steps of 8 and VGA 0..62 dB in steps of 2, matching HackRF
 validation. Settings depend on the frontend; HackRF fields are not shown for file replay.
-For offset tuning, DC removal and diagnostic additions, see [ITERATION_04.md](ITERATION_04.md).
+The streaming DC remover is retired. Historical conditioning keys are accepted and ignored,
+and omitted on save. SiGe hardware rate/RF/IF are fixed. See the
+[frontend decision record](FRONTEND_STREAM_DECISIONS.md) for stream scaling, USB setup,
+recording semantics and compatibility details.
 
 ## Replay parameters introduced in v0.6
 
 | Key | Meaning |
 | --- | --- |
-| `frontend.type` | Initially `hackrf` or `file`; `synthetic` was removed. Current native adapters also include RTL-SDR and bladeRF |
+| `frontend.type` | Initially `hackrf` or `file`; `synthetic` was removed. Current native adapters also include RTL-SDR, bladeRF and SiGe |
 | `replay.path` | Closed I/Q file on the receiver computer; required before Start |
-| `replay.format` | Current native format: CI8, CU8 or SC16_Q11 |
+| `replay.format` | Recorded storage format: CI8, CU8, SC16_Q11 or CI16 (Q15) |
 | `replay.start_sample` | Starting offset in complex pairs |
 | `replay.sample_limit` | Pair limit; 0 reads the rest of the selected range |
 | `replay.realtime` | Pace at the configured sample rate; default true |
 | `replay.loop` | Repeat the range with an explicit epoch/gap; default false |
 
 Old synthetic-frontend profiles must be replaced with a supported SDR or file profile.
-Parsing does not silently ignore obsolete keys. INI/JSON names preserve the protocol
+Unknown keys remain errors; the retired conditioning keys described above are explicit compatibility exceptions. INI/JSON names preserve the protocol
 format: lowerCamel C member names do not rename on-disk or WebSocket keys.

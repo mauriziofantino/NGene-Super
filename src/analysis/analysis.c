@@ -364,8 +364,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     double start = NgMonotonicSeconds();
     TNgError error = {{0}};
     TNgIqView native = {0};
-    int adcLimit = b->format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
-    int fftScale = b->format == NG_FORMAT_SC16_Q11 ? 8 : 128;
+    int adcLimit = b->format == NG_FORMAT_CI16 ? 32768 : b->format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
+    int fftScale = b->format == NG_FORMAT_CI16 ? 1 : b->format == NG_FORMAT_SC16_Q11 ? 8 : 128;
     if (BurstCurrent(a, b) == 0) {
         return 0;
     }
@@ -503,8 +503,12 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                     qValue >= adcLimit) {
                     return 0;
                 }
-                a->input[2 * k] = (int16_t)Shift15((int32_t)iValue * fftScale * a->window[k]);
-                a->input[2 * k + 1] = (int16_t)Shift15((int32_t)qValue * fftScale * a->window[k]);
+                { int32_t product = (int32_t)iValue * fftScale * a->window[k];
+                  if (b->format == NG_FORMAT_CI16) product = product>=0 ? product/2 : -1-((-1-product)/2);
+                  a->input[2*k]=(int16_t)Shift15(product); }
+                { int32_t product = (int32_t)qValue * fftScale * a->window[k];
+                  if (b->format == NG_FORMAT_CI16) product = product>=0 ? product/2 : -1-((-1-product)/2);
+                  a->input[2*k+1]=(int16_t)Shift15(product); }
             }
             if (BurstCurrent(a, b) == 0) {
                 return 0;

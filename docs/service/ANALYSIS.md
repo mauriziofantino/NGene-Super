@@ -4,10 +4,15 @@ Engineering reference. For current operator instructions and native I/Q formats,
 [diagnostics manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Signal-Diagnostics). The CI8 arithmetic examples below retain
 the original numerical explanation; current input formats also include CU8 and SC16 Q11.
 
-Frontend → pre-conditioning tap → shared conditioning (bypass/DC IIR) → single GNSS ring →
+Frontend → pre-conditioning tap → shared bypass → single GNSS ring →
 same window delivered to every channel → post-conditioning tap. The recording point is
 selected while stopped. PSD and histogram select their taps independently; there is no
 second GNSS ring.
+
+Current frontend streams are common signed CI8 or CI16 Q15; legacy CU8/Q11 replay is
+converted before publication. Histogram amplitudes and rail indicators use the common
+representation. Source ADC bits are separate metadata. There is no streaming DC remover.
+See [frontend decisions](FRONTEND_STREAM_DECISIONS.md).
 
 ## Capture and ownership
 
@@ -26,21 +31,31 @@ combines the connected browsers' requests and revokes capture when the last cons
 a panel or closes its connection. A two-second lease handles clients that stop requesting
 updates. The capture-only CLI does not instantiate the worker.
 
-With spectrum and waterfall disabled, the GUI does not validate or copy PSD data, accumulate
-history, or prepare bitmaps, meshes, projections or Canvas drawing. Resize callbacks and
+With spectrum and both waterfalls disabled, the GUI does not validate or copy PSD data,
+accumulate history, prepare bitmaps or draw canvases. Resize callbacks and
 already queued redraws check the enable state again. Histograms remain independent.
 Separate PSD and histogram sequences avoid redrawing unchanged data or an unrelated panel;
-the waterfall redraws only when it accepts a new row, respecting its own rate. While paused,
-explicit rotation and resizing can redraw cached data without producing new FFTs.
+the waterfalls redraw only when their shared history accepts a new row, respecting its
+rate limit. While paused, resizing and reenabling can redraw cached data without new FFTs.
 
-Spectrum and waterfall have independent header **Enable** switches. The first enabled plot
+Spectrum and both waterfalls have independent header **Enable** switches. The first enabled plot
 also sets the runtime producer to `spectrum_enabled=true`; disabling the last sets it to
-false. Disabled content is hidden. Either enabled plot maintains their shared PSD demand.
-A disabled spectrum is not drawn while the waterfall continues; a disabled waterfall does
-not accumulate history while the spectrum continues. Changing the same Diagnostics setting
-synchronizes both switches, including while paused. The runtime update uses the server's
+false. Disabled content is hidden. Any enabled plot maintains their shared PSD demand.
+A disabled view skips bitmap preparation and drawing. The single waterfall history advances
+while either waterfall is enabled; with both disabled it stays frozen while the spectrum
+continues. Changing the same Diagnostics setting synchronizes all three switches, including
+while paused. The runtime update uses the server's
 applied settings and preserves unrelated parameters and local drafts. Saving the profile is
 required to persist it to INI.
+
+The 3D view projects frequency/time/power as an orthographic surface: power changes
+vertex height and foreground surfaces can hide background surfaces. The colour-only
+relief implementation was rejected by the user on 2026-11-05. The views share stored
+rows, bins, frequency crop, power normalization, pause and Clear. Their screen time
+coordinates differ because 3D adds power height. Projection uses the configured history
+capacity, so filling history does not rescale existing ages. A per-frequency visibility
+horizon avoids drawing hidden strips without pooling bins or rows. The renderer is bounded
+by 2048 history rows and 1024 telemetry bins and runs only in the browser.
 
 The backend discards incomplete and queued bursts when interest is revoked. Active work
 checks cancellation between bounded stages and does not publish cancelled results. An FFT

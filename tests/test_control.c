@@ -179,6 +179,32 @@ int main(void)
     CHECK(NgControlRequest(c, NG_CMD_START, revision, &id, &error) == NG_OK);
     s = WaitState(c, NG_STOPPED, NG_REC_OFF);
     CHECK(s.commandOk && s.receiver.processedSamples == 3500 && s.recording.samples == 3500);
+    /* A failure after native startup must release the common worker and allow
+     * another Start. Invalid Q11 exercises the live conversion failure path,
+     * rather than only a missing file rejected before the worker starts. */
+    snprintf(path, sizeof(path), "%s/invalid.sc16q11", directory);
+    file = fopen(path, "wb");
+    {
+        const unsigned char invalidQ11[4] = {0, 8, 0, 0}; /* I=2048, outside Q11. */
+        CHECK(file != NULL && fwrite(invalidQ11, 1, 4, file) == 4 && fclose(file) == 0);
+    }
+    saved = cfg;
+    saved.recordingEnabled = 0;
+    saved.replayFormat = NG_FORMAT_SC16_Q11;
+    snprintf(saved.replayPath, sizeof(saved.replayPath), "%s", path);
+    CHECK(NgControlConfigure(c, &saved, revision, &error) == NG_OK);
+    NgControlConfig(c, &saved, &revision);
+    for (k = 0; k < 2; ++k) {
+        CHECK(NgControlRequest(c, NG_CMD_START, revision, &id, &error) == NG_OK);
+        s = WaitState(c, NG_FAILED, NG_REC_OFF);
+        CHECK(!s.commandOk && strstr(s.message, "conversion") != NULL);
+    }
+    cfg.recordingEnabled = 0;
+    CHECK(NgControlConfigure(c, &cfg, revision, &error) == NG_OK);
+    NgControlConfig(c, &saved, &revision);
+    CHECK(NgControlRequest(c, NG_CMD_START, revision, &id, &error) == NG_OK);
+    s = WaitState(c, NG_STOPPED, NG_REC_OFF);
+    CHECK(s.commandOk && s.receiver.processedSamples == 3500);
     /* Runtime switches also need authoritative metadata while the worker is absent. */
     NgControlConfig(c, &saved, &revision);
     saved.analysis.spectrumEnabled = 0;
@@ -190,6 +216,7 @@ int main(void)
     NgControlSnapshot(c, &s);
     CHECK(s.analysis.config.spectrumEnabled == 1 && s.analysis.sequence == 0);
     NgControlDestroy(c);
+    CHECK(remove(cfg.replayPath) == 0);
     CHECK(NgDirectoryFiles(directory, RemoveCapture, directory) == 0);
     CHECK(NG_TEST_REMOVE_DIRECTORY(directory) == 0);
     puts("Controller lifecycle, revision guard, recording and EOF: PASS");

@@ -11,21 +11,27 @@ The engine is the sole logical consumer of the GNSS ring: all channels receive t
 ## Implemented now
 
 - C API and strict, validated INI configuration.
-- Receiver lifecycle and native HackRF, RTL-SDR and bladeRF frontends.
-- CI8, CU8 and SC16 Q11 file replay; one active source per service. Parallel live reception
+- Receiver lifecycle and native HackRF, RTL-SDR, bladeRF and fixed-profile SiGe I/Q frontends.
+- CI8, CU8, SC16 Q11 and CI16 Q15 file replay; one active source per service. Parallel live reception
   and replay use separate processes. Deterministic input generation is confined to tests
   and optional documentation capture tooling.
-- Bypass, window assembly, ring, and common dispatch.
+- Dedicated common-source worker, exact SIMD conversion to signed CI8/CI16, aligned SPSC rings, window assembly and common dispatch.
 - Channel state contract and validation; optional dispatcher with a fixed pool and dynamic jobs per window. GNSS algorithms still need integration.
 - Recorder, segments, metadata, and overflow/EOF/stop handling.
-- Controller, dark GUI with separate configuration/observation, independent pre/post recording, and file transfers.
+- Controller, dark GUI with separate configuration/observation, common-stream recording with ADC/transport provenance, and file transfers.
 - Separate DSP library for FFT, statistics, and power; common APIs with SSE2/NEON backends selected for the target. Spectrum/waterfall, histograms, and runtime configuration.
-- Diagnostics with end-to-end PSD integrity, history without artificial rows, independent histograms, and I/Q statistics.
-- Optional continuous DC remover, separate hardware/signal tuning, and NCO/digital IF contract.
+- Diagnostics with end-to-end PSD integrity, synchronized 2D and rectangular relief waterfalls, independent histograms, and I/Q statistics.
+- Separate hardware/signal tuning and NCO/digital IF contract. Streaming DC removal is retired; historical conditioning keys are ignored on import and omitted on save.
 - SSE2/NEON intrinsics primitives and C reference; native Windows MSVC x64/ARM64 presets.
 - Core portability and tests; documentation of checks actually performed.
 
 ## Proposed increments
+
+The [frontend stream decision record](FRONTEND_STREAM_DECISIONS.md) records completed
+Windows SiGe USB checks and current stream/display contracts. The [DSP options study](DSP_OPTIONS_PLAN.md)
+defines the next kernel work; its approximate arithmetic candidates remain experiments.
+Acquisition, tracking and PVT are not integrated. The increments below retain their
+platform and RF validation requirements even where adapter or replay support exists.
 
 1. **Real HackRF test:** verify selection, gains, stream stability, recordings, and timing on Windows/Linux/macOS with the user's hardware. Select replay datasets.
 2. **File input and inspection tools:** read captures with metadata/gaps; make RF tests repeatable. No GNSS algorithm before obtaining a verifiable sample reference.

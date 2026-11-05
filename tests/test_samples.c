@@ -16,11 +16,10 @@
         }                                                                                          \
     } while (0)
 static TNgIq8 samples[262145];
-static TNgIq8 output[4096];
+static volatile uint64_t benchmarkSink;
 static int16_t iq[32770];
 static uint64_t p[16385];
 static uint64_t q[16385];
-static volatile uint64_t benchmarkSink;
 
 /**
  * @brief Verify benchmark behaviour.
@@ -64,23 +63,6 @@ static void Benchmark(void)
     simd = (NgMonotonicSeconds() - t) * 1e6 / 10000;
     printf("power %zu CI16: reference %.3f us, %s %.3f us, %.2fx\n", n, scalar,
            NgSampleOpsBackend(), simd, scalar / simd);
-    {
-        TNgConditioner dc;
-        TNgError e = {{0}};
-        TNgIqView in = {samples, {0}, NG_FORMAT_CI8};
-        TNgIqView out;
-        in.meta.count = n;
-        CHECK(NgConditionerDcCreate(n, 16, &dc, &e) == NG_OK);
-        t = NgMonotonicSeconds();
-        for (j = 0; j < 1000; ++j) {
-            in.meta.firstSample = j * n;
-            CHECK(dc.process(dc.context, &in, &out, &e) == NG_OK);
-            benchmarkSink += (uint8_t)out.samples[0].i;
-        }
-        printf("continuous DC Q32 %zu pairs: %.3f us/block\n", n,
-               (NgMonotonicSeconds() - t) * 1e6 / 1000);
-        NgConditionerDcDestroy(&dc);
-    }
 }
 
 /**
@@ -126,38 +108,6 @@ int main(int argc, char **argv)
     CHECK(p[0] == UINT64_C(2147483648));
     CHECK(!memcmp(p, q, sizeof(p)));
     {
-        TNgConditioner whole;
-        TNgConditioner chunks;
-        TNgIqView in = {samples, {0}, NG_FORMAT_CI8};
-        TNgIqView out;
-        CHECK(NgConditionerDcCreate(4096, 8, &whole, &e) == NG_OK);
-        CHECK(NgConditionerDcCreate(4096, 8, &chunks, &e) == NG_OK);
-        for (k = 0; k < 4096; ++k) {
-            samples[k].i = 24;
-            samples[k].q = 12;
-        }
-        in.meta.count = 4096;
-        CHECK(whole.process(whole.context, &in, &out, &e) == NG_OK);
-        memcpy(output, out.samples, sizeof(output));
-        for (k = 0; k < 4096; k += 37) {
-            in.samples = samples + k;
-            in.meta.firstSample = k;
-            in.meta.count = 4096 - k < 37 ? 4096 - k : 37;
-            CHECK(chunks.process(chunks.context, &in, &out, &e) == NG_OK);
-            CHECK(!memcmp(output + k, out.samples, in.meta.count * sizeof(TNgIq8)));
-        }
-        CHECK(abs(output[4095].i) <= 1 && abs(output[4095].q) <= 1);
-        CHECK(samples[4095].i == 24 && samples[4095].q == 12);
-        in.samples = samples;
-        in.meta.count = 1;
-        in.meta.firstSample = 10000;
-        in.meta.flags = NG_BLOCK_GAP;
-        CHECK(chunks.process(chunks.context, &in, &out, &e) == NG_OK);
-        CHECK(out.samples[0].i == 24);
-        NgConditionerDcDestroy(&whole);
-        NgConditionerDcDestroy(&chunks);
-    }
-    {
         TNgConfig c;
         TNgFrontend f;
         NgConfigDefaults(&c);
@@ -175,7 +125,7 @@ int main(int argc, char **argv)
     if (argc > 1 && strcmp(argv[1], "--benchmark") == 0) {
         Benchmark();
     }
-    puts("PASS: signed CI8 moments, full-range CI16 power, DC chunk invariance/gap, tuning "
+    puts("PASS: signed CI8 moments, full-range CI16 power, tuning "
          "metadata");
     return 0;
 }

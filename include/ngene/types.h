@@ -25,7 +25,8 @@ typedef struct {
 _Static_assert(sizeof(TNgIq8) == 2, "CI8 must occupy exactly two bytes");
 
 /** @brief Wire representation of complex frontend samples. */
-typedef enum { NG_FORMAT_CI8 = 1, NG_FORMAT_CU8 = 2, NG_FORMAT_SC16_Q11 = 3 } TNgSampleFormat;
+typedef enum { NG_FORMAT_CI8 = 1, NG_FORMAT_CU8 = 2, NG_FORMAT_SC16_Q11 = 3,
+               NG_FORMAT_CI16 = 4 } TNgSampleFormat;
 
 /** @brief Rate, RF reference and borrowed frontend identity for one stream. */
 typedef struct {
@@ -47,6 +48,10 @@ typedef struct {
     uint64_t signalFrequencyHz;
     /** signal_frequency - hardware_frequency. */
     int64_t digitalIfHz;
+    /** Transport format before the common stream adapter; zero for legacy sources. */
+    TNgSampleFormat nativeFormat;
+    /** Physical ADC precision, distinct from common stream storage width. */
+    unsigned adcBits;
 } TNgStreamInfo;
 
 enum { NG_BLOCK_GAP = 1u, NG_BLOCK_PARTIAL = 2u, NG_BLOCK_HARDWARE_TIME = 4u };
@@ -110,6 +115,10 @@ int NgIqComponent(const TNgIqView *view, size_t index, unsigned quadrature);
  * @param value Signed ADC level; CU8 is recentered by adding 128.
  */
 void NgIqStore(void *storage, TNgSampleFormat format, size_t index, unsigned quadrature, int value);
+/** Convert into a common signed stream. CI16 is normalized Q15, CI8 is Q7.
+ * All buffers are caller-owned; conversion is allocation-free and supports unaligned tails.
+ * Returns NG_ERROR for unsupported formats/geometry; input and output must not overlap. */
+int NgIqConvert(void *output, TNgSampleFormat target, const TNgIqView *input);
 
 /**
  * @brief Convert physical Doppler into a receiver carrier-NCO frequency.

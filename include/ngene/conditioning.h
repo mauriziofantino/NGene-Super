@@ -32,42 +32,4 @@ typedef struct {
  * @return A rate- and native-format-preserving conditioner value.
  */
 TNgConditioner NgConditionerBypass(void);
-/**
- * @brief Allocate a continuous fixed-point I/Q DC estimator.
- *
- * @details
- * Creates private output storage. Its process callback preserves count/rate/indices and
- * saturates corrected components to CI8; state persists across blocks and resets on gaps,
- * index discontinuities or a new epoch. Use NgConditionerDcDestroy after the engine stops.
- *
- * @param capacity Maximum complex pairs accepted per process call; positive.
- * @param shift Estimator exponent 4..24: alpha = 2^-shift per sample.
- * @param out Receives the owned conditioner instance on success.
- * @param error Optional error destination.
- *
- * @return NG_OK on success; NG_ERROR for invalid bounds or allocation failure.
- */
-int NgConditionerDcCreate(size_t capacity, unsigned shift, TNgConditioner *out, TNgError *error);
-/** @brief Allocate the continuous DC remover for a native integer IQ format.
- * @details No block-wise mean reset. CU8 is recentered only for arithmetic and stored
- * as CU8 again; SC16 Q11 retains 12-bit ADC resolution and saturates to [-2048,2047].
- * @param capacity Maximum complex pairs per call, positive.
- * @param shift Continuous estimator exponent in 4..24.
- * @param format Native IQ representation.
- * @param out Receives owned conditioner.
- * @param error Optional diagnostic.
- * @return NG_OK on success, NG_ERROR on invalid format/capacity/allocation.
- */
-int NgConditionerDcCreateFormat(size_t capacity, unsigned shift, TNgSampleFormat format,
-                                TNgConditioner *out, TNgError *error);
-/**
- * @brief Release storage owned by the continuous DC conditioner.
- *
- * @details
- * Stop processing first. A NULL pointer or a conditioner of another implementation is ignored;
- * a destroyed DC instance is replaced with a bypass value.
- *
- * @param conditioner Conditioner created by either NgConditionerDcCreate or NgConditionerDcCreateFormat.
- */
-void NgConditionerDcDestroy(TNgConditioner *conditioner);
 #endif

@@ -2,6 +2,7 @@ import {createReceiverWorkspace} from './workspace.js';
 import {createReceiverConfiguration} from './receiver-config.js';
 import {moduleParameters} from './module-parameters.js';
 import {frequencyUnits, frequencyToHz, frequencyFromHz} from './frequency-units.js';
+import {paintWaterfallRelief} from './waterfall-relief.js';
 
 const selectedSession = 'receiver';
 const sessionPrefix = () => '';
@@ -11,7 +12,8 @@ let receiverWorkspace = null, activeWorkspaceView = 'rf';
 const $ = id => document.getElementById(id);
 let receiverConfiguration = null, moduleForm = null;
 const fields = [
-  ['Frontend', 'frontend.type', 'Source', 'select', ['file', 'hackrf', 'rtlsdr', 'bladerf']],
+  ['Frontend', 'frontend.type', 'Source', 'select', ['file', 'hackrf', 'rtlsdr', 'bladerf', 'sige']],
+  ['Frontend', 'frontend.stream_format', 'Common stream precision', 'select', ['auto','CI8','CI16'], '', 'Auto preserves native precision. CI8 discards precision from wider ADCs; CI16 widens losslessly.'],
   ['Frontend', 'frontend.serial', 'Device serial', 'text', null, '', 'Empty selects the only connected device of the selected type'],
   ['Frontend', 'frontend.sample_rate_hz', 'Sample rate', 'number', null, 'pairs/s'],
   ['Frontend', 'frontend.center_frequency_hz', 'SDR hardware tuning frequency', 'number', null, 'Hz'],
@@ -28,7 +30,7 @@ const fields = [
   ['bladeRF', 'bladerf.gain_db', 'RX gain', 'number', null, 'dB', 'Query device limits for frequency-dependent min, max and step'],
   ['bladeRF', 'bladerf.bias_tee', 'Bias tee', 'select', ['false','true']],
   ['bladeRF', 'bladerf.format', 'Sample precision', 'select', ['SC16_Q11','CI8'], '', 'SC16_Q11: 12-bit ADC in 16-bit I/Q; CI8: native 8-bit I/Q (requires device/FPGA support)'],
-  ['File replay', 'replay.format', 'Native IQ format', 'select', ['CI8','CU8','SC16_Q11']],
+  ['File replay', 'replay.format', 'Native IQ format', 'select', ['CI8','CU8','SC16_Q11','CI16']],
   ['File replay', 'replay.path', 'Input file on receiver computer', 'text', null, '', 'Native I/Q (.cs8, .cu8, .sc16q11); sidecar loads format, rate and tuning'],
   ['File replay', 'replay.start_sample', 'Start sample pair', 'number', null, 'pairs'],
   ['File replay', 'replay.sample_limit', 'Range length', 'number', null, 'pairs', '0 = remainder of file'],
@@ -37,13 +39,10 @@ const fields = [
   ['Receiver', 'receiver.mode', 'Mode', 'select', ['capture', 'record']],
   ['Receiver', 'receiver.run_seconds', 'Run duration', 'number', null, 's', '0 = until Stop'],
   ['Receiver', 'receiver.idle_timeout_ms', 'Input timeout', 'number', null, 'ms'],
-  ['Receiver', 'conditioning.module', 'Conditioning', 'select', ['bypass','dc_iir']],
-  ['Receiver', 'conditioning.dc_shift', 'DC estimator time constant exponent', 'number', null, '4–24', 'Continuous α = 2^−shift; keeps state across blocks. Default 16.'],
   ['Buffers', 'buffer.window_samples', 'Common window', 'number', null, 'pairs'],
   ['Buffers', 'buffer.ingress_blocks', 'Frontend slots', 'number'],
   ['Buffers', 'buffer.ring_blocks', 'Central ring slots', 'number'],
   ['Buffers', 'buffer.overflow_policy', 'Input overflow', 'select', ['stop', 'drop_newest']],
-  ['Recording', 'recording.point', 'Capture point', 'select', ['post', 'pre'], '', 'post = shared conditioned stream; pre = original frontend samples'],
   ['Recording', 'recording.enabled', 'Record on receiver start', 'select', ['false', 'true']],
   ['Recording', 'recording.prefix', 'Base filename', 'text', null, '', 'Letters, digits, _ and - · unique suffix added automatically'],
   ['Recording', 'recording.directory', 'Folder on receiver computer', 'text', null, '', 'Receiver-side path, e.g. /data/gnss or D:/GNSS. Parent folder must exist.'],
@@ -167,6 +166,7 @@ function parseIni(text) {
 function toIni(object) {
   const groups = new Map();
   for (const [key, value] of Object.entries(object)) {
+    if(key.startsWith("conditioning.")) continue;
     if (['frontend.serial', 'recording.directory', 'replay.path'].includes(key) && !value) continue;
     const split = key.indexOf('.'), group = key.slice(0, split), name = key.slice(split + 1);
     if (!groups.has(group)) groups.set(group, []);
@@ -183,7 +183,7 @@ function dirtyState(changed) {
 }
 const settingsTopics = {
   source: ['Front end', 'Choose the live SDR or recorded input, sample format, tuning and gains.', 'Before start'],
-  receiver: ['Receiver & signals', 'Configure execution, conditioning and buffers. GNSS processing modules are unavailable.', 'Before start'],
+  receiver: ['Receiver & signals', 'Configure execution and common stream buffers. GNSS processing modules are unavailable.', 'Before start'],
   acquisition: ['Acquisition', 'The previous acquisition implementation has been removed. No acquisition settings are applied.', 'Unavailable'],
   tracking: ['Tracking', 'Configure coherent integration, code and carrier loops, lock criteria and correlators.', 'Module unavailable'],
   navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
@@ -245,8 +245,8 @@ function buildForm() {
       }
       for (const option of choices) { const element = document.createElement('option'); element.value = typeof option === 'object' ? option.value : option; element.textContent = typeof option === 'object' ? option.label : option === 'true' ? 'On' : option === 'false' ? 'Off' : option === 'record' ? 'Record only' : option === 'capture' ? 'Capture' : option; input.append(element); }
     }
-    else { input.type = nativeBandwidth ? 'number' : type; if(input.type==='number'){input.step='any';input.min='0'; if(key==='conditioning.dc_shift'){input.min='4';input.max='24';input.step='1';} if(key==='frontend.sample_rate_hz'){input.min='1';input.max='20000000';input.step='1';} if(key.endsWith('frequency_hz')){input.max='6000000000';input.step='1';} } input.inputMode = type === 'number' ? 'decimal' : 'text'; input.autocomplete = 'off'; }
-    const limits = {'conditioning.dc_shift':[4,24], 'buffer.window_samples':[1,1048576], 'buffer.ingress_blocks':[2,4096], 'buffer.ring_blocks':[2,4096], 'recording.queue_blocks':[2,4096], 'receiver.idle_timeout_ms':[100,3600000], 'receiver.run_seconds':[0,31536000], 'rtlsdr.ppm':[-1000,1000], 'bladerf.gain_db':[-100,100]};
+    else { input.type = nativeBandwidth ? 'number' : type; if(input.type==='number'){input.step='any';input.min='0'; if(key==='frontend.sample_rate_hz'){input.min='1';input.max='20000000';input.step='1';} if(key.endsWith('frequency_hz')){input.max='6000000000';input.step='1';} } input.inputMode = type === 'number' ? 'decimal' : 'text'; input.autocomplete = 'off'; }
+    const limits = {'buffer.window_samples':[1,1048576], 'buffer.ingress_blocks':[2,4096], 'buffer.ring_blocks':[2,4096], 'recording.queue_blocks':[2,4096], 'receiver.idle_timeout_ms':[100,3600000], 'receiver.run_seconds':[0,31536000], 'rtlsdr.ppm':[-1000,1000], 'bladerf.gain_db':[-100,100]};
     if (input.type === 'number') { input.step = key === 'receiver.run_seconds' ? 'any' : '1'; if (limits[key]) [input.min,input.max] = limits[key]; }
     const descriptor = moduleForm?.definitions.get(key);
     if (descriptor && input.type === 'number') {
@@ -268,7 +268,10 @@ function buildForm() {
           buildForm();
         }
       }
-      if (key === 'frontend.type') profileTouched.add('frontend.sample_rate_hz');
+      if (key === 'frontend.type') {
+        if (values[key]==='sige') {applySigeProfile();buildForm();}
+        profileTouched.add('frontend.sample_rate_hz');
+      }
       dirtyState(true); updateSourceFields(); refreshProfileErrors();
     });
     input.addEventListener('blur', () => { profileTouched.add(key); refreshProfileErrors(); });
@@ -277,6 +280,7 @@ function buildForm() {
   }
   selectSettings(selectedSettings); controls(); refreshProfileErrors();
 }
+function applySigeProfile(){ Object.assign(values,{'frontend.type':'sige','frontend.sample_rate_hz':'8183800','frontend.center_frequency_hz':'1575381600','frontend.signal_frequency_hz':'1575420000','hackrf.bandwidth_hz':'0','hackrf.lna_gain_db':'0','hackrf.vga_gain_db':'0','hackrf.rf_amp':'false','hackrf.antenna_power':'false','frontend.stream_format':'auto'}); }
 function updateSourceFields() {
   const source = values['frontend.type'];
   const caps = deviceCaps && deviceCaps.source === source && deviceCaps.serial === (values['frontend.serial'] || '') && deviceCaps.tuning === values['frontend.center_frequency_hz'] && (source !== 'bladerf' || deviceCaps.precision === values['bladerf.format']) ? deviceCaps : null;
@@ -295,6 +299,9 @@ function updateSourceFields() {
   const ppm=document.querySelector('[name="rtlsdr.ppm"]');if(ppm){ppm.min=-1000;ppm.max=1000;ppm.step=1;}
   const tuning=document.querySelector('[name="frontend.center_frequency_hz"]');
   if(tuning){tuning.min=(caps?.frequency_min_hz||0)/1e6;tuning.max=(caps?.frequency_max_hz||(source==='rtlsdr'?4294967295:6000000000))/1e6;}
+  for(const key of ['frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz','frontend.stream_format']) {const input=document.querySelector(`[name="${key}"]`);if(input)input.disabled=!editable()||source==='sige';}
+  const bandwidth=document.querySelector('[name="hackrf.bandwidth_hz"]');if(bandwidth)bandwidth.closest('.field')?.classList.toggle('hidden',source==='sige');
+  $('sigeInfo').classList.toggle('hidden',source!=='sige');
   for (const group of document.querySelectorAll('[data-group]')) {
     const kind = {'HackRF':'hackrf','RTL-SDR':'rtlsdr','bladeRF':'bladerf','File replay':'file'}[group.dataset.group];
     group.classList.toggle('hidden', Boolean(kind && source !== kind));
@@ -306,12 +313,13 @@ function controls() {
   const commandPending = httpBusy || pendingCommand !== null;
   for(const id of ['showSpectrum','showWaterfall','showWaterfall3D'])$(id).disabled=commandPending||['starting','stopping'].includes(status?.state);
   for (const field of $('configForm').elements) field.disabled = !ready;
-  for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
-  $('calibrateGains').disabled = !ready || values['frontend.type'] === 'file' || !capabilities?.[values['frontend.type']];
+  for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'sigePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
+  $('calibrateGains').disabled = !ready || ['file','sige'].includes(values['frontend.type']) || !capabilities?.[values['frontend.type']];
   $('apply').disabled = !ready || referenceSettingsOnly();
   if (capabilities && !capabilities.hackrf) $('hackrfPreset').disabled = true;
   $('rtlPreset').disabled = !ready || !capabilities?.rtlsdr;
   $('bladePreset').disabled = !ready || !capabilities?.bladerf;
+  $('sigePreset').disabled = !ready || !capabilities?.sige;
   updateSourceFields();
   const sourceSelect=document.querySelector('[name="frontend.type"]'); if(sourceSelect){for(const option of sourceSelect.options)option.disabled=option.value!=='file' && !capabilities?.[option.value];}
   moduleForm?.update($('configForm'), values, ready);
@@ -376,7 +384,7 @@ function renderStatus(next) {
   if (!lastSample || next.wall_seconds !== lastSample.time) lastSample = {samples:BigInt(next.received_samples), time:next.wall_seconds};
   $('rate').textContent = next.state !== 'running' ? '—' : rate === null ? $('rate').textContent : `${(Math.max(0, rate) / 1e6).toFixed(3)} Msps`;
   $('elapsed').textContent = `Elapsed ${duration(next.wall_seconds)}`;
-  $('written').textContent = bytes(BigInt(next.written_samples) * (next.sample_format==='SC16_Q11'?4n:2n));
+  $('written').textContent = bytes(BigInt(next.written_samples) * (['SC16_Q11','CI16'].includes(next.sample_format)?4n:2n));
   $('recordState').textContent = next.recording_state === 'recording' ? 'Recording active' : `Recording ${next.recording_state}`;
   $('dropped').textContent = pairs(next.known_dropped_samples); $('gaps').textContent = `${pairs(next.gap_events)} gap events`;
   $('inputQueue').textContent = `${pairs(next.input_queued_samples)} pairs`; $('recordQueue').textContent = `${pairs(next.recording_queued_samples)} pairs`;
@@ -412,7 +420,7 @@ async function refreshFiles() {
       if (file.closed) { const link = document.createElement('a'); link.textContent = 'Transfer ↓'; link.title = 'Download to the computer running this browser'; link.href = `/api/v1/${sessionPrefix()}files/${encodeURIComponent(file.name)}`; link.download = file.name; cell.append(link); }
       else cell.textContent = '—'; row.append(cell);
       const replayCell = document.createElement('td');
-      if (['.cs8','.cu8','.sc16q11'].some(ext=>file.name.endsWith(ext))) {
+      if (['.cs8','.cu8','.sc16q11','.ci16'].some(ext=>file.name.endsWith(ext))) {
         const play = document.createElement('button'); play.textContent = 'Replay';
         play.disabled = !file.closed || BigInt(file.bytes) === 0n;
         play.title = 'Select this file as the receiver input; stop reception first';
@@ -502,9 +510,8 @@ const plotToggle=id=>$(id==='spectrum'?'showSpectrum':id==='waterfall'?'showWate
 const plotSelection=()=>Object.fromEntries(plotIds.map(id=>[id,plotToggle(id).checked]));
 const anyPlotEnabled=()=>plotIds.some(id=>plotToggle(id).checked);
 let previousPlotSelection=plotSelection();
-let waterfall3DHistory=[],waterfall3DTime=-Infinity;
 const plotWork={spectrum:0,waterfall:0,waterfall3D:0};
-let waterfall3DRender={mode:'3d',rows:0,columns:0};
+let waterfall3DRender={mode:'3d',style:'surface',rows:0,columns:0};
 function diagnosticVisibility(){return document.hidden||activeWorkspaceView!=='rf'?0:(anyPlotEnabled()?1:0)|($('showHistogram').checked?2:0);}
 function diagnosticEnabled(name){const value=analysisConfig?.[name]??savedValues[`analysis.${name}`];return value!==false&&value!=='false';}
 function plotEnabled(id){return diagnosticEnabled('spectrum_enabled')&&plotToggle(id).checked;}
@@ -552,7 +559,7 @@ async function changePlotEnabled(event){
   const previousSelection={...previousPlotSelection},enabled=Object.values(selection).some(Boolean);
   if(enabled)previousPlotSelection={...selection};
   $('plotNotice').classList.add('hidden');
-  syncPlotVisibility();requestStatus();
+  syncPlotVisibility();schedulePlotDraw();requestStatus();
   if(enabled===diagnosticEnabled('spectrum_enabled'))return;
   plotConfigBusy=true;httpBusy=true;controls();
   try{
@@ -621,7 +628,7 @@ $('analysisForm').addEventListener('submit',async event=>{
   } catch(error){setAnalysisNotice(error.message,true);log(error.message,true);}
   finally{httpBusy=false;controls();}
 });
-function resetAnalysis(config=null){analysisSnapshot=null;analysisConfig=config;analysisSequence='0';histogramSequence='';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;waterfall3DHistory=[];waterfall3DTime=-Infinity;skippedDisplay=0;rejectedFrames=0;syncPlotVisibility();drawAnalysis();}
+function resetAnalysis(config=null){analysisSnapshot=null;analysisConfig=config;analysisSequence='0';histogramSequence='';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;skippedDisplay=0;rejectedFrames=0;syncPlotVisibility();drawAnalysis();}
 function psdIntegrity(a){
   if(!Array.isArray(a.dbfs)||a.dbfs.length>1024||a.dbfs.length!==Math.min(a.fft_size,1024))return false;
   let hash=2166136261,sum=0,min=Infinity,max=-Infinity;
@@ -643,7 +650,7 @@ function renderAnalysis(a,configRevision=null){
   const mask=diagnosticMask();
   if(!mask)return;
   if(a.sequence==='0'){if(analysisSequence!=='0')resetAnalysis(a.config);return;}
-  if(a.revision!==analysisRevision){waterfallHistory=[];waterfallTime=-Infinity;waterfall3DHistory=[];waterfall3DTime=-Infinity;analysisSequence='0';histogramSequence='';analysisRevision=a.revision;}
+  if(a.revision!==analysisRevision){waterfallHistory=[];waterfallTime=-Infinity;analysisSequence='0';histogramSequence='';analysisRevision=a.revision;}
   const incoming=a.sequence_id||'0';
   const spectrumChanged=Boolean(mask&1)&&incoming!==analysisSequence&&a.dbfs.length>0;
   const histogramIncoming=a.histogram_sequence??`${a.histogram_first_sample}:${a.histogram_count}`;
@@ -658,16 +665,13 @@ function renderAnalysis(a,configRevision=null){
   if(spectrumChanged){
     if(analysisSequence!=='0')skippedDisplay+=Number(BigInt(incoming)-BigInt(analysisSequence)-1n);
     analysisSequence=incoming;
-    if(plotEnabled('waterfall')&&a.produced_seconds-waterfallTime>=1/Math.max(0.1,Math.min(30,Number($('waterfallRate').value)))){
+    if((plotEnabled('waterfall')||plotEnabled('waterfall3D'))&&a.produced_seconds-waterfallTime>=1/Math.max(0.1,Math.min(30,Number($('waterfallRate').value)))){
       waterfallHistory.unshift({values:Object.freeze([...a.dbfs]),first:a.first_sample,epoch:a.epoch,sequence:incoming,produced:a.produced_seconds});
       waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());waterfallTime=a.produced_seconds;
-      waterfallChanged=true;
+      waterfallChanged=true;waterfall3DChanged=true;
     }
   }
-  if(spectrumChanged&&plotEnabled('waterfall3D')&&a.produced_seconds-waterfall3DTime>=1/Math.max(0.1,Math.min(30,Number($('waterfallRate').value)))){
-    waterfall3DHistory.unshift({values:Object.freeze([...a.dbfs]),first:a.first_sample,epoch:a.epoch,sequence:incoming,produced:a.produced_seconds});
-    waterfall3DHistory.length=Math.min(waterfall3DHistory.length,historyRows());waterfall3DTime=a.produced_seconds;waterfall3DChanged=true;
-  }
+
   analysisSnapshot={...a,dbfs:spectrumChanged?[...a.dbfs]:(analysisSnapshot?.dbfs||[]),
     histogram_i:histogramChanged?a.histogram_i:(analysisSnapshot?.histogram_i||[]),histogram_q:histogramChanged?a.histogram_q:(analysisSnapshot?.histogram_q||[])};
   const unit=a.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin';
@@ -690,7 +694,7 @@ function renderAnalysis(a,configRevision=null){
       }$(id).replaceChildren(dl);
     }
     $('dcMagnitude').textContent=`DC magnitude √(mean I² + mean Q²): ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
-    $('histogramRails').textContent=`Clipping indicator (${a.histogram_min ?? -128} / ${a.histogram_max ?? 127}): I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
+    $('histogramRails').textContent=`Common stream rails (${a.histogram_min ?? -128} / ${a.histogram_max ?? 127}): I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
     drawHistogram('histogramI',analysisSnapshot.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot.histogram_q,'#62a6ff');
   }
   $('analysisCost').textContent=`Worker ${a.compute_ms.toFixed(2)} ms · ${a.sample_backend} · skipped bursts ${a.skipped_bursts} · contended blocks ${a.contention_blocks}`;
@@ -732,7 +736,7 @@ const waterfallPalette=Array.from({length:256},(_,n)=>{
   const x=n/255*(stops.length-1),i=Math.min(stops.length-2,Math.floor(x)),f=x-i;
   return stops[i].map((c,k)=>Math.round(c+(stops[i+1][k]-c)*f));
 });
-const waterfallCssPalette=waterfallPalette.map(colour=>`rgb(${colour.join(',')})`);
+const waterfall3DBitmap=document.createElement('canvas');
 let waterfallRender={mode:'2d',rows:0,columns:0};
 function drawWaterfall(){
   if(!(diagnosticMask()&1)||!plotEnabled('waterfall'))return;
@@ -755,42 +759,32 @@ function drawWaterfall(){
   bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2),[flo,fhi]=frequencyRange();
   ctx.drawImage(waterfallBitmap,(flo-fullLo)/(fullHi-fullLo)*columns,0,(fhi-flo)/(fullHi-fullLo)*columns,rows,left,top,right-left,bottom-top);
   ctx.fillStyle='#8fa6ba';ctx.fillText('New',6,top+9);ctx.fillText('Older',6,bottom);frequencyAxes(s);
-  waterfallRender={mode:'2d',rows:Math.min(rows,waterfallHistory.length),columns};
+  waterfallRender={mode:'2d',rows:Math.min(rows,waterfallHistory.length),columns,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
 }
-/** Fixed front-facing surface: frequency stays aligned with the two plots above. */
+/** Project the shared history as a solid frequency/time/power surface. */
 function drawWaterfall3D(){
   if(!(diagnosticMask()&1)||!plotEnabled('waterfall3D'))return;
   const s=surface('waterfall3D');if(!s)return;++plotWork.waterfall3D;
-  const {ctx,left,right,top,bottom}=s,[lo,hi]=range(),[colourLo,colourHi]=range(true),[flo,fhi]=frequencyRange();
-  const history=waterfall3DHistory,fs=analysisSnapshot?.sample_rate_hz||100000;
-  const fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2),height=bottom-top;
-  const stride=Math.ceil(historyRows()/64),depthRows=Math.ceil(historyRows()/stride),rows=Math.ceil(history.length/stride),bins=history[0]?.values.length||0;
-  const start=Math.max(0,Math.min(bins-1,Math.floor((flo-fullLo)/(fullHi-fullLo)*bins)));
-  const end=Math.max(start+1,Math.min(bins,Math.ceil((fhi-fullLo)/(fullHi-fullLo)*bins)));
-  const columns=Math.min(256,end-start,Math.max(16,Math.floor((right-left)/3)));
-  const point=(k,depth,power)=>[left+k/Math.max(1,columns-1)*(right-left),bottom-depth*height*0.58-Math.max(0,Math.min(1,(power-lo)/(hi-lo)))*height*0.4];
-  const mesh=[];
-  for(let j=0;j<rows;j++){
-    // Fixed temporal buckets cover every snapshot, including brief events.
-    const bucket=history.slice(j*stride,Math.min((j+1)*stride,history.length)),points=[];
-    for(let k=0;k<columns;k++){
-      const a=start+Math.floor(k*(end-start)/columns),b=start+Math.floor((k+1)*(end-start)/columns);let peak=-Infinity;
-      for(const row of bucket)for(let bin=a;bin<b;bin++)peak=Math.max(peak,row.values[bin]);
-      points.push({power:peak,xy:point(k,j/Math.max(1,depthRows-1),peak)});
-    }mesh.push(points);
+  const {ctx,left,right,top,bottom}=s,[lo,hi]=range(true);
+  const rows=historyRows(),columns=analysisSnapshot?.dbfs.length||1024;
+  const imageRows=Math.max(2,Math.round(bottom-top));
+  waterfall3DBitmap.width=columns;waterfall3DBitmap.height=imageRows;
+  const bitmap=waterfall3DBitmap.getContext('2d'),pixels=bitmap.createImageData(columns,imageRows);
+  const geometry=paintWaterfallRelief(pixels.data,waterfallHistory,columns,rows,lo,hi,imageRows);
+  bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;
+  const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2),[flo,fhi]=frequencyRange();
+  const floorTop=top+0.38*(bottom-top);
+  ctx.strokeStyle='#233446';ctx.lineWidth=1;
+  for(let j=0;j<=4;j++){
+    const y=floorTop+j*(bottom-floorTop)/4,x=left+j*(right-left)/4;
+    ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,floorTop);ctx.lineTo(x,bottom);ctx.stroke();
   }
-  // Draw distant observations first; no camera transforms or facet sorting.
-  for(let j=rows-1;j>=0;j--)for(let k=0;k<columns-1;k++){
-    const a=mesh[j][k],b=mesh[j][k+1],rear=j+1<rows?mesh[j+1]:null;
-    const points=rear?[a.xy,b.xy,rear[k+1].xy,rear[k].xy]:[a.xy,b.xy,[b.xy[0],bottom-j/Math.max(1,depthRows-1)*height*0.58],[a.xy[0],bottom-j/Math.max(1,depthRows-1)*height*0.58]];
-    ctx.beginPath();ctx.moveTo(...points[0]);for(const xy of points.slice(1))ctx.lineTo(...xy);ctx.closePath();const peak=Math.max(a.power,b.power,rear?rear[k].power:-Infinity,rear?rear[k+1].power:-Infinity);
-    const colour=waterfallCssPalette[Math.max(0,Math.min(255,Math.round(255*(peak-colourLo)/(colourHi-colourLo))))];
-    ctx.fillStyle=colour;ctx.fill();ctx.strokeStyle=colour;ctx.lineWidth=0.6;ctx.stroke();
-  }
-  frequencyAxes(s);ctx.fillStyle='#8fa6ba';ctx.fillText('Older',5,top+12);ctx.fillText('New',5,bottom);
-  if(!rows)ctx.fillText('Waiting for 3D history',left+20,top+35);
-  $('waterfall3DInfo').textContent='Fixed perspective · '+history.length+' snapshots · newest at front';
-  waterfall3DRender={mode:'3d',rows,columns:rows?columns:0};
+  ctx.drawImage(waterfall3DBitmap,(flo-fullLo)/(fullHi-fullLo)*columns,0,(fhi-flo)/(fullHi-fullLo)*columns,imageRows,left,top,right-left,bottom-top);
+  ctx.fillStyle='#8fa6ba';ctx.fillText(String(hi),4,top+9);ctx.fillText(String(lo),4,floorTop+4);
+  ctx.fillText('New',6,floorTop+18);ctx.fillText('Older',6,bottom);frequencyAxes(s);
+  $('waterfall3DInfo').textContent='3D surface | '+waterfallHistory.length+' snapshots | height = power | synchronized with 2D';
+  waterfall3DRender={mode:'3d',style:'surface',...geometry,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
 }
 function drawHistogram(id,data,color){
   if(!(diagnosticMask()&2))return;
@@ -846,9 +840,10 @@ document.addEventListener('keydown',event=>{
     else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
   }
 });
-$('clearWaterfall').addEventListener('click',()=>{waterfallHistory=[];drawWaterfall();});
-$('clearWaterfall3D').addEventListener('click',()=>{waterfall3DHistory=[];drawWaterfall3D();});
-$('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());waterfall3DHistory.length=Math.min(waterfall3DHistory.length,historyRows());drawAnalysis();});
+function clearWaterfallHistory(){waterfallHistory=[];waterfallTime=-Infinity;drawWaterfall();drawWaterfall3D();}
+$('clearWaterfall').addEventListener('click',clearWaterfallHistory);
+$('clearWaterfall3D').addEventListener('click',clearWaterfallHistory);
+$('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());drawAnalysis();});
 for(const id of ['dbMin','dbMax','colourMin','colourMax','waterfallRate','frequencyMin','frequencyMax','histScale','histMax'])$(id).addEventListener('change',drawAnalysis);
 $('configForm').addEventListener('submit', event => event.preventDefault());
 $('apply').addEventListener('click', () => applyConfig()); $('validate').addEventListener('click', () => applyConfig(true));
@@ -864,6 +859,7 @@ $('rtlPreset').addEventListener('click', () => {
   Object.assign(values, {'frontend.type':'rtlsdr','frontend.sample_rate_hz':'2400000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'2400','hackrf.bandwidth_hz':'0','rtlsdr.auto_gain':'true','rtlsdr.gain_tenths_db':'0','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
   buildForm(); dirtyState(true);
 });
+$('sigePreset').addEventListener('click',()=>{if(!editable())return;applySigeProfile();dirtyState(true);buildForm();});
 $('bladePreset').addEventListener('click', () => {
   deviceCaps = null;
   Object.assign(values, {'frontend.type':'bladerf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','bladerf.gain_db':'30','bladerf.format':'SC16_Q11','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
@@ -871,7 +867,7 @@ $('bladePreset').addEventListener('click', () => {
 });
 let capabilityRequestId = 0;
 $('calibrateGains').addEventListener('click', async () => {
-  if (!editable() || values['frontend.type'] === 'file' || !validateProfileFields()) return;
+  if (!editable() || ['file','sige'].includes(values['frontend.type']) || !validateProfileFields()) return;
   const keys = ['frontend.type', 'frontend.serial', 'frontend.sample_rate_hz', 'frontend.center_frequency_hz', 'bladerf.format'];
   const requested = keys.map(key => values[key] || '');
   const current = () => keys.every((key,index) => (values[key] || '') === requested[index]);
@@ -961,7 +957,7 @@ receiverWorkspace = createReceiverWorkspace({
 connect();
 
 /* Read-only inspection for frame troubleshooting and browser regression tests. */
-export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:skippedDisplay,rejected:rejectedFrames,work:{...plotWork},waterfall:{...waterfallRender},waterfall3D:{...waterfall3DRender,history:waterfall3DHistory.length},history:waterfallHistory.map(row=>({...row,values:[...row.values]}))};}
+export function diagnosticSnapshot(){return {sequence:analysisSequence,skipped:skippedDisplay,rejected:rejectedFrames,work:{...plotWork},waterfall:{...waterfallRender},waterfall3D:{...waterfall3DRender,history:waterfallHistory.length},history:waterfallHistory.map(row=>({...row,values:[...row.values]}))};}
 export {psdIntegrity, renderAnalysis, displayFrequency};
 
 document.querySelectorAll('[data-settings]').forEach(button => button.addEventListener('click', () => selectSettings(button.dataset.settings)));
@@ -1051,8 +1047,8 @@ $('pickerUse').addEventListener('click', () => {
   if (!replaySelection || pickerSession !== selectedSession || !editable()) return;
   if (replaySelection.revision !== revision) { $('pickerNotice').textContent = 'The profile changed. Select the file again.'; return; }
   const draft = parseIni(replaySelection.ini);
-  const keys = ['frontend.type','replay.format','replay.path','replay.start_sample','replay.sample_limit','receiver.run_seconds','receiver.mode','recording.enabled','conditioning.module'];
-  if (replaySelection.metadata_available) keys.push('frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz','conditioning.dc_shift','buffer.window_samples');
+  const keys = ['frontend.type','replay.format','replay.path','replay.start_sample','replay.sample_limit','receiver.run_seconds','receiver.mode','recording.enabled'];
+  if (replaySelection.metadata_available) keys.push('frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz','buffer.window_samples');
   for (const key of keys) values[key] = draft[key];
   buildForm(); dirtyState(true); selectSettings('source'); $('showConfiguration').click();
   notice(replaySelection.metadata_available ? 'Replay metadata loaded into the draft. Review, Apply & save, then Start receiver.' : 'File selected. Set sampling rate and RF parameters, then Apply & save.');

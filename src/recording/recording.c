@@ -25,6 +25,8 @@ struct TNgRecorder {
     TNgError writerError;
     /** Copied validated configuration; owned by this instance. */
     TNgConfig config;
+    TNgSampleFormat nativeFormat;
+    unsigned adcBits;
     /** Writer-owned raw CI8 segment handle. */
     FILE *raw;
     /** Writer-owned CSV stream containing sample indices and gap events. */
@@ -45,6 +47,12 @@ struct TNgRecorder {
     TNgRecordingStats stats;
 };
 
+static unsigned StoredPrecision(const TNgRecorder *r)
+{
+    unsigned width=(unsigned)NgSampleBytes(r->capture.format)*4u;
+    return r->adcBits<width?r->adcBits:width;
+}
+
 /**
  * @brief Open the next raw CI8 segment exclusively.
  *
@@ -60,7 +68,8 @@ static int SegmentOpen(TNgRecorder *r)
 {
     char path[640];
     if (snprintf(path, sizeof(path), "%s_%06" PRIu64 ".%s", r->config.recordingPrefix, r->segment,
-                 r->capture.format == NG_FORMAT_SC16_Q11 ? "sc16q11"
+                 r->capture.format == NG_FORMAT_CI16 ? "ci16"
+                 : r->capture.format == NG_FORMAT_SC16_Q11 ? "sc16q11"
                  : r->capture.format == NG_FORMAT_CU8    ? "cu8"
                                                          : "cs8") >= (int)sizeof(path)) {
         return NgFail(&r->writerError, "Recording path is too long");
@@ -87,20 +96,20 @@ static int SegmentOpen(TNgRecorder *r)
                 r->segmentMetadata,
                 "[capture]\nversion=2\nformat=%s\nlayout=I,Q interleaved\n"
                 "component_bits=%u\ncomponent_signed=%s\nbyte_order=little_endian\n"
-                "significant_bits=%u\nfractional_bits=%u\ndata_file=%s\n"
+                "significant_bits=%u\nfractional_bits=%u\nsource_native_format=%s\nsource_adc_bits=%u\ndata_file=%s\n"
                 "sample_rate_hz=%u\nsample_rate_basis=configured_nominal\n"
                 "center_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
                 "\ndigital_if_hz=%" PRId64 "\nbandwidth_hz=%u\nconditioning=%s\n"
-                "dc_shift=%u\nrecording_point=%s\nhardware_timestamp=%s\n"
+                "recording_point=%s\nhardware_timestamp=%s\n"
                 "host_start_unix_seconds=%" PRId64 "\n",
                 NgSampleFormatName(r->capture.format),
-                r->capture.format == NG_FORMAT_SC16_Q11 ? 16u : 8u,
+                r->capture.format == NG_FORMAT_SC16_Q11 || r->capture.format == NG_FORMAT_CI16 ? 16u : 8u,
                 r->capture.format == NG_FORMAT_CU8 ? "false" : "true",
-                r->capture.format == NG_FORMAT_SC16_Q11 ? 12u : 8u,
-                r->capture.format == NG_FORMAT_SC16_Q11 ? 11u : 0u, name, r->capture.sampleRateHz,
+                StoredPrecision(r),
+                r->capture.format == NG_FORMAT_CI16 ? 15u : r->capture.format == NG_FORMAT_SC16_Q11 ? 11u : 0u, NgSampleFormatName(r->nativeFormat),r->adcBits,name, r->capture.sampleRateHz,
                 r->capture.centerFrequencyHz, r->capture.signalFrequencyHz,
                 (int64_t)r->capture.signalFrequencyHz - (int64_t)r->capture.centerFrequencyHz,
-                r->capture.bandwidthHz, r->capture.conditioningName, r->capture.dcShift,
+                r->capture.bandwidthHz, r->capture.conditioningName,
                 r->capture.preConditioning != 0 ? "pre_conditioning" : "post_conditioning",
                 r->capture.format == NG_FORMAT_SC16_Q11 && r->config.frontend == NG_FRONTEND_BLADERF
                     ? "true"
@@ -282,6 +291,8 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
         return NgFail(error, "Cannot initialize recorder counters");
     }
     r->config = *config;
+    r->nativeFormat=info->nativeFormat?info->nativeFormat:info->format;
+    r->adcBits=info->adcBits?info->adcBits:(info->format==NG_FORMAT_SC16_Q11?12u:info->format==NG_FORMAT_CI16?16u:8u);
     r->capture.format = info->format;
     r->capture.sampleRateHz = info->sampleRateHz;
     r->capture.centerFrequencyHz = info->centerFrequencyHz;
@@ -333,7 +344,7 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
     if (fprintf(r->metadata,
                 "[capture]\nversion=1\nformat=%s\nlayout=I,Q "
                 "interleaved\ncomponent_bits=%u\ncomponent_signed=%s\n"
-                "byte_order=little_endian\nsignificant_bits=%u\nfractional_bits=%u\n"
+                "byte_order=little_endian\nsignificant_bits=%u\nfractional_bits=%u\nsource_native_format=%s\nsource_adc_bits=%u\n"
                 "sample_rate_hz=%u\ncenter_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
                 "\ndigital_if_hz=%" PRId64 "\nbandwidth_hz=%u\n"
                 "source=%s\nclock_domain=%s\nhardware_timestamp=%s\n"
@@ -341,10 +352,10 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
                 "device_identifier=%s\nserial_requested=%s\nlna_gain_db=%u\nvga_gain_db=%u\nrf_amp="
                 "%d\nantenna_power=%d\n"
                 "segment_samples=%" PRIu64 "\n",
-                NgSampleFormatName(info->format), info->format == NG_FORMAT_SC16_Q11 ? 16u : 8u,
+                NgSampleFormatName(info->format), info->format == NG_FORMAT_SC16_Q11 || info->format == NG_FORMAT_CI16 ? 16u : 8u,
                 info->format == NG_FORMAT_CU8 ? "false" : "true",
-                info->format == NG_FORMAT_SC16_Q11 ? 12u : 8u,
-                info->format == NG_FORMAT_SC16_Q11 ? 11u : 0u, info->sampleRateHz,
+                StoredPrecision(r),
+                info->format == NG_FORMAT_CI16 ? 15u : info->format == NG_FORMAT_SC16_Q11 ? 11u : 0u, NgSampleFormatName(r->nativeFormat),r->adcBits,info->sampleRateHz,
                 info->centerFrequencyHz, info->signalFrequencyHz, info->digitalIfHz,
                 info->bandwidthHz, info->sourceName, info->clockDomain,
                 config->frontend == NG_FRONTEND_BLADERF ? "true" : "false", (int64_t)time(NULL),

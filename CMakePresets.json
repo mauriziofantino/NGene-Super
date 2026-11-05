@@ -108,6 +108,7 @@
       "inherits": "windows-msvc-x64-hackrf",
       "binaryDir": "${sourceDir}/build/msvc-x64-multisdr",
       "cacheVariables": {
+        "NGENE_WITH_SIGE": "ON",
         "NGENE_WITH_RTLSDR": "ON",
         "NGENE_WITH_BLADERF": "ON",
         "NGENE_RTLSDR_PROVIDER": "AUTO",
@@ -119,6 +120,7 @@
       "inherits": "windows-msvc-arm64-hackrf",
       "binaryDir": "${sourceDir}/build/msvc-arm64-multisdr",
       "cacheVariables": {
+        "NGENE_WITH_SIGE": "ON",
         "NGENE_WITH_RTLSDR": "ON",
         "NGENE_WITH_BLADERF": "ON",
         "NGENE_RTLSDR_PROVIDER": "AUTO",
@@ -131,6 +133,7 @@
       "binaryDir": "${sourceDir}/build/linux-multisdr",
       "cacheVariables": {
         "NGENE_WITH_HACKRF": "ON",
+        "NGENE_WITH_SIGE": "ON",
         "NGENE_WITH_RTLSDR": "ON",
         "NGENE_WITH_BLADERF": "ON"
       }
@@ -141,6 +144,7 @@
       "binaryDir": "${sourceDir}/build/macos-multisdr",
       "cacheVariables": {
         "NGENE_WITH_HACKRF": "ON",
+        "NGENE_WITH_SIGE": "ON",
         "NGENE_WITH_RTLSDR": "ON",
         "NGENE_WITH_BLADERF": "ON"
       }

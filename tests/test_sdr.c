@@ -259,7 +259,7 @@ static void TestPipeline(TNgSampleFormat format)
     config.windowSamples = 4;
     config.recordingEnabled = 1;
     config.recordingPreConditioning = 1;
-    CHECK(NgFrontendOpen(&config, &source, &error) == NG_OK);
+    CHECK(NgFrontendOpenNative(&config, &source, &error) == NG_OK);
     CHECK(NgReceiverRun(&config, &source, &bypass, NULL, 0, NULL, NULL, &stats, &error) == NG_OK);
     NgFrontendDestroy(&source);
     CHECK(stats.processedSamples == 11 && stats.recording.samples == 11 && stats.gapEvents == 0);
@@ -273,7 +273,7 @@ static void TestPipeline(TNgSampleFormat format)
     CHECK(metadata.available && metadata.complete && metadata.samples == 11 &&
           replay.replayFormat == format);
     replay.replayRealtime = 0;
-    CHECK(NgFrontendOpen(&replay, &source, &error) == NG_OK);
+    CHECK(NgFrontendOpenNative(&replay, &source, &error) == NG_OK);
     CHECK(source.ops->start(source.context, &error) == NG_OK);
     CHECK(source.ops->acquire(source.context, &view, 0, &error) == NG_OK && view.meta.count == 11);
     CHECK(memcmp(view.samples, expected, 11 * NgSampleBytes(format)) == 0);
@@ -349,39 +349,6 @@ static void TestDiagnostics(TNgSampleFormat format)
 /** @brief Verify native DC estimation stays continuous across IQ block boundaries.
  * @param format Native representation; SC16 Q11 keeps the full 12-bit ADC domain.
  */
-static void TestDc(TNgSampleFormat format)
-{
-    unsigned char storage[256];
-    TNgIqView input = {0}, output;
-    TNgConditioner dc;
-    TNgError error = {{0}};
-    size_t index;
-    int value = format == NG_FORMAT_SC16_Q11 ? 1235 : 63;
-    for (index = 0; index < 64; ++index) {
-        NgIqStore(storage, format, index, 0, value);
-        NgIqStore(storage, format, index, 1, -value);
-    }
-    input.samples = (const TNgIq8 *)(const void *)storage;
-    input.format = format;
-    input.meta.count = 64;
-    input.meta.flags = NG_BLOCK_HARDWARE_TIME;
-    input.meta.hardwareTimestamp = 1000;
-    CHECK(NgConditionerDcCreateFormat(64, 4, format, &dc, &error) == NG_OK);
-    CHECK(dc.process(dc.context, &input, &output, &error) == NG_OK);
-    CHECK(NgIqComponent(&output, 0, 0) == value && output.format == format);
-    input.meta.firstSample = 64;
-    input.meta.hardwareTimestamp = 1064;
-    CHECK(dc.process(dc.context, &input, &output, &error) == NG_OK);
-    CHECK(NgIqComponent(&output, 0, 0) < value / 8);
-    CHECK(output.meta.hardwareTimestamp == 1064);
-    input.meta.firstSample = 128;
-    input.meta.hardwareTimestamp = 1128;
-    input.meta.flags |= NG_BLOCK_GAP;
-    CHECK(dc.process(dc.context, &input, &output, &error) == NG_OK);
-    CHECK(NgIqComponent(&output, 0, 0) == value);
-    NgConditionerDcDestroy(&dc);
-}
-
 /** @brief Measure native ring copy/lease/release cost without RF, FFT, disk or channels.
  * @details This is a microbenchmark, not a full GNSS real-time acceptance result.
  */
@@ -484,7 +451,6 @@ int main(int argc, char **argv)
         TestConcurrent(format);
         TestPipeline(format);
         TestDiagnostics(format);
-        TestDc(format);
     }
     puts("PASS native CI8/CU8/SC16 Q11 ingress, 60,000 concurrent blocks, exact recording/replay "
          "and integer diagnostics");

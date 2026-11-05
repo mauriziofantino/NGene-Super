@@ -35,13 +35,14 @@ async function until(fn,label){for(let i=0;i<160;i++){const r=await fn();if(r)re
     for(let i=0;i<3;i++){
       const id=ids[i];if(bits&(1<<i))assert(after.work[id]>before.work[id],id+' must draw when enabled');else{assert.equal(after.work[id],before.work[id],id+' must skip rendering preparation');assert.equal(after.calls[id],before.calls[id],id+' must not touch its canvas');}
     }
-    if(!(bits&2))assert.deepEqual(after.history,before.history,'disabled 2D history must stay frozen');
-    if(!(bits&4))assert.equal(after.waterfall3D.history,before.waterfall3D.history,'disabled 3D history must stay frozen');
+    if(!(bits&6))assert.deepEqual(after.history,before.history,'shared history must stay frozen with both waterfalls off');
+    if((bits&6)===6){for(const key of ['newest','oldest','rows','columns'])assert.equal(after.waterfall[key],after.waterfall3D[key],'shared rendered '+key);}
+    assert.equal(after.waterfall3D.history,after.history.length,'one canonical history');
     if(!bits){assert.equal(statusAfter.analysis.sequence_id,statusBefore.analysis.sequence_id,'no PSD/FFT with all three views off');assert(BigInt(statusAfter.analysis.histogram_sequence)>BigInt(statusBefore.analysis.histogram_sequence),'histogram remains independent');}
     assert(BigInt(statusAfter.processed_samples)>BigInt(statusBefore.processed_samples),'receiver must keep processing');
   }
   await page.setViewportSize({width:390,height:844});await page.locator('#waterfall3D').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(root,'mobile.png'),fullPage:true});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'mobile overflow');assert.deepEqual(errors,[]);
-  await post('shutdown',{});assert.equal(await exit,0);console.log('PASS: acquisition removed; all eight plot combinations; disabled canvases/history/geometry idle; all-off FFT stopped while histogram and receiver advance; fixed perspective; desktop/mobile. Evidence: '+root);
+  await post('shutdown',{});assert.equal(await exit,0);console.log('PASS: acquisition removed; all eight plot combinations; disabled canvases idle; synchronized 2D/relief history; all-off FFT stopped while histogram and receiver advance; desktop/mobile. Evidence: '+root);
  }finally{if(browser)await browser.close();if(child.exitCode===null){child.kill('SIGTERM');await exit;}}
 })().catch(e=>{console.error(e);process.exitCode=1;});
 

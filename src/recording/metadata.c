@@ -101,7 +101,7 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
     int resultSeen = 0;
     int digitalSeen = 0;
     int64_t digitalIf = 0;
-    unsigned componentBits = 0;
+    unsigned componentBits = 0, significantBits = 0, fractionalBits = 0;
     int componentSigned = -1;
     out->format = NG_FORMAT_CI8;
     out->dcShift = NG_DEFAULT_DC_SHIFT;
@@ -162,6 +162,9 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
         NG_META_INTEGER_KEY("capture.signal_frequency_hz", UINT64_C(6000000000),
                             out->signalFrequencyHz = number)
         NG_META_INTEGER_KEY("capture.bandwidth_hz", UINT32_MAX, out->bandwidthHz = (uint32_t)number)
+        NG_META_INTEGER_KEY("capture.significant_bits", 16, significantBits = (unsigned)number)
+        NG_META_INTEGER_KEY("capture.fractional_bits", 15, fractionalBits = (unsigned)number)
+        NG_META_INTEGER_KEY("capture.source_adc_bits", 32, out->sourceAdcBits = (unsigned)number)
         NG_META_INTEGER_KEY("capture.dc_shift", 24, out->dcShift = (unsigned)number)
         NG_META_INTEGER_KEY("result.written_samples", UINT64_MAX, declaredSamples = number;
                             countSeen = 1)
@@ -172,6 +175,8 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
                 out->format = NG_FORMAT_CI8;
             } else if (strcmp(value, "CU8") == 0) {
                 out->format = NG_FORMAT_CU8;
+            } else if (strcmp(value, "CI16") == 0) {
+                out->format = NG_FORMAT_CI16;
             } else if (strcmp(value, "SC16_Q11") == 0) {
                 out->format = NG_FORMAT_SC16_Q11;
             } else {
@@ -242,13 +247,16 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
             resultSeen = 1;
         }
     }
-    if (out->format == NG_FORMAT_SC16_Q11) {
+    if (out->format == NG_FORMAT_CI16) {
+        if(significantBits<1 || significantBits>16 || fractionalBits!=15) return NgFail(error,"CI16 metadata requires valid source precision and signed Q15 components");
+    }
+    if (out->format == NG_FORMAT_SC16_Q11 || out->format == NG_FORMAT_CI16) {
         if (out->samples % 2u != 0) {
             return NgFail(error, "Incomplete SC16 Q11 sample pair");
         }
         out->samples /= 2u;
     }
-    if (componentBits != (out->format == NG_FORMAT_SC16_Q11 ? 16u : 8u) ||
+    if (componentBits != (out->format == NG_FORMAT_SC16_Q11 || out->format == NG_FORMAT_CI16 ? 16u : 8u) ||
         componentSigned != (out->format == NG_FORMAT_CU8 ? 0 : 1)) {
         return NgFail(error, "Capture format contradicts component width/signedness");
     }
@@ -312,7 +320,10 @@ int NgReplayInspect(const char *path, TNgCaptureMetadata *metadata, TNgError *er
             }
             result.metadataPath[0] = '\0';
             n = strlen(path);
-            if (n >= 8 && strcmp(path + n - 8, ".sc16q11") == 0) {
+            if(n>=5 && strcmp(path+n-5,".ci16")==0) {
+                if(bytes%4u)return NgFail(error,"Incomplete CI16 IQ pair");
+                result.format=NG_FORMAT_CI16;result.samples=bytes/4u;
+            } else if (n >= 8 && strcmp(path + n - 8, ".sc16q11") == 0) {
                 result.format = NG_FORMAT_SC16_Q11;
                 if (bytes % 4u != 0) {
                     return NgFail(error, "Incomplete SC16 Q11 IQ pair");
@@ -366,12 +377,13 @@ int NgReplayConfigure(const char *path, TNgConfig *config, TNgCaptureMetadata *m
         size_t length = strlen(path);
         int namedFormat = (length >= 4 && (strcmp(path + length - 4, ".cs8") == 0 ||
                                            strcmp(path + length - 4, ".cu8") == 0)) ||
-                          (length >= 8 && strcmp(path + length - 8, ".sc16q11") == 0);
+                          (length >= 8 && strcmp(path + length - 8, ".sc16q11") == 0) ||
+                          (length >= 5 && strcmp(path+length-5,".ci16")==0);
         if (found.available != 0 || namedFormat) {
             draft.replayFormat = found.format;
         } else {
             found.format = draft.replayFormat;
-            if (draft.replayFormat == NG_FORMAT_SC16_Q11) {
+            if (draft.replayFormat == NG_FORMAT_SC16_Q11 || draft.replayFormat == NG_FORMAT_CI16) {
                 if (found.samples % 2u != 0) {
                     return NgFail(error, "Incomplete declared SC16 Q11 IQ pair");
                 }

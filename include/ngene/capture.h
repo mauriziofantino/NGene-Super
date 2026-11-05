@@ -11,6 +11,8 @@ typedef struct {
     unsigned version;
     /** Native IQ representation stored in the raw file. */
     TNgSampleFormat format;
+    /** Original ADC precision when available; zero for historical/unknown sources. */
+    unsigned sourceAdcBits;
     /** Sampling frequency in complex pairs per second; recorded nominal clock rate. */
     uint32_t sampleRateHz;
     /** SDR hardware tuning frequency in Hz. */

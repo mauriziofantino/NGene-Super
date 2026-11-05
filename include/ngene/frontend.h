@@ -150,6 +150,10 @@ typedef struct {
  * @return NG_OK on success; NG_ERROR for configuration, device or allocation errors.
  */
 int NgFrontendOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error);
+/** Native boundary for calibration and driver fixtures; operational clients use Open. */
+int NgFrontendOpenNative(const TNgConfig *config, TNgFrontend *frontend, TNgError *error);
+/** Wrap an owned native source in a dedicated common-stream worker. */
+int NgFrontendCommon(const TNgConfig *config, TNgFrontend *frontend, TNgError *error);
 /**
  * @brief Destroy an opened frontend after reception stops.
  *

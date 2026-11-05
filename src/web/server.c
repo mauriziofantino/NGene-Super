@@ -495,6 +495,8 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     Number(object, "digital_if_hz", (double)status.digitalIfHz);
     Number(object, "actual_sample_rate_hz", status.actualSampleRateHz);
     String(object, "sample_format", NgSampleFormatName(status.sampleFormat));
+    String(object, "native_format", NgSampleFormatName(status.nativeFormat));
+    Number(object, "adc_bits", status.adcBits);
     String(object, "sample_rate_basis", "device_reported_nominal");
     String(object, "state", states[status.state]);
     String(object, "recording_state", recordStates[status.recordingState]);
@@ -666,6 +668,7 @@ static int FileNameValid(const char *name)
     }
     return (n > 4 && (strcmp(name + n - 4, ".cs8") == 0 || strcmp(name + n - 4, ".cu8") == 0)) ||
            (n > 8 && strcmp(name + n - 8, ".sc16q11") == 0) ||
+         (n > 5 && strcmp(name + n - 5, ".ci16") == 0) ||
            (n > 9 && strcmp(name + n - 9, ".meta.ini") == 0) ||
            (n > 10 && strcmp(name + n - 10, ".index.csv") == 0);
 }
@@ -859,7 +862,8 @@ static void AddPickerEntry(void *context, const char *name, uint64_t bytes, int 
     if (directory == 0 &&
         (length < 4 ||
          (strcmp(name + length - 4, ".cs8") != 0 && strcmp(name + length - 4, ".cu8") != 0 &&
-          (length < 8 || strcmp(name + length - 8, ".sc16q11") != 0)) ||
+          (length < 8 || strcmp(name + length - 8, ".sc16q11") != 0) &&
+          (length < 5 || strcmp(name + length - 5, ".ci16") != 0)) ||
          NameContains(name, list->nameFilter) == 0)) {
         return;
     }
@@ -870,7 +874,7 @@ static void AddPickerEntry(void *context, const char *name, uint64_t bytes, int 
     if (directory == 0) {
         usable =
             bytes > 0 &&
-            bytes % ((length >= 8 && strcmp(name + length - 8, ".sc16q11") == 0) ? 4u : 2u) == 0 &&
+            bytes % (((length >= 8 && strcmp(name + length - 8, ".sc16q11") == 0) || (length >= 5 && strcmp(name + length - 5, ".ci16") == 0)) ? 4u : 2u) == 0 &&
             snprintf(full, sizeof(full), "%s/%s", list->directory, name) < (int)sizeof(full) &&
             NgFileAbsolute(full, absolute, sizeof(absolute)) == 0 &&
             FileInUse(list->server, absolute, 0) == 0;
@@ -1065,6 +1069,11 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngModuleParametersJs, ngModuleParametersJsLength);
             return 200;
         }
+        if (strcmp(path, "/waterfall-relief.js") == 0) {
+            Headers(connection, 200, "text/javascript; charset=utf-8", ngWaterfallReliefJsLength);
+            mg_write(connection, ngWaterfallReliefJs, ngWaterfallReliefJsLength);
+            return 200;
+        }
         if (strcmp(path, "/frequency-units.js") == 0) {
             Headers(connection, 200, "text/javascript; charset=utf-8", ngFrequencyUnitsJsLength);
             mg_write(connection, ngFrequencyUnitsJs, ngFrequencyUnitsJsLength);
@@ -1091,6 +1100,7 @@ static int Handle(struct mg_connection *connection, void *context)
             cJSON_AddBoolToObject(reply, "hackrf", NgHackrfAvailable());
             cJSON_AddBoolToObject(reply, "rtlsdr", NgFrontendAvailable(NG_FRONTEND_RTLSDR));
             cJSON_AddBoolToObject(reply, "bladerf", NgFrontendAvailable(NG_FRONTEND_BLADERF));
+            cJSON_AddBoolToObject(reply, "sige", NgFrontendAvailable(NG_FRONTEND_SIGE));
             cJSON_AddBoolToObject(reply, "single_source", 1);
             cJSON_AddBoolToObject(reply, "periodogram", 1);
             cJSON_AddBoolToObject(reply, "gps_acquisition", 0);

@@ -61,7 +61,7 @@ static void TestConfig(void)
     CHECK(Parse("[buffer]\nwindow_samples=0\n", &c) == NG_ERROR);
     CHECK(Parse("[recording]\nunknown=true\n", &c) == NG_ERROR);
     CHECK(Parse("[receiver]\nmode=record\n", &c) == NG_ERROR);
-    CHECK(Parse("[conditioning]\nmodule=unknown\n", &c) == NG_ERROR);
+    CHECK(Parse("[conditioning]\nmodule=dc_iir\ndc_shift=4\n", &c) == NG_OK && c.dcRemoval == 0);
     CHECK(Parse("[frontend]\ntype=hackrf\nserial=\n[replay]\npath=\n"
                 "[recording]\ndirectory=\n",
                 &c) == NG_OK);
@@ -92,10 +92,10 @@ static void TestConfig(void)
     CHECK(Parse("[buffer]\nwindow_samples=1048576\ningress_blocks=4096\n", &c) == NG_ERROR);
     /* The same queue geometry fits the sample-storage guard only at two bytes per pair. */
     CHECK(Parse("[frontend]\ntype=bladerf\n[bladerf]\nformat=CI8\n"
-                "[buffer]\nwindow_samples=65536\ningress_blocks=2048\n",
+                "[buffer]\nwindow_samples=65536\ningress_blocks=1024\n",
                 &c) == NG_OK);
     CHECK(Parse("[frontend]\ntype=bladerf\n[bladerf]\nformat=SC16_Q11\n"
-                "[buffer]\nwindow_samples=65536\ningress_blocks=2048\n",
+                "[buffer]\nwindow_samples=65536\ningress_blocks=1024\n",
                 &c) == NG_ERROR);
 }
 
