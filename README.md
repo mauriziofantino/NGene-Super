@@ -7,7 +7,7 @@ navigation signals from software defined radios or recorded I/Q samples. This re
 develops the original NGene receiver into a portable C11 application with a shared sample
 stream, modular signal processing and a browser based operator console.
 
-The current application provides live I/Q reception, signal conditioning, recording, file
+The current application provides live I/Q reception, recording, file
 replay and spectrum diagnostics. Acquisition, tracking,
 navigation message decoding and position, velocity and time (PVT) computation are not yet integrated.
 
@@ -20,7 +20,8 @@ an over-the-air GNSS capture or a position solution.*
 
 - Native HackRF, RTL-SDR, bladeRF RX0 and fixed-profile SiGe I/Q inputs, plus file replay.
 - Common signed CI8/CI16 rings, SIMD conversion and a dedicated source worker. Automatic precision preserves native ADC information.
-- No streaming DC removal. Old DC profile keys are retired and ignored.
+- SIMD block-mean DC removal before diagnostic spectra, histograms and gain analysis;
+  no IIR filter or conditioning controls. Old DC profile keys are retired and ignored.
 - GNSS acquisition is unavailable: the previous implementation has been removed.
 - Common-stream recording with segmentation, format/ADC provenance and gap accounting.
 - Spectrum/PSD, synchronized 2D and rectangular relief waterfalls, I/Q histograms and live receiver counters.
@@ -133,8 +134,12 @@ all-off PSD production, profile compatibility, and desktop/mobile regression cov
 
 Gain calibration collects three native I/Q windows per setting and stops RX before statistical
 analysis. All three windows must pass. HackRF VGA sweeps stop at the first overloaded setting
-in each LNA/RF-amplifier branch. An unsuccessful calibration leaves the current GUI gains intact.
-These checks do not replace on-device RF/USB validation.
+in each LNA/RF-amplifier branch. A background worker reports progress and supports cancellation;
+the console and service exit remain available. An unsuccessful calibration leaves the current
+GUI gains intact. Accepted suggestions update the draft for review, without saving the profile.
+The score compares ADC loading and distribution, not GNSS C/N0 or sensitivity. Histograms and
+distribution statistics use centered samples; native clipping checks retain the original levels.
+See [calibration and DC verification](docs/service/CALIBRATION_DC.md) for the criteria and limits.
 
 The [frontend decision record](docs/service/FRONTEND_STREAM_DECISIONS.md) documents the
 common formats, worker ownership, SiGe USB setup, removed DC filter, recording semantics

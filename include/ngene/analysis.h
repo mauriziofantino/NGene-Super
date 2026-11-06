@@ -69,7 +69,7 @@ typedef struct {
     int min;
     /** Maximum observed component value. */
     int max;
-    /** Number of samples at either signed-int8 endpoint, -128 or 127. */
+    /** Original input stream endpoint count, before mean subtraction; not physical ADC clipping. */
     uint32_t clipping;
     /** Number of exactly zero component values. */
     uint32_t zeros;
@@ -141,6 +141,8 @@ typedef struct {
     TNgComponentStats statsQ;
     /** Magnitude hypot(mean I, mean Q) in ADC units; no bin is hidden. */
     double dcMagnitude;
+    /** Rounded block means subtracted before histogram statistics/bins. */
+    int removedDcI, removedDcQ;
     /** Owned FFT-shifted PSD bins in the configured logarithmic units. */
     double spectrumDbfs[NG_ANALYSIS_BINS];
     /** Statistics and checksum of this published PSD frame. */

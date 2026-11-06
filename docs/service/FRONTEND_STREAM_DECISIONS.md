@@ -106,9 +106,19 @@ keys. Historical `conditioning.module`/`dc_shift` profile entries are accepted a
 ignored so an old profile cannot silently re-enable a filter. Reserved legacy C
 configuration fields remain for source compatibility and must not enable DC.
 
-This does not implement the future Off/Manual/Automatic window-mean DC policy.
-RF/IF/Fs setup and that future numerical decision need their own validation.
-Histogram DC statistics remain measurements; displaying them does not remove DC.
+Diagnostic and calibration workers now subtract each observation's rounded I/Q mean
+with the two-pass SIMD primitive `NgIqCenterBlock`. This follows Classic's widened
+block subtraction rather than an IIR recurrence. SSE2 and ARM64 NEON implementations
+have a scalar fallback. The owned int32 output avoids saturation of centered CI16
+excursions. Histograms, statistics and FFT input use that output; removed offsets and
+the remaining sub-level mean are reported separately. Original stream endpoint counts
+remain available, and gain calibration checks clipping on the original native ADC levels.
+There is no selectable DC policy or pre/post diagnostic control in the UI.
+
+This correction is local to diagnostic/calibration workspaces. It does not modify the
+shared ring or recording samples and does not add a continuous DC filter. It removes
+the constant component of each observation, including any desired signal exactly at DC.
+RF/IF/Fs setup still needs on-device validation. See [verification](CALIBRATION_DC.md).
 
 Operational captures now contain the **common signed stream**. The old pre/post
 recording-point INI/API values remain readable for compatibility, but with bypass

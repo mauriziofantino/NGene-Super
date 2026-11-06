@@ -4,14 +4,15 @@ Engineering reference. For current operator instructions and native I/Q formats,
 [diagnostics manual](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Signal-Diagnostics). The CI8 arithmetic examples below retain
 the original numerical explanation; current input formats also include CU8 and SC16 Q11.
 
-Frontend → pre-conditioning tap → shared bypass → single GNSS ring →
-same window delivered to every channel → post-conditioning tap. The recording point is
-selected while stopped. PSD and histogram select their taps independently; there is no
-second GNSS ring.
+Frontend → shared bypass → single common ring → same window delivered to every channel.
+PSD and histogram workers copy independent diagnostic bursts. Legacy pre/post tap API
+fields remain compatible, but their redundant UI selectors have been removed.
 
 Current frontend streams are common signed CI8 or CI16 Q15; legacy CU8/Q11 replay is
 converted before publication. Histogram amplitudes and rail indicators use the common
-representation. Source ADC bits are separate metadata. There is no streaming DC remover.
+representation. Source ADC bits are separate metadata. Before statistics or FFT processing,
+each worker subtracts its burst's rounded I/Q mean using SIMD and widened int32 storage.
+There is no IIR or streaming DC remover; shared and recorded samples remain unchanged.
 See [frontend decisions](FRONTEND_STREAM_DECISIONS.md).
 
 ## Capture and ownership
@@ -100,7 +101,7 @@ changes.
 
 ## Arithmetic and display
 
-For CI8: ×128 → Q15 window → Q14 FFT /N → uint64 power and Welch accumulation. Segment
+For CI8: block mean subtraction → ×128 → Q15 window → Q14 FFT /N → uint64 power and Welch accumulation. Segment
 averaging uses linear power. Temporal mean/EMA uses double linear power, followed by log10
 for display. FFT butterflies remain integer. Configuration, epoch or detected discontinuity
 changes reset temporal state.
@@ -108,17 +109,20 @@ changes reset temporal state.
 Coherent gain G=sum(w)/N; ENBW=Fs*sum(w²)/(sum(w))². dBFS/bin uses tone normalization
 (CI8 radius 128 = 0 dBFS); dBFS/Hz divides normalized power by ENBW. This is not dBm.
 Integer quantization and numerical noise remain: a longer FFT does not guarantee greater
-dynamic range. Bin zero is never erased.
+dynamic range. Bin zero is not overwritten; block-mean subtraction removes the constant
+component before windowing. Any useful signal exactly at DC is removed along with offset.
 
 FFT-shifted output is reduced to at most 1024 display values using maximum pooling for larger
 FFTs; peak frequency and Δf retain native resolution. Pooling preserves peaks rather than
 integrated noise power. The waterfall is a sequence of snapshots, rather than a continuous
 STFT. Every row uses the same colour scale; history, rate and axes have separate controls.
 
-The original signed 8-bit histograms cover [-128,127], with uint32 counts and 64-bit moment
-accumulators. Current native formats use their corresponding integer ranges. NGene computes
-mean, standard deviation, RMS, minimum/maximum, zeros, rail counts and DC magnitude. Rail
-counts do not establish RF clipping. Choose the pre-conditioning tap to inspect input bias
-and the post-conditioning tap to inspect the conditioner.
+Histograms describe samples after mean subtraction, using uint32 counts and 64-bit moment
+accumulators. The axis covers the input format's signed range and doubles if needed to retain
+centered excursions without clipping into an end bin. NGene computes residual mean,
+standard deviation, RMS, minimum/maximum, zeros and residual DC magnitude, and separately
+reports the removed I/Q offsets. Endpoint counts refer to input stream values before subtraction;
+they do not establish physical ADC or RF clipping. Burst-mean subtraction and its checks are
+documented in [calibration and DC verification](CALIBRATION_DC.md).
 
 [Implementation, tuning, ownership, benchmarks and limitations](ITERATION_04.md).

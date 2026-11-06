@@ -110,6 +110,8 @@ struct TNgAnalysis {
     TNgAnalysisSnapshot workResult;
     /** Owned input stream or workspace; no frontend pointer is retained. */
     int16_t input[2 * NG_FFT_MAX_SIZE];
+    /** Widened ADC units after SIMD block-mean subtraction; native bursts stay immutable. */
+    int32_t centered[2 * NG_ANALYSIS_PAIRS];
     /** Owned output workspace, reused only by this worker. */
     int16_t output[2 * NG_FFT_MAX_SIZE];
     /** Worker-owned fixed-point window coefficients. */
@@ -364,6 +366,7 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     double start = NgMonotonicSeconds();
     TNgError error = {{0}};
     TNgIqView native = {0};
+    int removedDc[2];
     int adcLimit = b->format == NG_FORMAT_CI16 ? 32768 : b->format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
     int fftScale = b->format == NG_FORMAT_CI16 ? 1 : b->format == NG_FORMAT_SC16_Q11 ? 8 : 128;
     if (BurstCurrent(a, b) == 0) {
@@ -372,6 +375,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     native.samples = (const TNgIq8 *)(const void *)b->data.native;
     native.format = b->format;
     native.meta.count = b->count;
+    if (NgIqCenterBlock(&native, a->centered, removedDc, &error) != NG_OK ||
+        BurstCurrent(a, b) == 0) return 0;
     memset(s, 0, sizeof(*s));
     s->histogramMin = -adcLimit;
     s->histogramMax = adcLimit - 1;
@@ -385,52 +390,26 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     s->config = *c;
     s->capturedSeconds = b->captured;
     if (b->kind == 1) {
-        int64_t sums[2];
-        uint64_t squares[2];
+        int64_t sums[2] = {0, 0};
+        uint64_t squares[2] = {0, 0};
+        unsigned rawClipping[2] = {0, 0};
+        int histogramLimit = adcLimit;
         TNgComponentStats *stats[2] = {&s->statsI, &s->statsQ};
         s->histogramBins = c->histogramBins;
         s->histogramCount = (uint32_t)c->histogramPairs;
         s->histogramFirst = b->first;
         s->histogramEpoch = b->epoch;
-        if (b->format == NG_FORMAT_CI8 || b->format == 0) {
-            NgIqMoments(b->data.ci8, c->histogramPairs, sums, squares);
-        } else {
-            sums[0] = sums[1] = 0;
-            squares[0] = squares[1] = 0;
-            for (k = 0; k < c->histogramPairs; ++k) {
-                if (k % 1024 == 0 && BurstCurrent(a, b) == 0) {
-                    return 0;
-                }
-                for (j = 0; j < 2; ++j) {
-                    int64_t v = NgIqComponent(&native, k, (unsigned)j);
-                    if (v < -adcLimit || v >= adcLimit) {
-                        return 0;
-                    }
-                    sums[j] += v;
-                    squares[j] += (uint64_t)(v * v);
-                }
-            }
-        }
-        s->statsI.min = s->statsQ.min = adcLimit - 1;
-        s->statsI.max = s->statsQ.max = -adcLimit;
+        s->statsI.min = s->statsQ.min = 2 * adcLimit;
+        s->statsI.max = s->statsQ.max = -2 * adcLimit;
         for (k = 0; k < c->histogramPairs; ++k) {
-            int values[2];
             if (k % 1024 == 0 && BurstCurrent(a, b) == 0) {
                 return 0;
             }
-            if (b->format == 0 || b->format == NG_FORMAT_CI8) {
-                values[0] = b->data.ci8[k].i;
-                values[1] = b->data.ci8[k].q;
-            } else {
-                values[0] = NgIqComponent(&native, k, 0);
-                values[1] = NgIqComponent(&native, k, 1);
-            }
-            ++s->histogramI[(unsigned)(values[0] + adcLimit) * c->histogramBins /
-                            (unsigned)(2 * adcLimit)];
-            ++s->histogramQ[(unsigned)(values[1] + adcLimit) * c->histogramBins /
-                            (unsigned)(2 * adcLimit)];
             for (j = 0; j < 2; ++j) {
-                int v = values[j];
+                int v = a->centered[2 * k + j];
+                int raw = v + removedDc[j];
+                sums[j] += v;
+                squares[j] += (uint64_t)((int64_t)v * v);
                 if (v < stats[j]->min) {
                     stats[j]->min = v;
                 }
@@ -438,16 +417,30 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                     stats[j]->max = v;
                 }
                 stats[j]->zeros += v == 0;
-                stats[j]->clipping += v == -adcLimit || v == adcLimit - 1;
+                rawClipping[j] += (unsigned)(raw == -adcLimit || raw == adcLimit - 1);
+                if (v < -adcLimit || v >= adcLimit) histogramLimit = 2 * adcLimit;
             }
+        }
+        /* Widen the displayed axis only when subtracting the mean exceeds the
+         * original ADC range. Never clip centered samples into an end bin. */
+        s->histogramMin = -histogramLimit;
+        s->histogramMax = histogramLimit - 1;
+        for (k = 0; k < c->histogramPairs; ++k) {
+            if (k % 1024 == 0 && BurstCurrent(a, b) == 0) return 0;
+            ++s->histogramI[(unsigned)(a->centered[2*k] + histogramLimit) * c->histogramBins /
+                            (unsigned)(2 * histogramLimit)];
+            ++s->histogramQ[(unsigned)(a->centered[2*k+1] + histogramLimit) * c->histogramBins /
+                            (unsigned)(2 * histogramLimit)];
         }
         for (j = 0; j < 2; ++j) {
             double power = (double)squares[j] / (double)c->histogramPairs;
             stats[j]->mean = (double)sums[j] / (double)c->histogramPairs;
             stats[j]->rms = sqrt(power);
             stats[j]->std = sqrt(fmax(0, power - stats[j]->mean * stats[j]->mean));
+            stats[j]->clipping = rawClipping[j];
         }
         s->dcMagnitude = hypot(s->statsI.mean, s->statsQ.mean);
+        s->removedDcI = removedDc[0]; s->removedDcQ = removedDc[1];
         s->clippedI = s->statsI.clipping;
         s->clippedQ = s->statsQ.clipping;
         s->histogramSeconds = NgMonotonicSeconds();
@@ -492,17 +485,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             }
             for (k = 0; k < n; ++k) {
                 int iValue, qValue;
-                if (b->format == 0 || b->format == NG_FORMAT_CI8) {
-                    iValue = b->data.ci8[offset + k].i;
-                    qValue = b->data.ci8[offset + k].q;
-                } else {
-                    iValue = NgIqComponent(&native, offset + k, 0);
-                    qValue = NgIqComponent(&native, offset + k, 1);
-                }
-                if (iValue < -adcLimit || iValue >= adcLimit || qValue < -adcLimit ||
-                    qValue >= adcLimit) {
-                    return 0;
-                }
+                iValue = a->centered[2 * (offset + k)];
+                qValue = a->centered[2 * (offset + k) + 1];
                 { int32_t product = (int32_t)iValue * fftScale * a->window[k];
                   if (b->format == NG_FORMAT_CI16) product = product>=0 ? product/2 : -1-((-1-product)/2);
                   a->input[2*k]=(int16_t)Shift15(product); }
@@ -674,6 +658,7 @@ static void Worker(void *context)
                 d->statsI = s->statsI;
                 d->statsQ = s->statsQ;
                 d->dcMagnitude = s->dcMagnitude;
+                d->removedDcI = s->removedDcI; d->removedDcQ = s->removedDcQ;
                 d->clippedI = s->clippedI;
                 d->clippedQ = s->clippedQ;
             }

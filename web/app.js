@@ -51,6 +51,9 @@ const fields = [
 ];
 let values = {}, savedValues = {}, revision = '1', token = '', status = null, capabilities = null;
 let dirty = false, httpBusy = false, pendingCommand = null, socket = null, reconnectTimer = null;
+let calibrationBusy = false, calibrationJobId = null, calibrationRequest = null;
+let calibrationPolling = false, calibrationTerminal = '';
+let calibrationSeenJob = 0n;
 let waiting = false, statusRequestPending = false, lastRequest = 0, lastResponse = -Infinity, lastSample = null, lastMessage = '', lastCommand = '', lastRun = '';
 let paused = false, fileBusy = false, lastFileRefresh = 0;
 let selectedSettings = 'source', deletingFile = false;
@@ -146,7 +149,7 @@ function clearProfileErrors() {
   profileErrors.clear(); profileTouched.clear(); profileValidationRequested = false; profileRequestNotice = null;
 }
 function connected() { return socket?.readyState === WebSocket.OPEN; }
-function editable() { return connected() && status && ['stopped', 'error'].includes(status.state) && !httpBusy && !pendingCommand; }
+function editable() { return connected() && status && ['stopped', 'error'].includes(status.state) && !httpBusy && !pendingCommand && !calibrationBusy; }
 function pairs(value) { try { return BigInt(value || '0').toLocaleString('en-US'); } catch { return '—'; } }
 function bytes(value) { const n = Number(value); if (n < 1000) return `${n} B`; if (n < 1e6) return `${(n / 1e3).toFixed(1)} kB`; if (n < 1e9) return `${(n / 1e6).toFixed(2)} MB`; return `${(n / 1e9).toFixed(2)} GB`; }
 function duration(value) { const n = Math.max(0, Math.floor(value || 0)); return `${Math.floor(n / 3600) ? `${Math.floor(n / 3600)}:` : ''}${String(Math.floor(n / 60) % 60).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`; }
@@ -315,6 +318,8 @@ function controls() {
   for (const field of $('configForm').elements) field.disabled = !ready;
   for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'sigePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
   $('calibrateGains').disabled = !ready || ['file','sige'].includes(values['frontend.type']) || !capabilities?.[values['frontend.type']];
+  $('cancelCalibration').classList.toggle('hidden', !calibrationBusy);
+  $('cancelCalibration').disabled = !connected() || !calibrationBusy;
   $('apply').disabled = !ready || referenceSettingsOnly();
   if (capabilities && !capabilities.hackrf) $('hackrfPreset').disabled = true;
   $('rtlPreset').disabled = !ready || !capabilities?.rtlsdr;
@@ -487,8 +492,6 @@ async function connect() {
 const analysisFields = [
   ['spectrum_enabled','Spectrum enabled',['true','false']],
   ['histogram_enabled','Histogram enabled',['true','false']],
-  ['spectrum_source','Spectrum source',['pre','post']],
-  ['histogram_source','Histogram source',['pre','post']],
   ['fft_size','FFT size',[256,512,1024,2048,4096,8192,16384]],
   ['window','Window',['rectangular','hann','hamming','blackman','blackman_harris']],
   ['overlap_percent','FFT overlap (%)',null,0,99,1],
@@ -678,7 +681,7 @@ function renderAnalysis(a,configRevision=null){
   if(spectrumChanged){
     $('fftBackend').textContent=a.backend||'Integer FFT';
     if(plotEnabled('spectrum')){
-    $('spectrumInfo').textContent=`${a.fft_size}-point FFT · Δf ${a.bin_hz.toFixed(2)} Hz · ENBW ${a.enbw_hz.toFixed(2)} Hz · ${a.config.window} · ${a.config.averages} Welch segments · ${a.config.spectrum_source}`;
+    $('spectrumInfo').textContent=`${a.fft_size}-point FFT · Δf ${a.bin_hz.toFixed(2)} Hz · ENBW ${a.enbw_hz.toFixed(2)} Hz · ${a.config.window} · ${a.config.averages} Welch segments · after block DC removal`;
     $('spectrumPeak').textContent=`Peak ${displayFrequency(a.peak_hz).toFixed(4)} ${frequencyUnit()} · ${a.peak_dbfs.toFixed(1)} ${unit}`;
     }
     $('frameIntegrity').textContent=`PSD #${incoming} · produced ${a.produced_seconds.toFixed(3)} s · min/max/mean ${a.min.toFixed(2)} / ${a.max.toFixed(2)} / ${a.mean.toFixed(2)} · NaN/Inf ${a.nan_count}/${a.inf_count} · hash ${a.checksum.toString(16)} · rejected ${rejectedFrames}`;
@@ -686,15 +689,15 @@ function renderAnalysis(a,configRevision=null){
   }
   if(histogramChanged){
     histogramSequence=histogramIncoming;
-    $('histogramInfo').textContent=a.histogram_count?`${pairs(a.histogram_count)} pairs · ${a.histogram_i.length} bins · ${a.config.histogram_source}`:'Histogram disabled / waiting';
+    $('histogramInfo').textContent=a.histogram_count?`${pairs(a.histogram_count)} pairs · ${a.histogram_i.length} bins · after block DC removal`:'Histogram disabled / waiting';
     for(const [id,t] of [['statsI',a.stats_i],['statsQ',a.stats_q]]){
       const dl=document.createElement('dl');
       for(const [label,value] of [['Mean',t.mean],['Std',t.std],['RMS',t.rms],['Min',t.min],['Max',t.max],['Clipping / rail count',t.clipping_count],['Zero count',t.zero_count]]){
         const div=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=Number.isInteger(value)?pairs(value):value.toFixed(4);div.append(dt,dd);dl.append(div);
       }$(id).replaceChildren(dl);
     }
-    $('dcMagnitude').textContent=`DC magnitude √(mean I² + mean Q²): ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
-    $('histogramRails').textContent=`Common stream rails (${a.histogram_min ?? -128} / ${a.histogram_max ?? 127}): I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
+    $('dcMagnitude').textContent=`Removed block DC: I ${a.removed_dc_i ?? 0}, Q ${a.removed_dc_q ?? 0} counts · residual DC ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
+    $('histogramRails').textContent=`Input stream rail counts, before DC removal: I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
     drawHistogram('histogramI',analysisSnapshot.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot.histogram_q,'#62a6ff');
   }
   $('analysisCost').textContent=`Worker ${a.compute_ms.toFixed(2)} ms · ${a.sample_backend} · skipped bursts ${a.skipped_bursts} · contended blocks ${a.contention_blocks}`;
@@ -866,33 +869,75 @@ $('bladePreset').addEventListener('click', () => {
   buildForm(); dirtyState(true);
 });
 let capabilityRequestId = 0;
+function calibrationDetails(result) {
+  return `RMS ${(result.rms_fraction * 100).toFixed(1)}% of ADC range · DC ${(result.dc_fraction * 100).toFixed(2)}% · near clipping ${(result.clipped_fraction * 100).toFixed(3)}% · distribution error ${Number(result.gaussian_error).toFixed(2)} · I/Q imbalance ${(result.iq_imbalance * 100).toFixed(1)}%`;
+}
+function renderCalibration(result) {
+  const job = BigInt(result.job_id || '0');
+  if (job < calibrationSeenJob) return;
+  calibrationSeenJob = job;
+  if (!calibrationBusy && result.state === 'running') notice('Gain calibration running. You can cancel it, view the console or exit the service.');
+  calibrationBusy = result.state === 'running';
+  if (calibrationBusy) {
+    const gains = values['frontend.type'] === 'hackrf' ?
+      ` · testing LNA ${result.current_lna_gain_db} dB, VGA ${result.current_vga_gain_db} dB, RF amp ${result.current_rf_amp ? 'on' : 'off'}` : '';
+    $('calibrationStatus').textContent = `${result.cancel_requested ? 'Cancelling; releasing the SDR' : 'Calibrating'} · ${result.tested / 3} settings completed · ${Math.floor(result.elapsed_seconds)} s${gains}`;
+    $('cancelCalibration').dataset.jobId = result.job_id;
+    controls();
+    return;
+  }
+  controls();
+  if (result.state === 'idle' || calibrationTerminal === `${result.job_id}:${result.state}`) return;
+  calibrationTerminal = `${result.job_id}:${result.state}`;
+  if (result.state === 'failed' || result.state === 'cancelled') {
+    const message = result.state === 'cancelled' ? 'Calibration cancelled. Existing gains were kept.' :
+      `Calibration failed: ${result.error || 'SDR measurement failed'}. Existing gains were kept.`;
+    $('calibrationStatus').textContent = message;
+    notice(message, result.state === 'failed');
+  } else if (!result.accepted) {
+    const message = `No setting passed all three windows. Gains were kept. Rejected settings (reasons can overlap): weak ${result.rejected_weak}, overload ${result.rejected_overload}, non-Gaussian ${result.rejected_distribution}, I/Q imbalance ${result.rejected_imbalance}. Best measured: ${calibrationDetails(result)}.`;
+    $('calibrationStatus').textContent = message;
+    notice('Gain calibration finished without an accepted setting. See the measurement details.', true);
+  } else if (calibrationJobId === result.job_id && calibrationRequest) {
+    if (result.revision !== revision || calibrationRequest.revision !== revision || toIni(values) !== calibrationRequest.ini) {
+      $('calibrationStatus').textContent = 'Calibration completed, but the profile changed. Suggestion was not applied.';
+    } else {
+      const source = calibrationRequest.source;
+      if (source === 'hackrf') Object.assign(values, {'hackrf.lna_gain_db':String(result.lna_gain_db), 'hackrf.vga_gain_db':String(result.vga_gain_db), 'hackrf.rf_amp':String(result.rf_amp)});
+      if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':String(result.rtl_auto_gain), 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db)});
+      if (source === 'bladerf') values['bladerf.gain_db'] = String(result.blade_gain_db);
+      deviceCaps = source === 'hackrf' ? null : {...result, source, serial:values['frontend.serial'] || '', tuning:values['frontend.center_frequency_hz'], precision:values['bladerf.format']};
+      buildForm(); dirtyState(true);
+      $('calibrationStatus').textContent = `Suggested ADC loading from ${result.tested / 3} settings. ${calibrationDetails(result)}. GNSS sensitivity is not measured. Review before Apply & save.`;
+      notice('Gain calibration completed. Review and save the suggested gains.');
+    }
+  } else {
+    $('calibrationStatus').textContent = `Calibration completed in another page. No draft changes were applied here. ${calibrationDetails(result)}.`;
+  }
+  calibrationJobId = null; calibrationRequest = null;
+}
+async function pollCalibration() {
+  if (!connected() || calibrationPolling || httpBusy) return;
+  calibrationPolling = true;
+  try { const result = await api('frontend/calibrate'); if (!httpBusy) renderCalibration(result); }
+  catch (error) { if (calibrationBusy) $('calibrationStatus').textContent = `Calibration status unavailable: ${error.message}. Reconnecting does not cancel the SDR job.`; }
+  finally { calibrationPolling = false; }
+}
+$('cancelCalibration').addEventListener('click', async () => {
+  $('cancelCalibration').disabled = true;
+  try { renderCalibration(await api('frontend/calibrate/cancel', {job_id:$('cancelCalibration').dataset.jobId})); }
+  catch (error) { notice(error.message, true); }
+});
+setInterval(pollCalibration, 750);
 $('calibrateGains').addEventListener('click', async () => {
   if (!editable() || ['file','sige'].includes(values['frontend.type']) || !validateProfileFields()) return;
-  const keys = ['frontend.type', 'frontend.serial', 'frontend.sample_rate_hz', 'frontend.center_frequency_hz', 'bladerf.format'];
-  const requested = keys.map(key => values[key] || '');
-  const current = () => keys.every((key,index) => (values[key] || '') === requested[index]);
+  const requested = {revision, ini:toIni(values), source:values['frontend.type']};
   httpBusy = true; controls();
-  $('calibrationStatus').textContent = values['frontend.type'] === 'hackrf' ?
-    'Checking HackRF gains from low gain; saturated VGA branches stop early. Three I/Q windows per setting; this can take several minutes.' :
-    'Checking every supported gain setting, three I/Q windows each. Display histogram bins stay unchanged.';
+  $('calibrationStatus').textContent = 'Starting gain calibration…';
   try {
-    const result = await api('frontend/calibrate', {revision, ini: toIni(values)});
-    if (!current()) throw new Error('Source settings changed during calibration.');
-    if (!result.accepted) throw new Error('No clean gain setting was found. Existing gains were kept; check the RF input and antenna before retrying.');
-    const source = values['frontend.type'];
-    if (source === 'hackrf') Object.assign(values, {'hackrf.lna_gain_db':String(result.lna_gain_db), 'hackrf.vga_gain_db':String(result.vga_gain_db), 'hackrf.rf_amp':String(result.rf_amp)});
-    if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':String(result.rtl_auto_gain), 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db)});
-    if (source === 'bladerf') values['bladerf.gain_db'] = String(result.blade_gain_db);
-    deviceCaps = source === 'hackrf' ? null :
-      {...result, source, serial:requested[1], tuning:requested[3], precision:requested[4]};
-    buildForm(); dirtyState(true);
-    const level = (result.rms_fraction * 100).toFixed(1);
-    const mode = source === 'rtlsdr' ? (result.rtl_auto_gain ? 'automatic tuner gain' : 'manual tuner gain') :
-      source === 'hackrf' ? (result.rf_amp ? 'RF amplifier on' : 'RF amplifier off') : 'manual gain';
-    const verdict = result.accepted ? 'Suggested' : 'Best measured, but quality criteria not met:';
-    $('calibrationStatus').textContent = `${verdict} ${mode} from ${result.tested / 3} gain settings (${result.tested} I/Q windows) · RMS ${level}% of ADC range · DC offset ${(result.dc_fraction * 100).toFixed(3)}% · ${(result.clipped_fraction * 100).toFixed(3)}% near clipping. Display histogram bins are unchanged. Review before Apply & save.`;
-    notice(result.accepted ? 'Gain calibration completed. Review and save the suggested receiver profile.' :
-      'No clean gain setting was found. Review the best measured draft before saving it.', !result.accepted);
+    const result = await api('frontend/calibrate', {revision:requested.revision, ini:requested.ini});
+    calibrationJobId = result.job_id; calibrationRequest = requested;
+    renderCalibration(result);
   } catch (error) {
     $('calibrationStatus').textContent = error.message;
     notice(error.message, true);
@@ -979,9 +1024,9 @@ async function inspectReplaySelection(path) {
     lines.push(['Metadata', result.metadata_path], ['Sample rate', `${frequencyFromHz('frontend.sample_rate_hz', settings['frontend.sample_rate_hz'])} Msps (nominal)`],
       ['SDR tuning', `${frequencyFromHz('frontend.center_frequency_hz', settings['frontend.center_frequency_hz'])} MHz`], ['Signal centre', `${frequencyFromHz('frontend.signal_frequency_hz', settings['frontend.signal_frequency_hz'])} GHz`],
       ['Digital IF', `${(Number(settings['frontend.signal_frequency_hz']) - Number(settings['frontend.center_frequency_hz'])) / 1e6} MHz`],
-      ['Saved samples', result.recording_point], ['Recorded conditioner', result.recorded_conditioning],
+      ['Saved samples', result.recording_point], ['Recorded stream processing', result.recorded_conditioning],
       ['Completion', result.complete ? 'Complete' : 'Incomplete / interrupted'], ['Stream gaps', result.has_gaps ? 'Present — see sample index' : 'See session sample index'],
-      ['Replay conditioner', 'Bypass — saved sample values are preserved']);
+      ['Replay samples', 'Saved sample values are preserved']);
   } else lines.push(['Metadata', 'Not found — set sampling rate and RF parameters manually']);
   for (const [label, value] of lines) {
     const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = value; $('pickerMetadata').append(dt, dd);

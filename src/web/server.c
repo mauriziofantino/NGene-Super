@@ -76,6 +76,15 @@ typedef struct {
     /** Expected localhost host and port. */
     char localhost[64];
     cJSON *moduleSchema;
+    /* commandMutex protects snapshots; the worker never holds it during SDR I/O. */
+    TNgThread calibrationThread;
+    int calibrationThreadStarted, calibrationState;
+    TNgAtomicInt calibrationCancel;
+    uint64_t calibrationId, calibrationRevision;
+    double calibrationStarted, calibrationSeconds;
+    TNgConfig calibrationConfig, calibrationCandidate;
+    TNgGainCalibration calibrationResult;
+    TNgError calibrationError;
 } TNgWebServer;
 
 /**
@@ -108,6 +117,127 @@ static void String(cJSON *object, const char *key, const char *value)
 static void Number(cJSON *object, const char *key, double value)
 {
     cJSON_AddNumberToObject(object, key, value);
+}
+
+static int CalibrationCancelled(void *context)
+{
+    TNgWebServer *server = context;
+    return NgAtomicGet(&server->calibrationCancel) || NgAtomicGet(&server->quit);
+}
+
+static void CalibrationProgress(void *context, const TNgConfig *candidate,
+                                 const TNgGainCalibration *result)
+{
+    TNgWebServer *server = context;
+    NgMutexLock(&server->commandMutex);
+    server->calibrationCandidate = *candidate;
+    server->calibrationResult = *result;
+    NgMutexUnlock(&server->commandMutex);
+}
+
+static void CalibrationWorker(void *context)
+{
+    TNgWebServer *server = context;
+    TNgGainCalibration result = {0};
+    TNgError error = {{0}};
+    TNgGainCalibrationCallbacks callbacks = {CalibrationCancelled, CalibrationProgress, server};
+    int rc = NgGainCalibrateControlled(&server->calibrationConfig, &result, &callbacks, &error);
+    NgMutexLock(&server->commandMutex);
+    server->calibrationResult = result;
+    server->calibrationError = error;
+    server->calibrationSeconds = NgMonotonicSeconds() - server->calibrationStarted;
+    if (rc == NG_OK && CalibrationCancelled(server)) rc = NG_END;
+    server->calibrationState = rc == NG_OK ? 2 : rc == NG_END ? 4 : 3;
+    NgMutexUnlock(&server->commandMutex);
+}
+
+/* Caller owns commandMutex. A published completed worker no longer needs the
+ * mutex after its final unlock, so joining it here cannot deadlock. */
+static int StartCalibration(TNgWebServer *server, const TNgConfig *config, uint64_t revision,
+                            TNgError *error)
+{
+    if (server->calibrationState == 1)
+        return NgFail(error, "Gain calibration is already running");
+    if (config->frontend == NG_FRONTEND_FILE || config->frontend == NG_FRONTEND_SIGE ||
+        !NgFrontendAvailable(config->frontend))
+        return NgFail(error, "Select an available SDR with adjustable gains");
+    if (server->calibrationThreadStarted) {
+        NgThreadJoin(server->calibrationThread);
+        server->calibrationThreadStarted = 0;
+    }
+    server->calibrationConfig = server->calibrationCandidate = *config;
+    memset(&server->calibrationResult, 0, sizeof(server->calibrationResult));
+    memset(&server->calibrationError, 0, sizeof(server->calibrationError));
+    server->calibrationRevision = revision;
+    server->calibrationStarted = NgMonotonicSeconds();
+    NgAtomicSet(&server->calibrationCancel, 0);
+    server->calibrationState = 1;
+    ++server->calibrationId;
+    if (NgThreadStart(&server->calibrationThread, CalibrationWorker, server) != 0) {
+        server->calibrationState = 3;
+        return NgFail(error, "Cannot start gain calibration worker");
+    }
+    server->calibrationThreadStarted = 1;
+    return NG_OK;
+}
+
+/* Build an owned small snapshot while commandMutex is held. */
+static cJSON *CalibrationJson(TNgWebServer *server)
+{
+    static const char *const states[] = {"idle", "running", "completed", "failed", "cancelled"};
+    const TNgGainCalibration *result = &server->calibrationResult;
+    const TNgConfig *candidate = &server->calibrationCandidate;
+    const TNgConfig *selected = &result->selected;
+    const TNgGainQuality *quality = &result->quality;
+    cJSON *reply = cJSON_CreateObject(), *gains = cJSON_CreateArray();
+    size_t index;
+    String(reply, "state", states[server->calibrationState]);
+    /* Job/revision IDs are decimal strings like the controller IDs. */
+    {
+        char id[32], revision[32];
+        snprintf(id, sizeof(id), "%" PRIu64, server->calibrationId);
+        snprintf(revision, sizeof(revision), "%" PRIu64, server->calibrationRevision);
+        String(reply, "job_id", id);
+        String(reply, "revision", revision);
+    }
+    String(reply, "error", server->calibrationError.message);
+    cJSON_AddBoolToObject(reply, "cancel_requested", NgAtomicGet(&server->calibrationCancel));
+    cJSON_AddBoolToObject(reply, "accepted", server->calibrationState == 2 && result->accepted);
+    Number(reply, "elapsed_seconds", server->calibrationState == 1 ?
+           NgMonotonicSeconds() - server->calibrationStarted : server->calibrationSeconds);
+    Number(reply, "tested", result->tested);
+    Number(reply, "current_lna_gain_db", candidate->lnaGainDb);
+    Number(reply, "current_vga_gain_db", candidate->vgaGainDb);
+    cJSON_AddBoolToObject(reply, "current_rf_amp", candidate->rfAmp);
+    Number(reply, "current_rtl_gain_tenths_db", candidate->rtlGainTenthsDb);
+    Number(reply, "current_blade_gain_db", candidate->bladeGainDb);
+    Number(reply, "rms_fraction", quality->rmsFraction);
+    Number(reply, "clipped_fraction", quality->clippedFraction);
+    Number(reply, "gaussian_error", quality->gaussianError);
+    Number(reply, "dc_fraction", quality->dcFraction);
+    Number(reply, "iq_imbalance", quality->iqImbalance);
+    Number(reply, "rejection_reasons", quality->rejectionReasons);
+    Number(reply, "rejected_weak", result->rejectedWeak);
+    Number(reply, "rejected_overload", result->rejectedOverload);
+    Number(reply, "rejected_distribution", result->rejectedDistribution);
+    Number(reply, "rejected_imbalance", result->rejectedImbalance);
+    Number(reply, "lna_gain_db", selected->lnaGainDb);
+    Number(reply, "vga_gain_db", selected->vgaGainDb);
+    cJSON_AddBoolToObject(reply, "rf_amp", selected->rfAmp);
+    cJSON_AddBoolToObject(reply, "rtl_auto_gain", selected->rtlAutoGain);
+    Number(reply, "rtl_gain_tenths_db", selected->rtlGainTenthsDb);
+    Number(reply, "blade_gain_db", selected->bladeGainDb);
+    Number(reply, "sample_rate_min_hz", result->capabilities.sampleRateMinHz);
+    Number(reply, "sample_rate_max_hz", result->capabilities.sampleRateMaxHz);
+    Number(reply, "frequency_min_hz", (double)result->capabilities.frequencyMinHz);
+    Number(reply, "frequency_max_hz", (double)result->capabilities.frequencyMaxHz);
+    Number(reply, "gain_min_db", result->capabilities.gainMinDb);
+    Number(reply, "gain_max_db", result->capabilities.gainMaxDb);
+    Number(reply, "gain_step_db", result->capabilities.gainStepDb);
+    for (index = 0; index < result->capabilities.tunerGainCount; ++index)
+        cJSON_AddItemToArray(gains, cJSON_CreateNumber(result->capabilities.tunerGains[index]));
+    cJSON_AddItemToObject(reply, "tuner_gains_tenths_db", gains);
+    return reply;
 }
 
 /**
@@ -333,6 +463,9 @@ static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s, unsigned mask)
     cJSON_AddItemToObject(o, "stats_i", ComponentJson(&s->statsI));
     cJSON_AddItemToObject(o, "stats_q", ComponentJson(&s->statsQ));
     Number(o, "dc_magnitude", s->dcMagnitude);
+    Number(o, "removed_dc_i", s->removedDcI);
+    Number(o, "removed_dc_q", s->removedDcQ);
+    String(o, "dc_removal", "simd_block_mean");
     Number(o, "histogram_min", s->histogramMin);
     Number(o, "histogram_max", s->histogramMax);
     String(o, "sample_format", NgSampleFormatName(s->sampleFormat));
@@ -800,7 +933,9 @@ static int GuardedCommand(TNgWebServer *server, TNgControl *control, TNgCommand 
 {
     int result;
     NgMutexLock(&server->commandMutex);
-    result = NgControlRequest(control, command, revision, id, error);
+    result = server->calibrationState == 1 && command == NG_CMD_START
+        ? NgFail(error, "Gain calibration owns the SDR; cancel it before starting the receiver")
+        : NgControlRequest(control, command, revision, id, error);
     NgMutexUnlock(&server->commandMutex);
     return result;
 }
@@ -1110,6 +1245,12 @@ static int Handle(struct mg_connection *connection, void *context)
         if (strcmp(path, "/api/v1/status") == 0) {
             return JsonReply(connection, 200, StatusJson(control, 3u));
         }
+        if (strcmp(path, "/api/v1/frontend/calibrate") == 0) {
+            NgMutexLock(&server->commandMutex);
+            reply = CalibrationJson(server);
+            NgMutexUnlock(&server->commandMutex);
+            return JsonReply(connection, 200, reply);
+        }
         if (strcmp(path, "/api/v1/analysis/config") == 0) {
             return AnalysisConfigReply(control, connection);
         }
@@ -1212,10 +1353,21 @@ static int Handle(struct mg_connection *connection, void *context)
             }
         }
     }
-    if (strcmp(path, "/api/v1/frontend/calibrate") == 0) {
+    if (strcmp(path, "/api/v1/frontend/calibrate/cancel") == 0) {
+        cJSON *job = cJSON_GetObjectItemCaseSensitive(body, "job_id");
+        char id[32];
+        NgMutexLock(&server->commandMutex);
+        snprintf(id, sizeof(id), "%" PRIu64, server->calibrationId);
+        if (!cJSON_IsString(job) || strcmp(job->valuestring, id) != 0) {
+            code = Failure(connection, 409, "Calibration job changed; refresh its status");
+        } else {
+            if (server->calibrationState == 1) NgAtomicSet(&server->calibrationCancel, 1);
+            code = JsonReply(connection, 202, CalibrationJson(server));
+        }
+        NgMutexUnlock(&server->commandMutex);
+    } else if (strcmp(path, "/api/v1/frontend/calibrate") == 0) {
         TNgControlStatus status;
         TNgConfig config = {0};
-        TNgGainCalibration calibration = {0};
         TNgError error = {{0}};
         cJSON *ini = cJSON_GetObjectItemCaseSensitive(body, "ini");
         uint64_t revision;
@@ -1224,6 +1376,8 @@ static int Handle(struct mg_connection *connection, void *context)
         NgControlSnapshot(control, &status);
         if (!cJSON_IsString(ini) || !ParseRevision(body, &revision)) {
             code = Failure(connection, 400, "Expected source profile and revision");
+        } else if (server->calibrationState == 1) {
+            code = Failure(connection, 409, "Gain calibration is already running");
         } else if (status.state != NG_STOPPED && status.state != NG_FAILED) {
             code = Failure(connection, 409, "Stop the receiver before calibrating gains");
         } else if (status.revision != revision || status.commandId != status.completedCommandId) {
@@ -1236,42 +1390,12 @@ static int Handle(struct mg_connection *connection, void *context)
                     strlen(ini->valuestring) && fseek(input, 0, SEEK_SET) == 0)
                 result = NgConfigRead(input, &config, &error);
             fclose(input);
-            if (result == NG_OK) result = NgGainCalibrate(&config, &calibration, &error);
+            if (result == NG_OK) result = NgControlValidate(&config, &error);
+            if (result == NG_OK) result = StartCalibration(server, &config, revision, &error);
             if (result != NG_OK) {
                 code = Failure(connection, 400, error.message[0] ? error.message : "SDR calibration failed");
             } else {
-                NgControlSnapshot(control, &status);
-                if (status.revision != revision) {
-                    code = Failure(connection, 409, "Receiver profile changed during calibration");
-                } else {
-                    size_t index;
-                    cJSON *gains = cJSON_CreateArray();
-                    reply = cJSON_CreateObject();
-                    cJSON_AddBoolToObject(reply, "accepted", calibration.accepted);
-                    Number(reply, "tested", calibration.tested);
-                    Number(reply, "rms_fraction", calibration.quality.rmsFraction);
-                    Number(reply, "clipped_fraction", calibration.quality.clippedFraction);
-                    Number(reply, "gaussian_error", calibration.quality.gaussianError);
-                    Number(reply, "dc_fraction", calibration.quality.dcFraction);
-                    Number(reply, "iq_imbalance", calibration.quality.iqImbalance);
-                    Number(reply, "lna_gain_db", calibration.selected.lnaGainDb);
-                    Number(reply, "vga_gain_db", calibration.selected.vgaGainDb);
-                    cJSON_AddBoolToObject(reply, "rf_amp", calibration.selected.rfAmp);
-                    cJSON_AddBoolToObject(reply, "rtl_auto_gain", calibration.selected.rtlAutoGain);
-                    Number(reply, "rtl_gain_tenths_db", calibration.selected.rtlGainTenthsDb);
-                    Number(reply, "blade_gain_db", calibration.selected.bladeGainDb);
-                    Number(reply, "sample_rate_min_hz", calibration.capabilities.sampleRateMinHz);
-                    Number(reply, "sample_rate_max_hz", calibration.capabilities.sampleRateMaxHz);
-                    Number(reply, "frequency_min_hz", (double)calibration.capabilities.frequencyMinHz);
-                    Number(reply, "frequency_max_hz", (double)calibration.capabilities.frequencyMaxHz);
-                    Number(reply, "gain_min_db", calibration.capabilities.gainMinDb);
-                    Number(reply, "gain_max_db", calibration.capabilities.gainMaxDb);
-                    Number(reply, "gain_step_db", calibration.capabilities.gainStepDb);
-                    for (index = 0; index < calibration.capabilities.tunerGainCount; ++index)
-                        cJSON_AddItemToArray(gains, cJSON_CreateNumber(calibration.capabilities.tunerGains[index]));
-                    cJSON_AddItemToObject(reply, "tuner_gains_tenths_db", gains);
-                    code = JsonReply(connection, 200, reply);
-                }
+                code = JsonReply(connection, 202, CalibrationJson(server));
             }
         }
         NgMutexUnlock(&server->commandMutex);
@@ -1284,7 +1408,9 @@ static int Handle(struct mg_connection *connection, void *context)
         FILE *input = NULL;
         NgMutexLock(&server->commandMutex);
         NgControlSnapshot(control, &status);
-        if (status.state != NG_STOPPED && status.state != NG_FAILED) {
+        if (server->calibrationState == 1) {
+            code = Failure(connection, 409, "Wait for gain calibration or cancel it before querying device limits");
+        } else if (status.state != NG_STOPPED && status.state != NG_FAILED) {
             code = Failure(connection, 409, "Stop the receiver before querying device limits");
         } else if (!cJSON_IsString(ini) || (input = tmpfile()) == NULL) {
             code = Failure(connection, 400, "Expected a source profile in ini");
@@ -1407,10 +1533,14 @@ static int Handle(struct mg_connection *connection, void *context)
                 reply = cJSON_CreateObject();
                 cJSON_AddBoolToObject(reply, "valid", 1);
                 code = JsonReply(connection, 200, reply);
-            } else if (NgControlConfigure(control, &config, revision, &error) != NG_OK) {
-                code = Failure(connection, 409, error.message);
             } else {
-                code = ConfigReply(control, connection);
+                NgMutexLock(&server->commandMutex);
+                if (server->calibrationState == 1 ||
+                    NgControlConfigure(control, &config, revision, &error) != NG_OK)
+                    code = Failure(connection, 409, server->calibrationState == 1 ?
+                                   "Cancel gain calibration before applying a profile" : error.message);
+                else code = ConfigReply(control, connection);
+                NgMutexUnlock(&server->commandMutex);
             }
         }
     } else if (strcmp(path, "/api/v1/shutdown") == 0) {
@@ -1737,7 +1867,9 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
         NgSleepMs(50);
     }
     NgAtomicSet(&server.quit, 1);
+    NgAtomicSet(&server.calibrationCancel, 1);
     mg_stop(server.http);
+    if (server.calibrationThreadStarted) NgThreadJoin(server.calibrationThread);
     cJSON_Delete(server.moduleSchema);
     NgControlDestroy(server.control);
     mg_exit_library();

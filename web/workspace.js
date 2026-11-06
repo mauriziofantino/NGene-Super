@@ -275,7 +275,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       processed: live ? counter(live.processed_samples) : '—', windowsDetail: live ? `${counter(live.windows)} common windows` : 'Waiting for receiver telemetry',
       receiverState: state, connection: connected ? 'Connected' : 'Disconnected', connectionDetail: connected ? 'Connected receiver service' : 'Current receiver state unknown',
       recordingState: record, recordingName: live?.recording_name || 'No recording session', profileState, revision: revision || UNAVAILABLE,
-      capturePoint: profile['recording.point'] === 'pre' ? 'Pre-conditioning' : profile['recording.point'] === 'post' ? 'Post-conditioning' : UNAVAILABLE,
+      capturePoint: 'Original stream samples',
       replayState: configuredSource === 'file' ? (profile['replay.path'] ? 'File selected' : 'No file selected') : 'Live SDR selected',
       replayDetail: configuredSource === 'file' ? profile['replay.path'] || 'Choose recorded I/Q to prepare input' : 'Stop reception before switching input',
       architecture: capabilities?.architecture || UNAVAILABLE, operatingSystem: capabilities?.os || UNAVAILABLE,

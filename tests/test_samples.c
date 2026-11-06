@@ -77,10 +77,64 @@ static void Benchmark(void)
  *
  * @return Zero if every contract assertion passes.
  */
+static void TestBlockDc(void)
+{
+    static const size_t lengths[] = {1, 3, 4, 7, 8, 9, 16, 31, 257, 4097, 262144};
+    unsigned char *allocation = malloc(4 * 262144 + 1), *raw;
+    int32_t *storage = malloc((2 * 262144 + 2) * sizeof(*storage)), *out;
+    TNgSampleFormat format;
+    TNgError error = {{0}};
+    size_t k, t;
+    CHECK(allocation && storage);
+    raw = allocation + 1; out = storage + 1; /* SIMD-unaligned input/output. */
+    for (format = NG_FORMAT_CI8; format <= NG_FORMAT_CI16;
+         format = (TNgSampleFormat)(format + 1)) {
+        int limit = format == NG_FORMAT_CI16 ? 32768 : format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
+        TNgIqView view = {0};
+        view.samples = (const TNgIq8 *)(const void *)raw;
+        view.format = format;
+        for (k = 0; k < 262144; ++k) {
+            NgIqStore(raw, format, k, 0, (int)((k * 271) % (unsigned)(2 * limit)) - limit);
+            NgIqStore(raw, format, k, 1, (int)((k * 73 + 17) % (unsigned)(2 * limit)) - limit);
+        }
+        for (t = 0; t < sizeof(lengths) / sizeof(lengths[0]); ++t) {
+            int64_t sum[2] = {0, 0};
+            int dc[2], expected[2];
+            unsigned c;
+            view.meta.count = lengths[t];
+            for (k = 0; k < view.meta.count; ++k) for (c = 0; c < 2; ++c)
+                sum[c] += NgIqComponent(&view, k, c);
+            for (c = 0; c < 2; ++c)
+                expected[c] = (int)llround((double)sum[c] / (double)view.meta.count);
+            storage[0] = storage[2 * view.meta.count + 1] = 1234567;
+            CHECK(NgIqCenterBlock(&view, out, dc, &error) == NG_OK);
+            CHECK(dc[0] == expected[0] && dc[1] == expected[1]);
+            for (k = 0; k < view.meta.count; ++k) for (c = 0; c < 2; ++c)
+                CHECK(out[2 * k + c] == NgIqComponent(&view, k, c) - expected[c]);
+            CHECK(storage[0] == 1234567 && storage[2 * view.meta.count + 1] == 1234567);
+        }
+        /* Extreme mean and an opposite rail: widening must preserve excursions
+         * beyond the original ADC container, without invented clipping. */
+        for (k = 0; k < 262144; ++k) {
+            NgIqStore(raw, format, k, 0, limit - 1);
+            NgIqStore(raw, format, k, 1, -limit);
+        }
+        NgIqStore(raw, format, 0, 0, -limit);
+        {
+            int dc[2];
+            CHECK(NgIqCenterBlock(&view, out, dc, &error) == NG_OK);
+            CHECK(dc[0] == limit - 1 && dc[1] == -limit);
+            CHECK(out[0] == -2 * limit + 1 && out[1] == 0 && out[2] == 0);
+        }
+    }
+    free(storage); free(allocation);
+}
+
 int main(int argc, char **argv)
 {
     size_t k;
     size_t n;
+    TestBlockDc();
     int64_t sum[2];
     int64_t refsum[2];
     uint64_t sq[2];

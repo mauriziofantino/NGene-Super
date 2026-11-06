@@ -338,11 +338,12 @@ static void TestDiagnostics(TNgSampleFormat format)
         NgSleepMs(1);
     }
     CHECK(snapshot.histogramSequence != 0 && snapshot.psdSequence != 0);
-    CHECK(snapshot.statsI.mean == value && snapshot.statsI.rms == value &&
+    CHECK(snapshot.statsI.mean == 0 && snapshot.statsI.rms == 0 &&
           snapshot.statsQ.zeros == 1024);
+    CHECK(snapshot.removedDcI == value && snapshot.removedDcQ == 0);
+    CHECK(NgIqComponent(&view, 0, 0) == value); /* Native input is never rewritten. */
     CHECK(snapshot.histogramMin == (format == NG_FORMAT_SC16_Q11 ? -2048 : -128));
-    CHECK(fabs(snapshot.peakDbfs -
-               20 * log10((double)value / (format == NG_FORMAT_SC16_Q11 ? 2048 : 128))) < 0.05);
+    CHECK(snapshot.peakDbfs < -150); /* A constant input is DC, not an RF tone. */
     NgAnalysisDestroy(analysis);
 }
 
@@ -416,8 +417,8 @@ static void TestGainQuality(void)
         }
         CHECK(NgGainAnalyze(&view, &quality, &error) == NG_OK && quality.acceptable);
         centeredScore = quality.score;
-        /* A small constant I/Q offset creates a DC spectral line even when
-         * the rest of the amplitude distribution still looks Gaussian. */
+        /* A small native DC offset is removable without clipping. Measure and
+         * penalize it, but do not reject it by significance of its mean. */
         for (k = 0; k < 8192; ++k) {
             int inPhase = NgIqComponent(&view, k, 0);
             int quadrature = NgIqComponent(&view, k, 1);
@@ -425,7 +426,7 @@ static void TestGainQuality(void)
             NgIqStore(samples, format, k, 1, quadrature + 3 * scale);
         }
         CHECK(NgGainAnalyze(&view, &quality, &error) == NG_OK &&
-              quality.score > centeredScore && !quality.acceptable);
+              quality.score > centeredScore && quality.acceptable);
         for (k = 0; k < 8192; ++k) {
             int peak = format == NG_FORMAT_SC16_Q11 ? 2047 : 127;
             NgIqStore(samples, format, k, 0, k % 2 ? peak : -peak);

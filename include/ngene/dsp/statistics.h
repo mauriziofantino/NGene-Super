@@ -2,6 +2,11 @@
 #ifndef NGENE_DSP_STATISTICS_H
 #define NGENE_DSP_STATISTICS_H
 #include "ngene/types.h"
+/** Subtract rounded I/Q means of this block into widened signed ADC units.
+ * SSE2/NEON, scalar tails/reference fallback. Output needs 2*count int32_t values,
+ * must not alias input, and never clips or rescales. No state carries between blocks.
+ * Native input, metadata and recordings are unchanged. */
+int NgIqCenterBlock(const TNgIqView *view, int32_t *output, int dc[2], TNgError *error);
 /**
  * @brief Compute exact sums and sums of squares for signed I and Q.
  *

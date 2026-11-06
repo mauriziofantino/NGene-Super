@@ -11,6 +11,7 @@ they do not establish the current feature set or platform acceptance status.
 - [Coding conventions](CODING_STANDARD.md).
 - [FFT arithmetic, precision and implementation review](FFT_REVIEW.md).
 - [Diagnostic worker contracts](ANALYSIS.md).
+- [Gain calibration, SIMD DC removal and verification](CALIBRATION_DC.md).
 - [Frontend stream decisions, SiGe USB and alternatives](FRONTEND_STREAM_DECISIONS.md).
 - [Native I/Q formats and performance](NATIVE_IQ_PERFORMANCE.md).
 - [Configuration engineering notes](CONFIGURATION.md).

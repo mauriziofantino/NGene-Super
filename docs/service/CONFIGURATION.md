@@ -104,7 +104,8 @@ controller; this has been removed from the current service. The default replay p
 The GUI provides LNA 0..40 dB in steps of 8 and VGA 0..62 dB in steps of 2, matching HackRF
 validation. Settings depend on the frontend; HackRF fields are not shown for file replay.
 The streaming DC remover is retired. Historical conditioning keys are accepted and ignored,
-and omitted on save. SiGe hardware rate/RF/IF are fixed. See the
+and omitted on save. SIMD block-mean subtraction is fixed within diagnostic and calibration
+workers, with no conditioning controls; it does not alter recordings. SiGe hardware rate/RF/IF are fixed. See the
 [frontend decision record](FRONTEND_STREAM_DECISIONS.md) for stream scaling, USB setup,
 recording semantics and compatibility details.
 

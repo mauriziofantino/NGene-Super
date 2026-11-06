@@ -183,8 +183,8 @@ int main(void)
     v.meta.count = 1024;
     Submit(a, &v, 0);
     WaitResult(a, 2);
-    CHECK(snapshot.spectrumBins == 0 && snapshot.histogramI[0] == 1024 &&
-          snapshot.histogramQ[15] == 1024);
+    CHECK(snapshot.spectrumBins == 0 && snapshot.histogramI[8] == 1024 &&
+          snapshot.histogramQ[8] == 1024);
     CHECK(snapshot.clippedI == 1024 && snapshot.clippedQ == 1024);
     c.histogramBins = 63;
     CHECK(NgAnalysisConfigure(a, &c, &e) == NG_ERROR);
@@ -207,18 +207,18 @@ int main(void)
     v.meta.count = 4096;
     Submit(a, &v, 1);
     for (i = 0; i < 8192; ++i) {
-        data[i].i = 4;
+        data[i].i = (int8_t)(i % 2 ? 4 : -4);
         data[i].q = 0;
     }
     Submit(a, &v, 0);
     WaitResult(a, 1);
-    CHECK(snapshot.statsI.mean == 21 && snapshot.statsI.std == 1 && snapshot.statsI.min == 20 &&
-          snapshot.statsI.max == 22);
-    CHECK(snapshot.statsQ.mean == 12 && snapshot.statsQ.std == 0 && snapshot.statsQ.rms == 12);
-    CHECK(fabs(snapshot.statsI.rms - sqrt(442)) < 1e-9);
-    CHECK(fabs(snapshot.dcMagnitude - hypot(21, 12)) < 1e-9);
-    CHECK(snapshot.histogramI[148] == 2048 && snapshot.histogramI[150] == 2048);
-    CHECK(fabs(snapshot.peakDbfs - 20 * log10(4.0 / 128)) < 0.01 && snapshot.peakHz == 0);
+    CHECK(snapshot.statsI.mean == 0 && snapshot.statsI.std == 1 && snapshot.statsI.min == -1 &&
+          snapshot.statsI.max == 1);
+    CHECK(snapshot.statsQ.mean == 0 && snapshot.statsQ.std == 0 && snapshot.statsQ.rms == 0);
+    CHECK(snapshot.statsI.rms == 1 && snapshot.dcMagnitude == 0);
+    CHECK(snapshot.removedDcI == 21 && snapshot.removedDcQ == 12);
+    CHECK(snapshot.histogramI[127] == 2048 && snapshot.histogramI[129] == 2048);
+    CHECK(fabs(snapshot.peakDbfs - 20 * log10(4.0 / 128)) < 0.01 && snapshot.peakHz == -32768);
     {
         TNgAnalysisSnapshot retained = snapshot;
         TNgPsdIntegrity integrity;
@@ -233,7 +233,7 @@ int main(void)
         }
         Submit(a, &v, 1);
         for (i = 0; i < 8192; ++i) {
-            data[i].i = 4;
+            data[i].i = (int8_t)(i % 2 ? 4 : -4);
             data[i].q = 0;
         }
         Submit(a, &v, 0);
@@ -268,7 +268,7 @@ int main(void)
             c.updateHz = 30;
             CHECK(NgAnalysisCreate(65536, &c, &a, &e) == NG_OK);
             for (i = 0; i < 8192; ++i) {
-                data[i].i = 4;
+                data[i].i = (int8_t)(i % 2 ? 4 : -4);
                 data[i].q = 0;
             }
             v.meta.count = 256;
@@ -278,7 +278,7 @@ int main(void)
             firstSequence = snapshot.psdSequence;
             NgSleepMs(40);
             for (i = 0; i < 8192; ++i) {
-                data[i].i = 8;
+                data[i].i = (int8_t)(i % 2 ? 8 : -8);
             }
             v.meta.firstSample = 256;
             Submit(a, &v, 0);

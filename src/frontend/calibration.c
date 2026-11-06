@@ -1,11 +1,17 @@
 #include "ngene/calibration.h"
+#include "ngene/dsp/statistics.h"
 #include "platform/platform.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 enum { CAL_PAIRS = 32768, CAL_BLOCK = 32768, CAL_INGRESS_BLOCKS = 128,
-       CAL_REPEATS = 3, CAL_HISTOGRAM_LEVELS = 4096 };
+       CAL_REPEATS = 3, CAL_HISTOGRAM_LEVELS = 8192 };
+
+static int Cancelled(const TNgGainCalibrationCallbacks *callbacks)
+{
+    return callbacks && callbacks->cancelled && callbacks->cancelled(callbacks->context);
+}
 
 static double Median3(double a, double b, double c)
 {
@@ -21,22 +27,35 @@ int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *q, TNgError *error)
     double limit, variance[2], kurtosis[2], dc, rms, cdfError = 0;
     uint32_t histogram[2][CAL_HISTOGRAM_LEVELS] = {{0}};
     unsigned levels;
+    int offset[2];
+    int32_t *centered;
     size_t k, clipped = 0;
     if (!view || !view->samples || view->meta.count < 1024 || !q)
         return NgFail(error, "Calibration requires at least 1024 I/Q pairs");
+    if (view->format != NG_FORMAT_CI8 && view->format != NG_FORMAT_CU8 &&
+        view->format != NG_FORMAT_SC16_Q11)
+        return NgFail(error, "Unsupported native ADC format for gain analysis");
     memset(q, 0, sizeof(*q));
+    if (view->meta.count > 262144 ||
+        (centered = malloc(2 * view->meta.count * sizeof(*centered))) == NULL)
+        return NgFail(error, "Cannot allocate bounded calibration DC workspace");
+    if (NgIqCenterBlock(view, centered, offset, error) != NG_OK) {
+        free(centered);
+        return NG_ERROR;
+    }
     levels = view->format == NG_FORMAT_SC16_Q11 ? 4096u : 256u;
     limit = (double)levels * 0.5;
     for (k = 0; k < view->meta.count; ++k) {
         unsigned c;
         for (c = 0; c < 2; ++c) {
-            int value = NgIqComponent(view, k, c);
-            int index = value + (int)(levels / 2u);
+            int value = centered[2 * k + c];
+            int raw = value + offset[c];
+            int index = value + (int)levels;
             double x = (double)value / limit;
             mean[c] += x;
-            if (fabs(x) >= 0.97) ++clipped;
+            if (fabs((double)raw / limit) >= 0.97) ++clipped;
             if (index < 0) index = 0;
-            if ((unsigned)index >= levels) index = (int)levels - 1;
+            if ((unsigned)index >= 2 * levels) index = (int)(2 * levels) - 1;
             ++histogram[c][(size_t)index];
         }
     }
@@ -44,7 +63,7 @@ int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *q, TNgError *error)
     for (k = 0; k < view->meta.count; ++k) {
         unsigned c;
         for (c = 0; c < 2; ++c) {
-            double d = NgIqComponent(view, k, c) / limit - mean[c];
+            double d = centered[2 * k + c] / limit - mean[c];
             double d2 = d * d;
             second[c] += d2;
             fourth[c] += d2 * d2;
@@ -56,18 +75,18 @@ int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *q, TNgError *error)
                        (variance[k] * variance[k]) : 0;
     }
     rms = sqrt((variance[0] + variance[1]) * 0.5);
-    dc = hypot(mean[0], mean[1]);
+    dc = hypot(mean[0] + offset[0] / limit, mean[1] + offset[1] / limit);
     for (k = 0; k < 2; ++k) {
         uint64_t cumulative = 0;
         unsigned bin;
         double invStd;
         if (variance[k] < 1e-12) { cdfError = 1.0; continue; }
         invStd = 1.0 / sqrt(2.0 * variance[k]);
-        for (bin = 0; bin < levels; ++bin) {
+        for (bin = 0; bin < 2 * levels; ++bin) {
             double edge, expected, observed, difference;
             cumulative += histogram[k][bin];
             /* A discrete ADC level occupies a bin centred on the integer. */
-            edge = ((double)bin + 0.5 - limit) / limit;
+            edge = ((double)bin + 0.5 - (double)levels) / limit;
             expected = 0.5 * (1.0 + erf((edge - mean[k]) * invStd));
             observed = (double)cumulative / (double)view->meta.count;
             difference = fabs(observed - expected);
@@ -82,18 +101,24 @@ int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *q, TNgError *error)
     q->dcFraction = dc;
     q->iqImbalance = fabs(sqrt(variance[0]) - sqrt(variance[1])) /
                      (sqrt(variance[0]) + sqrt(variance[1]) + 1e-12);
-    q->acceptable = rms >= 0.06 && rms <= 0.32 && q->clippedFraction < 0.001 &&
-                    q->gaussianError < 0.9 && q->iqImbalance < 0.25 &&
-                    dc / (rms + 1e-12) * sqrt((double)view->meta.count * 0.5) < 8.0;
+    if (rms < 0.06) q->rejectionReasons |= NG_GAIN_WEAK;
+    if (rms > 0.32 || q->clippedFraction >= 0.001) q->rejectionReasons |= NG_GAIN_OVERLOAD;
+    if (q->gaussianError >= 0.9) q->rejectionReasons |= NG_GAIN_DISTRIBUTION;
+    if (q->iqImbalance >= 0.25) q->rejectionReasons |= NG_GAIN_IMBALANCE;
+    /* A normal receiver DC offset is not evidence of overload. Its statistical
+     * significance increases with capture length even when ADC headroom does not
+     * change. Actual rail occupancy and the centered distribution guard overload. */
+    q->acceptable = q->rejectionReasons == 0;
     q->score = fabs(log((rms + 1e-12) / 0.12)) + 2.0 * q->gaussianError +
                8.0 * q->iqImbalance +
-               1.5 * dc / (rms + 1e-12) * sqrt((double)view->meta.count * 0.5) +
+               1.5 * dc / (rms + 1e-12) +
                100.0 * q->clippedFraction;
+    free(centered);
     return NG_OK;
 }
 
 static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
-                   TNgError *error)
+                   const TNgGainCalibrationCallbacks *callbacks, TNgError *error)
 {
     TNgConfig local = *candidate;
     TNgFrontend frontend = {0};
@@ -110,6 +135,7 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
     local.ingressBlocks = CAL_INGRESS_BLOCKS;
     local.ringBlocks = 2;
     local.overflowPolicy = NG_OVERFLOW_STOP;
+    if (Cancelled(callbacks)) return NG_END;
     if (NgFrontendOpenNative(&local, &frontend, error) != NG_OK) return NG_ERROR;
     bytes = NgSampleBytes(frontend.info.format);
     if (!bytes || (samples = malloc(CAL_REPEATS * CAL_PAIRS * bytes)) == NULL) {
@@ -130,6 +156,7 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
                    repeat == 0 ? 10u : 50u);
         deadline = NgMonotonicSeconds() + 4.0;
         while (count < CAL_PAIRS && NgMonotonicSeconds() < deadline) {
+            if (Cancelled(callbacks)) { ok = NG_END; goto done; }
             int rc = frontend.ops->acquire(frontend.context, &view, 200, error);
             size_t offset = 0, n;
             if (rc == NG_TIMEOUT) continue;
@@ -155,6 +182,7 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
     if (frontend.ops->stop(frontend.context, error) != NG_OK) goto done;
     started = 0;
     for (repeat = 0; repeat < (unsigned)CAL_REPEATS; ++repeat) {
+        if (Cancelled(callbacks)) { ok = NG_END; goto done; }
         collected.samples = (const TNgIq8 *)(samples + repeat * CAL_PAIRS * bytes);
         if (NgGainAnalyze(&collected, &q[repeat], error) != NG_OK) goto done;
     }
@@ -162,7 +190,7 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
 done:
     if (started) {
         TNgError stopError = {{0}};
-        if (frontend.ops->stop(frontend.context, &stopError) != NG_OK && ok == NG_OK) {
+        if (frontend.ops->stop(frontend.context, &stopError) != NG_OK) {
             *error = stopError;
             ok = NG_ERROR;
         }
@@ -182,16 +210,28 @@ static void Consider(const TNgConfig *candidate, const TNgGainQuality *quality,
         result->accepted = quality->acceptable;
     }
     result->tested += (unsigned)CAL_REPEATS;
+    if (quality->rejectionReasons & NG_GAIN_WEAK) ++result->rejectedWeak;
+    if (quality->rejectionReasons & NG_GAIN_OVERLOAD) ++result->rejectedOverload;
+    if (quality->rejectionReasons & NG_GAIN_DISTRIBUTION) ++result->rejectedDistribution;
+    if (quality->rejectionReasons & NG_GAIN_IMBALANCE) ++result->rejectedImbalance;
 }
 
 static int Try(const TNgConfig *candidate, TNgGainCalibration *result, int *overloaded,
-               TNgError *error)
+               const TNgGainCalibrationCallbacks *callbacks, TNgError *error)
 {
     TNgGainQuality measurements[CAL_REPEATS], quality;
     unsigned accepted = 0, i;
-    if (Measure(candidate, measurements, error) != NG_OK) return NG_ERROR;
+    int rc;
+    if (Cancelled(callbacks)) return NG_END;
+    if (callbacks && callbacks->progress) callbacks->progress(callbacks->context, candidate, result);
+    rc = Measure(candidate, measurements, callbacks, error);
+    if (rc != NG_OK) return rc;
+    quality.rejectionReasons = 0;
     for (i = 0; i < (unsigned)CAL_REPEATS; ++i)
+    {
         accepted += (unsigned)(measurements[i].acceptable != 0);
+        quality.rejectionReasons |= measurements[i].rejectionReasons;
+    }
     quality.rmsFraction = Median3(measurements[0].rmsFraction,
                                   measurements[1].rmsFraction,
                                   measurements[2].rmsFraction);
@@ -219,10 +259,12 @@ static int Try(const TNgConfig *candidate, TNgGainCalibration *result, int *over
     /* A clipped window must never be hidden by the median. */
     quality.acceptable = accepted == CAL_REPEATS;
     Consider(candidate, &quality, result);
+    if (callbacks && callbacks->progress) callbacks->progress(callbacks->context, candidate, result);
     return NG_OK;
 }
 
-int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgError *error)
+int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *result,
+                              const TNgGainCalibrationCallbacks *callbacks, TNgError *error)
 {
     TNgConfig candidate;
     if (!config || !result || (config->frontend == NG_FRONTEND_FILE || config->frontend == NG_FRONTEND_SIGE) ||
@@ -243,7 +285,8 @@ int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgErro
                     candidate.lnaGainDb = lna;
                     candidate.vgaGainDb = vga;
                     candidate.rfAmp = amp;
-                    if (Try(&candidate, result, &overloaded, error) != NG_OK) return NG_ERROR;
+                    int rc = Try(&candidate, result, &overloaded, callbacks, error);
+                    if (rc != NG_OK) return rc;
                     if (overloaded) break;
                 }
             }
@@ -253,12 +296,14 @@ int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgErro
         size_t i;
         candidate = *config;
         candidate.rtlAutoGain = 1;
-        if (Try(&candidate, result, NULL, error) != NG_OK) return NG_ERROR;
+        int rc = Try(&candidate, result, NULL, callbacks, error);
+        if (rc != NG_OK) return rc;
         for (i = 0; i < count; ++i) {
             candidate = *config;
             candidate.rtlAutoGain = 0;
             candidate.rtlGainTenthsDb = result->capabilities.tunerGains[i];
-            if (Try(&candidate, result, NULL, error) != NG_OK) return NG_ERROR;
+            rc = Try(&candidate, result, NULL, callbacks, error);
+            if (rc != NG_OK) return rc;
         }
     } else if (config->frontend == NG_FRONTEND_BLADERF) {
         int min = result->capabilities.gainMinDb, max = result->capabilities.gainMaxDb;
@@ -268,9 +313,15 @@ int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgErro
         for (gain = min; gain <= max; gain += step) {
             candidate = *config;
             candidate.bladeGainDb = (int)gain;
-            if (Try(&candidate, result, NULL, error) != NG_OK) return NG_ERROR;
+            int rc = Try(&candidate, result, NULL, callbacks, error);
+            if (rc != NG_OK) return rc;
         }
     }
     if (!result->tested) return NG_ERROR;
     return NG_OK;
+}
+
+int NgGainCalibrate(const TNgConfig *config, TNgGainCalibration *result, TNgError *error)
+{
+    return NgGainCalibrateControlled(config, result, NULL, error);
 }
