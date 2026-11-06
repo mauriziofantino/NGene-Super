@@ -93,7 +93,7 @@ int main(void)
     unsigned k;
     unsigned char random[4];
     char directory[100];
-    char path[1024];
+    char path[sizeof(saved.replayPath)];
     char firstRecording[160];
     FILE *file;
     CHECK(NgRandomBytes(random, sizeof(random)) == 0);

@@ -234,7 +234,10 @@ static void WorkerTest(TNgSampleFormat target, int overflow)
 
 static void Recording(void)
 {
-    char input[128], recorded[160], path[160];
+    char prefix[64];
+    char input[sizeof(prefix) + sizeof(".input")];
+    char recorded[sizeof(prefix) + sizeof("_000000.ci16")];
+    char path[sizeof(recorded) + sizeof(".meta.ini")];
     unsigned char raw[52], actual[52];
     TNgConfig config, replay;
     TNgFrontend source;
@@ -245,9 +248,10 @@ static void Recording(void)
     FILE *file;
     unsigned k;
     NgConfigDefaults(&config);
-    snprintf(config.recordingPrefix, sizeof(config.recordingPrefix), "ngene_common_%llu",
+    snprintf(prefix, sizeof(prefix), "ngene_common_%llu",
              (unsigned long long)(NgMonotonicSeconds() * 1000000));
-    snprintf(input, sizeof(input), "%s.input", config.recordingPrefix);
+    snprintf(config.recordingPrefix, sizeof(config.recordingPrefix), "%s", prefix);
+    snprintf(input, sizeof(input), "%s.input", prefix);
     for (k = 0; k < 26; k++) {
         NgIqStore(raw, NG_FORMAT_SC16_Q11, k / 2, k % 2, (int)k * 157 - 2048);
     }
@@ -262,7 +266,7 @@ static void Recording(void)
           source.info.format == NG_FORMAT_CI16);
     CHECK(NgReceiverRun(&config, &source, &bypass, NULL, 0, NULL, NULL, &stats, &error) == NG_OK);
     NgFrontendDestroy(&source);
-    snprintf(recorded, sizeof(recorded), "%s_000000.ci16", config.recordingPrefix);
+    snprintf(recorded, sizeof(recorded), "%s_000000.ci16", prefix);
     file = fopen(recorded, "rb");
     CHECK(file && fread(actual, 4, 13, file) == 13 && fclose(file) == 0);
     {
@@ -282,9 +286,9 @@ static void Recording(void)
     CHECK(remove(input) == 0 && remove(recorded) == 0);
     snprintf(path, sizeof(path), "%s.meta.ini", recorded);
     CHECK(remove(path) == 0);
-    snprintf(path, sizeof(path), "%s.meta.ini", config.recordingPrefix);
+    snprintf(path, sizeof(path), "%s.meta.ini", prefix);
     CHECK(remove(path) == 0);
-    snprintf(path, sizeof(path), "%s.index.csv", config.recordingPrefix);
+    snprintf(path, sizeof(path), "%s.index.csv", prefix);
     CHECK(remove(path) == 0);
 }
 
