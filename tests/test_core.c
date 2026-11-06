@@ -435,9 +435,11 @@ static void TestEngine(void)
     TNgMockSource mock = {0};
     TNgObservers observed = {0};
     TNgFrontend source = {
-        &mockOps,
-        &mock,
-        {100000, 1575420000, 0, NG_FORMAT_CI8, "mock", "test", NULL, 1575420000, 0}};
+        .ops = &mockOps,
+        .context = &mock,
+        .info = {.sampleRateHz = 100000, .centerFrequencyHz = 1575420000,
+                 .format = NG_FORMAT_CI8, .sourceName = "mock", .clockDomain = "test",
+                 .signalFrequencyHz = 1575420000}};
     TNgConditioner conditioner = NgConditionerBypass();
     const TNgChannelOps ops = {Observe, 0, 0};
     TNgChannel channels[2] = {{{0, 0, 1, 0}, NG_CHANNEL_ACQUISITION, &ops, &observed},
@@ -476,8 +478,9 @@ static void TestRecording(void)
     TNgIq8 data[5];
     TNgIq8 expected[13];
     TNgIq8 actual[13];
-    TNgStreamInfo info = {100000, 1575420000, 0, NG_FORMAT_CI8, "test", "relative",
-                          NULL,   1575420000, 0};
+    TNgStreamInfo info = {.sampleRateHz = 100000, .centerFrequencyHz = 1575420000,
+                         .format = NG_FORMAT_CI8, .sourceName = "test", .clockDomain = "relative",
+                         .signalFrequencyHz = 1575420000};
     char path[640];
     char metadata[4096];
     FILE *f;
@@ -601,9 +604,11 @@ static void TestRecordingTaps(void)
     TNgMockSource mock = {0};
     TNgReceiverStats stats;
     TNgFrontend source = {
-        &mockOps,
-        &mock,
-        {100000, 1575420000, 0, NG_FORMAT_CI8, "mock", "test", NULL, 1575420000, 0}};
+        .ops = &mockOps,
+        .context = &mock,
+        .info = {.sampleRateHz = 100000, .centerFrequencyHz = 1575420000,
+                 .format = NG_FORMAT_CI8, .sourceName = "mock", .clockDomain = "test",
+                 .signalFrequencyHz = 1575420000}};
     TNgIq8 scratch[4];
     TNgIq8 samples[17];
     TNgConditioner conditioner = {scratch, "test-half", Halve};
