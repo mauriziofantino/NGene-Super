@@ -1,5 +1,6 @@
 /** @file test_rtlsdr.c @brief Deterministic native API fixture; no RF hardware validation. */
 #include "frontend/rtlsdr_adapter.h"
+#include "frontend/calibration_frontend.h"
 #include "platform/platform.h"
 #include <rtl-sdr.h>
 #include <stdlib.h>
@@ -21,6 +22,8 @@ struct rtlsdr_dev {
 
 /** @brief Inject an odd byte count; never exposed outside this fixture. */
 static int malformed;
+static int ifCalls, ifGains[6], failIfStage, deviceOpens, deviceCloses;
+static int asyncCalls;
 static enum rtlsdr_tuner fixtureTuner = RTLSDR_TUNER_R820T;
 
 /** @brief Return the native tuner ID used to select actual supported gain operations. */
@@ -62,6 +65,7 @@ int rtlsdr_open(rtlsdr_dev_t **device, uint32_t index)
         return -1;
     }
     *device = calloc(1, sizeof(**device));
+    ++deviceOpens;
     return *device == NULL ? -1 : 0;
 }
 
@@ -69,6 +73,7 @@ int rtlsdr_open(rtlsdr_dev_t **device, uint32_t index)
 int rtlsdr_close(rtlsdr_dev_t *device)
 {
     free(device);
+    ++deviceCloses;
     return 0;
 }
 
@@ -131,6 +136,16 @@ int rtlsdr_set_tuner_gain(rtlsdr_dev_t *device, int gain)
     return 0;
 }
 
+/** @brief Check actual E4000 stage calls, including native tenth-dB units. */
+int rtlsdr_set_tuner_if_gain(rtlsdr_dev_t *device, int stage, int gain)
+{
+    (void)device;
+    CHECK(fixtureTuner == RTLSDR_TUNER_E4000 && stage >= 1 && stage <= 6 && gain % 10 == 0);
+    ifGains[stage - 1] = gain / 10;
+    ++ifCalls;
+    return stage == failIfStage ? -1 : 0;
+}
+
 /** @brief Accept PPM correction. @param device Fixture. @param ppm Correction. @return Zero. */
 int rtlsdr_set_freq_correction(rtlsdr_dev_t *device, int ppm)
 {
@@ -184,7 +199,7 @@ int rtlsdr_read_async(rtlsdr_dev_t *device, rtlsdr_read_async_cb_t callback, voi
 {
     unsigned char bytes[22];
     unsigned index;
-    (void)buffers;
+    ++asyncCalls;
     (void)length;
     NgSleepMs(5);
     NgAtomicSet(&device->canceled, 0); /* Deliberately exercise early cancel retry. */
@@ -193,6 +208,13 @@ int rtlsdr_read_async(rtlsdr_dev_t *device, rtlsdr_read_async_cb_t callback, voi
         bytes[index * 2 + 1] = 255;
     }
     callback(bytes, malformed ? 21u : 22u, context);
+    if (buffers == NG_CAL_RTL_BUFFERS) {
+        CHECK(length == 2u * NG_CAL_RTL_BUFFER_PAIRS);
+        while (!NgAtomicGet(&device->canceled)) {
+            NgSleepMs(2);
+            callback(bytes, 22u, context);
+        }
+    }
     memset(bytes, 0, sizeof(bytes));
     while (!NgAtomicGet(&device->canceled)) {
         NgSleepMs(1);
@@ -237,6 +259,55 @@ int main(void)
     config.rtlGainTenthsDb = 1;
     CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_ERROR);
     config.rtlGainTenthsDb = 77;
+    CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_OK && !ifCalls);
+    NgFrontendDestroy(&source);
+    fixtureTuner = RTLSDR_TUNER_E4000;
+    CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_OK && !ifCalls);
+    NgFrontendDestroy(&source);
+    for (config.rtlIfGainDb = 3; config.rtlIfGainDb <= 56; ++config.rtlIfGainDb) {
+        int sum = 0;
+        ifCalls = 0;
+        CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_OK && ifCalls == 6);
+        for (index = 0; index < 6; ++index) sum += ifGains[index];
+        CHECK(sum == config.rtlIfGainDb);
+        CHECK(ifGains[0] == (sum >= 12 ? 6 : -3));
+        CHECK(ifGains[1] >= 0 && ifGains[1] <= 9 && ifGains[1] % 3 == 0);
+        CHECK(ifGains[2] >= 0 && ifGains[2] <= 9 && ifGains[2] % 3 == 0);
+        CHECK(ifGains[3] >= 0 && ifGains[3] <= 2);
+        CHECK(ifGains[4] >= 3 && ifGains[4] <= 15 && ifGains[4] % 3 == 0);
+        CHECK(ifGains[5] >= 3 && ifGains[5] <= 15 && ifGains[5] % 3 == 0);
+        NgFrontendDestroy(&source);
+    }
+    config.rtlIfGainDb = 48;
+    failIfStage = 3;
+    CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_ERROR && !source.context);
+    CHECK(strstr(error.message, "stage 3") != NULL);
+    failIfStage = 0;
+    config.rtlAutoGain = 1; ifCalls = 0;
+    CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_OK && !ifCalls);
+    NgFrontendDestroy(&source);
+    config.rtlAutoGain = 0;
+    fixtureTuner = RTLSDR_TUNER_R820T;
+    CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_OK && !ifCalls);
+    NgFrontendDestroy(&source);
+    /* Repeated calibration observations reuse USB, replace the closed ingress
+     * and never expose queued samples from the previous gain. */
+    {
+        int before = deviceOpens, closed = deviceCloses, workers = asyncCalls;
+        malformed = 0;
+        CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_OK);
+        for (index = 0; index < 3; ++index) {
+            CHECK(NgRtlsdrCalibrationNext(&config, &source, &error) == NG_OK);
+            CHECK(source.ops->start(source.context, &error) == NG_OK);
+            CHECK(source.ops->acquire(source.context, &view, 1000, &error) == NG_OK);
+            CHECK(view.meta.firstSample >= index * 11u && NgIqComponent(&view, 0, 0) == -128);
+            source.ops->release(source.context);
+            CHECK(NgRtlsdrCalibrationPause(&source, &error) == NG_OK);
+        }
+        CHECK(deviceOpens == before + 1 && deviceCloses == closed);
+        NgFrontendDestroy(&source);
+        CHECK(deviceCloses == closed + 1 && asyncCalls == workers + 1);
+    }
     for (scenario = 0; scenario < 4; ++scenario) {
         malformed = scenario == 2;
         config.ingressBlocks = scenario == 1 ? 2 : 8;
@@ -276,7 +347,7 @@ int main(void)
         CHECK(stats.hardwareLossState == NG_DIAGNOSTIC_UNSUPPORTED);
         NgFrontendDestroy(&source);
     }
-    puts("PASS native RTL-SDR adapter fixture, CU8 lifetime, gain steps, overflow-stop and "
+    puts("PASS native RTL-SDR adapter fixture, E4000 IF stages/units/failure, CU8 lifetime, gain steps, overflow-stop and "
          "cancellation race");
     return 0;
 }

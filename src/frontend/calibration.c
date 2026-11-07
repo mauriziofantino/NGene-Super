@@ -1,5 +1,6 @@
 #include "ngene/calibration.h"
 #include "ngene/dsp/statistics.h"
+#include "frontend/calibration_frontend.h"
 #include "platform/platform.h"
 #include <math.h>
 #include <stdio.h>
@@ -7,18 +8,19 @@
 #include <string.h>
 
 enum { CAL_PAIRS = 32768, CAL_BLOCK = 32768, CAL_INGRESS_BLOCKS = 128,
-       CAL_REPEATS = 3, CAL_HISTOGRAM_LEVELS = 8192 };
+       CAL_REPEATS = 3, CAL_HISTOGRAM_LEVELS = 8192, CAL_GAIN_GROUPS = 197 };
 
 /** @brief Preferred measured split for one RF-amp/physical-total-gain group. */
 typedef struct {
     int valid, earlyDb;
     unsigned lna, vga;
+    int rtlGain, rtlIfGain;
     TNgGainQuality quality;
 } TNgGainSplit;
 
 /** @brief Bounded worker-owned sweep state; no full configuration copies per point. */
 typedef struct {
-    TNgGainSplit groups[2][103];
+    TNgGainSplit groups[2][CAL_GAIN_GROUPS];
     unsigned char seen[2][41][64];
 } TNgGainSweep;
 
@@ -160,7 +162,8 @@ int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *q, TNgError *error)
 }
 
 static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
-                   const TNgGainCalibrationCallbacks *callbacks, TNgError *error)
+                   const TNgGainCalibrationCallbacks *callbacks, TNgFrontend *retained,
+                   TNgError *error)
 {
     TNgConfig local = *candidate;
     TNgFrontend frontend = {0};
@@ -178,7 +181,11 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
     local.ringBlocks = 2;
     local.overflowPolicy = NG_OVERFLOW_STOP;
     if (Cancelled(callbacks)) return NG_END;
-    if (NgFrontendOpenNative(&local, &frontend, error) != NG_OK) return NG_ERROR;
+    if (retained && retained->ops) {
+        frontend = *retained;
+    } else if (NgFrontendOpenNative(&local, &frontend, error) != NG_OK) return NG_ERROR;
+    if (retained && NgFrontendCalibrationNext(&local, &frontend, error) != NG_OK) goto done;
+    if (Cancelled(callbacks)) { ok = NG_END; goto done; }
     bytes = NgSampleBytes(frontend.info.format);
     if (!bytes || (samples = malloc(CAL_REPEATS * CAL_PAIRS * bytes)) == NULL) {
         NgFail(error, "Cannot allocate calibration sample buffer");
@@ -196,10 +203,15 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
         discard = frontend.info.sampleRateHz /
                   (candidate->frontend == NG_FRONTEND_RTLSDR && candidate->rtlAutoGain &&
                    repeat == 0 ? 10u : 50u);
+        /* RF/IF gains do not change between the three non-overlapping windows.
+         * RTL settling is needed once after a gain change, not before each window. */
+        if (candidate->frontend == NG_FRONTEND_RTLSDR && repeat != 0) discard = 0;
+        if (retained && repeat == 0)
+            discard += (size_t)NG_CAL_RTL_BUFFERS * NG_CAL_RTL_BUFFER_PAIRS;
         deadline = NgMonotonicSeconds() + 4.0;
         while (count < CAL_PAIRS && NgMonotonicSeconds() < deadline) {
             if (Cancelled(callbacks)) { ok = NG_END; goto done; }
-            int rc = frontend.ops->acquire(frontend.context, &view, 200, error);
+            int rc = frontend.ops->acquire(frontend.context, &view, 50, error);
             size_t offset = 0, n;
             if (rc == NG_TIMEOUT) continue;
             if (rc != NG_OK) goto done;
@@ -221,7 +233,9 @@ static int Measure(const TNgConfig *candidate, TNgGainQuality q[CAL_REPEATS],
     }
     /* Drain and copy all windows before doing statistical work. Otherwise USB
      * continues filling ingress during the native-level CDF/moment analysis. */
-    if (frontend.ops->stop(frontend.context, error) != NG_OK) goto done;
+    if (retained) {
+        if (NgFrontendCalibrationPause(&frontend, error) != NG_OK) goto done;
+    } else if (frontend.ops->stop(frontend.context, error) != NG_OK) goto done;
     started = 0;
     for (repeat = 0; repeat < (unsigned)CAL_REPEATS; ++repeat) {
         if (Cancelled(callbacks)) { ok = NG_END; goto done; }
@@ -237,7 +251,11 @@ done:
             ok = NG_ERROR;
         }
     }
-    NgFrontendDestroy(&frontend);
+    if (retained && ok == NG_OK) *retained = frontend;
+    else {
+        NgFrontendDestroy(&frontend);
+        if (retained) memset(retained, 0, sizeof(*retained));
+    }
     free(samples);
     return ok;
 }
@@ -246,11 +264,21 @@ static void Consider(const TNgConfig *candidate, const TNgGainQuality *quality,
                      TNgGainCalibration *result, TNgGainSweep *sweep)
 {
     if (sweep) {
-        int early, late, amp, total, selected = 0;
+        int early, late, amp, total, selected = 0, selectedEarly = -1;
+        int e4000 = result->capabilities.gainPolicy == NG_GAIN_POLICY_RTL_E4000;
         TNgGainSplit *split;
-        HackrfPhysicalGains(result->capabilities.gainPolicy, candidate->lnaGainDb,
-                           candidate->vgaGainDb, &early, &late);
-        split = &sweep->groups[candidate->rfAmp][early + late];
+        if (e4000) {
+            early = candidate->rtlGainTenthsDb;
+            late = candidate->rtlIfGainDb * 10;
+            amp = 0;
+            total = (early + late) / 5; /* E4000 totals are on a 0.5 dB grid. */
+        } else {
+            HackrfPhysicalGains(result->capabilities.gainPolicy, candidate->lnaGainDb,
+                               candidate->vgaGainDb, &early, &late);
+            amp = candidate->rfAmp;
+            total = early + late;
+        }
+        split = &sweep->groups[amp][total];
         if (!split->valid || quality->acceptable > split->quality.acceptable ||
             (quality->acceptable == split->quality.acceptable &&
              ((quality->acceptable && early > split->earlyDb) ||
@@ -260,22 +288,32 @@ static void Consider(const TNgConfig *candidate, const TNgGainQuality *quality,
             split->earlyDb = early;
             split->lna = candidate->lnaGainDb;
             split->vga = candidate->vgaGainDb;
+            split->rtlGain = candidate->rtlGainTenthsDb;
+            split->rtlIfGain = candidate->rtlIfGainDb;
             split->quality = *quality;
         }
         /* Recompute after replacing a representative: its score can increase.
          * A pairwise comparator mixing split priority and score is not transitive. */
-        for (amp = 0; amp < 2; ++amp) for (total = 0; total < 103; ++total) {
+        for (amp = 0; amp < 2; ++amp) for (total = 0; total < CAL_GAIN_GROUPS; ++total) {
             split = &sweep->groups[amp][total];
             if (split->valid && (!selected ||
                 split->quality.acceptable > result->accepted ||
                 (split->quality.acceptable == result->accepted &&
-                 split->quality.score < result->quality.score))) {
+                 ((!e4000 && split->quality.acceptable && split->earlyDb > selectedEarly) ||
+                  ((e4000 || !split->quality.acceptable || split->earlyDb == selectedEarly) &&
+                   split->quality.score < result->quality.score))))) {
                 result->selected = *candidate;
-                result->selected.rfAmp = amp;
-                result->selected.lnaGainDb = split->lna;
-                result->selected.vgaGainDb = split->vga;
+                if (e4000) {
+                    result->selected.rtlGainTenthsDb = split->rtlGain;
+                    result->selected.rtlIfGainDb = split->rtlIfGain;
+                } else {
+                    result->selected.rfAmp = amp;
+                    result->selected.lnaGainDb = split->lna;
+                    result->selected.vgaGainDb = split->vga;
+                }
                 result->quality = split->quality;
                 result->accepted = split->quality.acceptable;
+                selectedEarly = split->earlyDb;
                 selected = 1;
             }
         }
@@ -293,14 +331,14 @@ static void Consider(const TNgConfig *candidate, const TNgGainQuality *quality,
 }
 
 static int Try(const TNgConfig *candidate, TNgGainCalibration *result, TNgGainSweep *sweep,
-               const TNgGainCalibrationCallbacks *callbacks, TNgError *error)
+               const TNgGainCalibrationCallbacks *callbacks, TNgFrontend *retained, TNgError *error)
 {
     TNgGainQuality measurements[CAL_REPEATS], quality;
     unsigned accepted = 0, i;
     int rc;
     if (Cancelled(callbacks)) return NG_END;
     if (callbacks && callbacks->progress) callbacks->progress(callbacks->context, candidate, result);
-    rc = Measure(candidate, measurements, callbacks, error);
+    rc = Measure(candidate, measurements, callbacks, retained, error);
     if (rc != NG_OK) return rc;
     quality.rejectionReasons = 0;
     for (i = 0; i < (unsigned)CAL_REPEATS; ++i)
@@ -372,21 +410,29 @@ int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *resul
                     candidate.lnaGainDb = lna;
                     candidate.vgaGainDb = vga;
                     candidate.rfAmp = amp;
-                    int rc = Try(&candidate, result, &sweep, callbacks, error);
+                    int rc = Try(&candidate, result, &sweep, callbacks, NULL, error);
                     if (rc != NG_OK) return rc;
                 }
             }
         }
     } else if (config->frontend == NG_FRONTEND_RTLSDR) {
+        TNgGainSweep sweep = {0};
+        int e4000 = result->capabilities.gainPolicy == NG_GAIN_POLICY_RTL_E4000;
+        TNgFrontend retained = {0};
         size_t count = result->capabilities.tunerGainCount;
         size_t i;
         if (result->capabilities.gainPolicy < NG_GAIN_POLICY_RTL_R82XX ||
             result->capabilities.gainPolicy > NG_GAIN_POLICY_RTL_FC001X)
             return NgFail(error, "Invalid RTL-SDR gain policy");
         if (!count || count > 64) return NgFail(error, "Invalid native RTL gain list");
+        if (e4000) for (i = 0; i < count; ++i) {
+            int gain = result->capabilities.tunerGains[i];
+            if (gain < -10 || gain > 420 || gain % 5 != 0)
+                return NgFail(error, "Unexpected native E4000 gain list");
+        }
         for (i = 0; i < count; ++i) {
             size_t earlier;
-            int rc;
+            int ifGain;
             for (earlier = 0; earlier < i; ++earlier)
                 if (result->capabilities.tunerGains[earlier] == result->capabilities.tunerGains[i])
                     break;
@@ -394,9 +440,20 @@ int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *resul
             candidate = base;
             candidate.rtlAutoGain = 0;
             candidate.rtlGainTenthsDb = result->capabilities.tunerGains[i];
-            rc = Try(&candidate, result, NULL, callbacks, error);
-            if (rc != NG_OK) return rc;
+            /* The E4000 native tuner list controls LNA/mixer only. Exhaust all
+             * realizable IF totals too, with earlier IF stages filled first.
+             * Other RTL tuners do not implement the public IF-gain operation. */
+            for (ifGain = e4000 ? 3 : 0; ifGain <= (e4000 ? 56 : 0); ++ifGain) {
+                int rc;
+                if (e4000) candidate.rtlIfGainDb = ifGain;
+                rc = Try(&candidate, result, e4000 ? &sweep : NULL, callbacks, &retained, error);
+                if (rc != NG_OK) {
+                    NgFrontendDestroy(&retained);
+                    return rc;
+                }
+            }
         }
+        NgFrontendDestroy(&retained);
     } else if (config->frontend == NG_FRONTEND_BLADERF) {
         int min = result->capabilities.gainMinDb, max = result->capabilities.gainMaxDb;
         int step = result->capabilities.gainStepDb;
@@ -408,7 +465,7 @@ int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *resul
         for (gain = min; gain <= max; gain += step) {
             candidate = base;
             candidate.bladeGainDb = (int)gain;
-            int rc = Try(&candidate, result, NULL, callbacks, error);
+            int rc = Try(&candidate, result, NULL, callbacks, NULL, error);
             if (rc != NG_OK) return rc;
         }
     }

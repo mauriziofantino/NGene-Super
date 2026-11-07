@@ -1,51 +1,87 @@
-/* Orthographic frequency/time/power surface. Each PSD bin is a vertex;
- * power displaces its screen position, rather than merely changing its colour.
- * The populated history spans the time grid; the oldest strip meets the floor. */
-const stops = [[5,9,35],[12,23,77],[23,48,127],[22,118,193],[63,218,234],[197,255,252]];
-export const reliefPalette = Array.from({length:256}, (_, level) => {
-  const x=level/255*(stops.length-1),i=Math.min(stops.length-2,Math.floor(x)),f=x-i;
-  return stops[i].map((value,k)=>Math.round(value+(stops[i+1][k]-value)*f));
-});
-
-export function projectWaterfallPoint(age, level, rows, imageRows) {
-  const rise=(imageRows-1)*0.38;
-  return rise+age/Math.max(1,rows-1)*(imageRows-1-rise)-level*rise;
+/* Fixed frontal 3D frequency/power/time mesh: real geometry, depth testing,
+ * directional lighting and time traces. The global power scale is shared. */
+export const surfaceElevation=18*Math.PI/180,surfaceHeight=0.32;
+const stops=[[0,12,85],[0,34,145],[0,76,215],[0,141,245],[38,207,255],[197,247,255]];
+export const reliefPalette=Array.from({length:256},(_,n)=>{const x=n/255*5,i=Math.min(4,Math.floor(x)),f=x-i;return stops[i].map((v,k)=>Math.round(v+(stops[i+1][k]-v)*f));});
+const levelOf=(v,lo,hi)=>Number.isFinite(v)?Math.max(0,Math.min(1,(v-lo)/(hi-lo))):0;
+const edgeHeight=age=>age<=0||age>=1?0:Math.sin(Math.PI*age);
+/** Retain unfinished movement when another observation arrives. */
+export function createWaterfallScroll(duration=180){
+ let pending=0,started=0,pausedAt=null;
+ const offset=now=>pending*(1-Math.max(0,Math.min(1,((pausedAt??now)-started)/duration)));
+ return {
+  offset,
+  push(now){pending=offset(now)+1;started=pausedAt??now;},
+  pause(now){if(pausedAt===null)pausedAt=now;},
+  resume(now){if(pausedAt!==null){started+=now-pausedAt;pausedAt=null;}},
+  reset(){pending=0;started=0;pausedAt=null;}
+ };
 }
-
-/** Rasterize connected height-field strips, front (oldest) to rear (newest).
- * A strip has one pixel column per telemetry bin, without frequency pooling.
- * Foreground strips occlude background surfaces, as in a solid 3D plot.
- * The input history remains the shared, immutable 2D/3D observations. */
-export function paintWaterfallRelief(pixels, history, columns, rows, lo, hi, imageRows=rows) {
-  if(!Number.isInteger(columns)||columns<1||columns>1024||!Number.isInteger(rows)||rows<1||rows>2048||
-     !Number.isInteger(imageRows)||imageRows<2||imageRows>2048||
-     !Number.isFinite(lo)||!Number.isFinite(hi)||lo>=hi||pixels.length!==columns*imageRows*4)
-    throw new Error('Invalid waterfall relief geometry or power range.');
-  const active=Math.min(rows,history.length),previousY=new Float32Array(columns),previousLevel=new Float32Array(columns);
-  const horizon=new Int32Array(columns);horizon.fill(imageRows);
-  const levelOf=value=>Number.isFinite(value)?Math.max(0,Math.min(1,(value-lo)/(hi-lo))):0;
-  pixels.fill(0);
-  const rise=(imageRows-1)*0.38,step=(imageRows-1-rise)/Math.max(1,active-1);
-  for(let j=active-1;j>=0;j--)for(let k=0;k<columns;k++){
-    const values=history[j].values,level=levelOf(values[k]);
-    const hasFront=j<active-1,y=rise+j*step-level*rise,back=hasFront?previousY[k]:imageRows-1;
-    const frontLevel=previousLevel[k];previousY[k]=y;previousLevel[k]=level;
-    const first=Math.max(0,Math.floor(Math.min(y,back))),last=Math.min(horizon[k]-1,imageRows-1,Math.ceil(Math.max(y,back)));
-    // A per-frequency horizon removes hidden strips before shading. No row or
-    // bin is pooled; every vertex contributes to visibility. Each output pixel
-    // is written at most once, even at the maximum history depth.
-    if(first>last)continue;
-    horizon[k]=first;
-    const dx=3.5*(levelOf(values[Math.min(columns-1,k+1)])-levelOf(values[Math.max(0,k-1)]));
-    const dt=hasFront?2*(level-frontLevel):0;
-    const light=Math.max(0,(0.82+0.46*dx+0.34*dt)/Math.sqrt(1+dx*dx+dt*dt));
-    for(let screenY=first;screenY<=last;screenY++){
-      const f=Math.abs(y-back)<0.001?1:Math.max(0,Math.min(1,(screenY-back)/(y-back)));
-      const power=hasFront?frontLevel+f*(level-frontLevel):level;
-      const colour=reliefPalette[Math.round(power*255)],shade=0.5+0.3*light+0.3*power,offset=4*(screenY*columns+k);
-      for(let c=0;c<3;c++)pixels[offset+c]=Math.min(255,Math.round(colour[c]*shade));
-      pixels[offset+3]=255;
-    }
+export function buildWaterfallMesh(history,columns,capacity,lo,hi){
+ const rows=Math.min(capacity,history.length),gridRows=rows?capacity:0;
+ if(columns<2||columns>1024||!Number.isInteger(capacity)||capacity<2||capacity>2048||!Number.isFinite(lo)||!Number.isFinite(hi)||lo>=hi)throw Error('Invalid 3D waterfall geometry.');
+ const positions=new Float32Array((gridRows?gridRows+1:0)*columns*3),normals=new Float32Array(positions.length),levels=new Float32Array(positions.length/3);
+ const c=Math.cos(surfaceElevation),s=Math.sin(surfaceElevation),step=1/(capacity-1);
+ const sample=(j,k)=>levelOf(history[Math.min(rows-1,j)].values[k],lo,hi);
+ for(let j=0;j<gridRows;j++)for(let k=0;k<columns;k++){
+  const i=j*columns+k,level=sample(j,k),age=j*step,h=(level-0.5)*surfaceHeight;
+  positions.set([2*k/(columns-1)-1,h,age],3*i);levels[i]=level;
+  const l=sample(j,Math.max(0,k-1)),r=sample(j,Math.min(columns-1,k+1));
+  const near=Math.max(0,j-1),far=Math.min(gridRows-1,j+1);
+  const hn=(sample(near,k)-0.5)*surfaceHeight*edgeHeight(near*step);
+  const hf=(sample(far,k)-0.5)*surfaceHeight*edgeHeight(far*step);
+  normals.set([-(r-l)*surfaceHeight*edgeHeight(age)*(columns-1)/4,1,(hf-hn)*(capacity-1)/4],3*i);
+ }
+ // Hold the oldest known edge across unfilled history, without adding observations.
+ // The extra rear boundary stays fixed while actual rows scroll out of view.
+ if(gridRows){
+  for(let k=0;k<columns;k++){
+   const i=gridRows*columns+k;positions.set([2*k/(columns-1)-1,0,2],3*i);
+   normals.set([0,1,0],3*i);levels[i]=sample(gridRows-1,k);
   }
-  return {rows:active,columns,imageRows,heightFraction:0.38};
+ }
+ // Fixed view: the time edges exactly span the pane. Taper only at those edges;
+ // 0.32 gain keeps projected movement monotonic for every permitted power level.
+ const matrix=new Float32Array([1,0,0,0,0,c/s,-s/4,0,0,-1,-c/4,0,0,0,0,1]);
+ return {rows,gridRows,columns,positions,normals,levels,matrix};
+}
+export function projectSurfacePoint(frequency,level,age,mesh){
+ age=Math.max(0,Math.min(1,age));
+ const h=(level-0.5)*surfaceHeight*edgeHeight(age),z=1-2*age,m=mesh.matrix;
+ return {x:frequency,y:m[5]*h+m[9]*z+m[13],depth:m[6]*h+m[10]*z};
+}
+export function createWaterfallSurface(canvas){
+ const gl=canvas.getContext('webgl',{alpha:true,antialias:true,preserveDrawingBuffer:true});
+ if(!gl||!gl.getExtension('OES_element_index_uint'))throw Error('3D waterfall requires WebGL.');
+ const compile=(type,source)=>{const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;};
+ const program=gl.createProgram();
+ gl.attachShader(program,compile(gl.VERTEX_SHADER,'attribute vec3 position;attribute vec3 normal;attribute float level;uniform mat4 projection;uniform float rowOffset;uniform float ageStep;varying vec3 vNormal;varying float vLevel;void main(){float age=position.z>1.5?1.0:max(0.0,position.z-rowOffset*ageStep);float edge=age<=0.0||age>=1.0?0.0:sin(3.14159265359*age);gl_Position=projection*vec4(position.x,position.y*edge,1.0-2.0*age,1.0);vNormal=normal;vLevel=level;}'));
+ gl.attachShader(program,compile(gl.FRAGMENT_SHADER,'precision mediump float;uniform sampler2D palette;uniform float trace;varying vec3 vNormal;varying float vLevel;void main(){vec3 n=normalize(vNormal);float diffuse=max(0.0,dot(n,normalize(vec3(-0.2,0.85,0.5))));vec3 colour=texture2D(palette,vec2(clamp(vLevel,0.0,1.0),0.5)).rgb;gl_FragColor=trace>0.5?vec4(mix(colour*0.22,vec3(0.01,0.04,0.16),0.5),0.62):vec4(colour*(0.36+0.7*diffuse),1.0);}'));
+ gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));gl.useProgram(program);
+ const attributes={};for(const [name,size] of [['position',3],['normal',3],['level',1]])attributes[name]={location:gl.getAttribLocation(program,name),buffer:gl.createBuffer(),size};
+ const triangles=gl.createBuffer(),traces=gl.createBuffer(),projection=gl.getUniformLocation(program,'projection'),offsetUniform=gl.getUniformLocation(program,'rowOffset'),ageStep=gl.getUniformLocation(program,'ageStep'),trace=gl.getUniformLocation(program,'trace');
+ const texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,texture);
+ for(const parameter of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,parameter,gl.LINEAR);
+ for(const parameter of [gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T])gl.texParameteri(gl.TEXTURE_2D,parameter,gl.CLAMP_TO_EDGE);
+ gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,256,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(reliefPalette.flatMap(c=>[...c,255])));
+ let mesh=null,key='',triangleCount=0,traceCount=0;
+ return {draw(history,columns,capacity,lo,hi,width,height,rowOffset=0){
+  const nextKey=[history[0]?.sequence,history.at(-1)?.sequence,history.length,columns,capacity,lo,hi].join(':');
+  if(!mesh||key!==nextKey){
+   key=nextKey;mesh=buildWaterfallMesh(history,columns,capacity,lo,hi);
+   for(const [name,data] of Object.entries({position:mesh.positions,normal:mesh.normals,level:mesh.levels})){const a=attributes[name];gl.bindBuffer(gl.ARRAY_BUFFER,a.buffer);gl.bufferData(gl.ARRAY_BUFFER,data,gl.DYNAMIC_DRAW);gl.enableVertexAttribArray(a.location);gl.vertexAttribPointer(a.location,a.size,gl.FLOAT,false,0,0);}
+   const indices=[],lines=[];
+   for(let j=0;j<mesh.gridRows;j++)for(let k=0;k<columns-1;k++){const a=j*columns+k;lines.push(a,a+1);indices.push(a,a+columns,a+1,a+1,a+columns,a+columns+1);}
+   triangleCount=indices.length;traceCount=lines.length;
+   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,triangles);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(indices),gl.STATIC_DRAW);
+   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,traces);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(lines),gl.STATIC_DRAW);
+  }
+  if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;
+  gl.viewport(0,0,width,height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);
+  rowOffset=Math.max(0,Math.min(capacity-1,rowOffset));
+  gl.uniformMatrix4fv(projection,false,mesh.matrix);gl.uniform1f(offsetUniform,rowOffset);gl.uniform1f(ageStep,1/(capacity-1));
+  gl.uniform1f(trace,0);gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(1,1);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,triangles);gl.drawElements(gl.TRIANGLES,triangleCount,gl.UNSIGNED_INT,0);
+  gl.disable(gl.POLYGON_OFFSET_FILL);gl.uniform1f(trace,1);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,traces);gl.drawElements(gl.LINES,traceCount,gl.UNSIGNED_INT,0);gl.disable(gl.BLEND);
+  return {rows:mesh.rows,gridRows:mesh.gridRows,columns,imageRows:height,style:'mesh',azimuth:0,elevation:18,rowOffset,scrollProgress:1-Math.min(1,rowOffset),projection:Array.from(mesh.matrix),vertices:mesh.gridRows*columns,triangles:triangleCount/3};
+ }};
 }

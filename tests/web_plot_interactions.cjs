@@ -30,7 +30,7 @@ const server=http.createServer((request,response)=>{
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(predicate,message){for(let n=0;n<100;n++){if(await predicate())return;await delay(30);}throw new Error(message);}
 (async()=>{
-  let browser;
+  let browser,liveSocket,liveTimer;
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{}),args:['--no-sandbox']});
@@ -45,6 +45,94 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     const logo=page.locator('.brandmark');
     assert(await logo.isVisible(),'The NGene logo is missing from the console header');
     await until(()=>logo.evaluate(image=>image.complete&&image.naturalWidth>0),'The NGene logo asset did not load under production CSP');
+    if(process.env.NGENE_MOTION_TEST==='1'){
+      await page.evaluate(async()=>{
+        const {renderAnalysis}=await import('/app.js');document.getElementById('waterfallRate').value='30';
+        const stats={mean:0,std:10,rms:10,min:-32,max:32,clipping_count:0,zero_count:0};
+        window.publishMotionFrame=sequence=>{
+          const dbfs=Array(256).fill(-65);
+          if(sequence===40)for(let k=125;k<=131;k++)dbfs[k]=-20;
+          if(sequence>80){dbfs[12]=sequence%2?-200:-65;dbfs[16]=sequence%2?20:-30;}
+          let checksum=2166136261;
+          for(const value of dbfs){let word=Math.floor(value*1000+0.5)>>>0;for(let b=0;b<4;b++){checksum=Math.imul(checksum^(word&255),16777619)>>>0;word>>>=8;}}
+          renderAnalysis({sequence:String(sequence),sequence_id:String(sequence),revision:'1',epoch:'1',produced_seconds:sequence*.3,first_sample:String(sequence*100000),sample_rate_hz:100000,fft_size:256,bin_hz:390.625,enbw_hz:585.9375,dbfs,integrity_ok:true,nan_count:0,inf_count:0,checksum,telemetry_checksum:checksum,min:Math.min(...dbfs),max:Math.max(...dbfs),mean:dbfs.reduce((a,b)=>a+b,0)/256,config:{units:'dbfs_bin',window:'hann',averages:1,spectrum_source:'post',histogram_source:'post'},peak_hz:0,peak_dbfs:Math.max(...dbfs),histogram_count:0,histogram_i:[],histogram_q:[],stats_i:stats,stats_q:stats,dc_magnitude:0,histogram_first_sample:'0',histogram_age_seconds:0,clipped_i:'0',clipped_q:'0',compute_ms:0,skipped_bursts:0,contention_blocks:0,sample_backend:'motion',backend:'motion'});
+        };
+        for(let n=1;n<=80;n++)window.publishMotionFrame(n);
+        window.sampleMotionMarker=()=>Object.fromEntries(['waterfall','waterfall3D'].map(id=>{
+          const canvas=document.getElementById(id),w=canvas.width,h=canvas.height,d=Math.min(devicePixelRatio||1,2);
+          const left=52*d,right=w-18*d,x=Math.round(left+128/256*(right-left)),top=Math.ceil(16*d),bottom=Math.floor(h-32*d);
+          const pixels=canvas.getContext('2d').getImageData(x-4,top,9,bottom-top).data;let sum=0,count=0;
+          for(let y=0;y<bottom-top;y++)for(let k=0;k<9;k++){
+            const p=4*(y*9+k),red=pixels[p],green=pixels[p+1];
+            if(id==='waterfall'?red>200&&green<120:red>50){sum+=top+y;count++;}
+          }
+          return [id,count?sum/count:null];
+        }));
+      });
+      await until(async()=>(await snapshot()).waterfall3D.scrollProgress===1,'Initial motion preload settled');
+      await page.locator('#waterfall3D').scrollIntoViewIfNeeded();
+      if(process.env.NGENE_SCREENSHOTS)await page.evaluate(()=>{
+        const video=document.createElement('canvas');video.width=1280;video.height=500;
+        const ctx=video.getContext('2d'),stream=video.captureStream(30),chunks=[];
+        const recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8',videoBitsPerSecond:2000000});
+        const timer=setInterval(()=>{ctx.drawImage(document.getElementById('waterfall'),0,0,640,500);ctx.drawImage(document.getElementById('waterfall3D'),640,0,640,500);},33);
+        recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data);};recorder.start();
+        window.finishMotionRecording=()=>new Promise(resolve=>{
+          recorder.onstop=()=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.readAsDataURL(new Blob(chunks,{type:'video/webm'}));};
+          clearInterval(timer);recorder.stop();for(const track of stream.getTracks())track.stop();
+        });
+      });
+      const samples=[];const sample=async()=>samples.push(await page.evaluate(()=>window.sampleMotionMarker()));
+      await sample();
+      for(let sequence=81;sequence<=145;sequence++){
+        await page.evaluate(sequence=>window.publishMotionFrame(sequence),sequence);await sample();await delay(40);await sample();
+      }
+      await until(async()=>(await snapshot()).waterfall3D.scrollProgress===1,'Motion settled');await sample();
+      for(const row of samples)assert(row.waterfall!==null&&row.waterfall3D!==null,'The same marker must remain visible in both views');
+      for(let n=1;n<samples.length;n++){
+        assert(samples[n].waterfall>=samples[n-1].waterfall-0.8,'2D marker reversed direction');
+        assert(samples[n].waterfall3D<=samples[n-1].waterfall3D+0.8,'3D marker reversed direction');
+      }
+      assert(samples.at(-1).waterfall-samples[0].waterfall>100,'2D must actually scroll');
+      assert(samples[0].waterfall3D-samples.at(-1).waterfall3D>100,'3D must actually scroll');
+      const result=await snapshot();assert.equal(result.waterfall.gridRows,128);assert.equal(result.waterfall3D.gridRows,128);
+      if(process.env.NGENE_SCREENSHOTS)fs.writeFileSync(path.join(process.env.NGENE_SCREENSHOTS,'motion-marker.json'),JSON.stringify(samples,null,2));
+      if(process.env.NGENE_SCREENSHOTS)fs.writeFileSync(path.join(process.env.NGENE_SCREENSHOTS,'motion.webm'),Buffer.from(await page.evaluate(()=>window.finishMotionRecording()),'base64'));
+      assert.deepEqual(errors,[]);console.log('PASS: one physical marker moves only forward in both canvases, through initial filling, overlapping arrivals, new extrema and full history.');return;
+    }
+    if(process.env.NGENE_LIVE_ENDPOINT){
+      const endpoint=new URL(process.env.NGENE_LIVE_ENDPOINT);
+      const bootstrap=await(await fetch(endpoint.origin+'/api/v1/bootstrap')).json();
+      liveSocket=await new Promise((resolve,reject)=>{
+        const request=http.request({hostname:endpoint.hostname,port:endpoint.port,path:'/api/v1/events?token='+encodeURIComponent(bootstrap.token),headers:{Connection:'Upgrade',Upgrade:'websocket',Origin:endpoint.origin,'Sec-WebSocket-Version':'13','Sec-WebSocket-Key':require('node:crypto').randomBytes(16).toString('base64')}});
+        request.on('upgrade',(_,socket)=>{socket.on('data',()=>{});resolve(socket);});request.on('error',reject);request.on('response',r=>reject(Error('Live WebSocket: '+r.statusCode)));request.end();
+      });
+      liveTimer=setInterval(()=>{
+        const message=Buffer.from('status:3'),mask=require('node:crypto').randomBytes(4),frame=Buffer.alloc(6+message.length);
+        frame[0]=0x81;frame[1]=0x80|message.length;mask.copy(frame,2);
+        for(let n=0;n<message.length;n++)frame[6+n]=message[n]^mask[n%4];liveSocket.write(frame);
+      },300);
+      const frames=[];let sequence='0';
+      for(let n=0;n<100&&frames.length<40;n++){
+        const live=await(await fetch(process.env.NGENE_LIVE_ENDPOINT+'/api/v1/status')).json();
+        const frame=live.analysis;
+        if(frame?.dbfs?.length&&frame.sequence_id!==sequence){
+          sequence=frame.sequence_id;frames.push(frame);
+          await page.evaluate(async frame=>{const {renderAnalysis}=await import('/app.js');renderAnalysis(frame);},frame);
+        }
+        await delay(250);
+      }
+      assert(frames.length>=8,'Live source did not publish enough PSD frames');
+      await until(async()=>(await snapshot()).waterfall3D.scrollProgress===1,'Live scrolling settled');
+      const state=await snapshot();assert.equal(state.waterfall3D.style,'mesh');assert(state.waterfall3D.triangles>0);
+      assert.deepEqual(errors,[]);
+      const output=process.env.NGENE_SCREENSHOTS||'build';
+      fs.writeFileSync(path.join(output,'live-frames.json'),JSON.stringify(frames));
+      await page.locator('#spectrumPanel').screenshot({path:path.join(output,'live-panels.png'),style:'.workspace-topbar{visibility:hidden!important}'});
+      await page.locator('#waterfall3D').screenshot({path:path.join(output,'live-3d.png')});
+      console.log('PASS: live SDR frames through updated UI, genuine 3D mesh, scrolling and colour bars. '+output);
+      return;
+    }
     await page.evaluate(async()=>{
       const {renderAnalysis}=await import('/app.js');
       const stats={mean:0,std:10,rms:10,min:-32,max:32,clipping_count:0,zero_count:0};
@@ -64,6 +152,13 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
         renderAnalysis(frame);window.reliefFixture=frame;
       }
     });
+    const moving=await page.evaluate(async()=>{
+      const {diagnosticSnapshot}=await import('/app.js');
+      return {state:diagnosticSnapshot(),image:document.getElementById('waterfall3D').toDataURL()};
+    });
+    await until(async()=>(await snapshot()).waterfall3D.scrollProgress===1,'3D scroll did not finish');
+    assert.deepEqual((await snapshot()).history,moving.state.history,'Animation must not add observations');
+    if(moving.state.waterfall3D.scrollProgress<1)assert(await page.locator('#waterfall3D').evaluate(canvas=>canvas.toDataURL())!==moving.image,'3D history must visibly scroll');
     await page.locator('#pausePlot').click();
     const original=await snapshot();assert.equal(original.history.length,128);
     await page.evaluate(async()=>{const {renderAnalysis}=await import('/app.js');renderAnalysis({...window.reliefFixture,sequence:'129',sequence_id:'129',produced_seconds:39});});
@@ -71,8 +166,8 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     const registered=async()=>{
       const state=await snapshot();
       for(const key of ['rows','columns','newest','oldest'])assert.equal(state.waterfall[key],state.waterfall3D[key],'Synchronized '+key);
-      assert.equal(state.waterfall3D.style,'surface');
-      assert(state.waterfall3D.heightFraction>0,'3D power must have geometric height');
+      assert.equal(state.waterfall3D.style,'mesh');
+      if(state.history.length>1)assert(state.waterfall3D.triangles>0,'3D must render actual triangles with depth');
     };
     await registered();
     await page.locator('#showWaterfall3D').uncheck();
@@ -80,29 +175,18 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     await until(async()=>(await snapshot()).work.waterfall3D>original.work.waterfall3D,'Reenabled paused relief did not redraw');
     await registered();
     const spectrum=page.locator('#spectrum'),waterfall=page.locator('#waterfall');
-    const image=()=>waterfall.evaluate(canvas=>canvas.toDataURL());
-    const flat=await image(),heightBefore=(await waterfall.boundingBox()).height;
-    await page.locator('#waterfallHeight').fill('500');
-    await until(async()=>(await waterfall.boundingBox()).height>heightBefore+150,'Waterfall slider did not enlarge the canvas');
-    assert.equal(await page.locator('#waterfallHeightValue').textContent(),'500 px');
-    await page.locator('#waterfallResize').focus();await page.keyboard.press('ArrowDown');
-    assert.equal(await page.locator('#waterfallResize').getAttribute('aria-valuenow'),'510');
-    await page.locator('#spectrumResize').evaluate(handle=>handle.scrollIntoView({block:'center'}));
-    const separator=await page.locator('#spectrumResize').boundingBox();
-    await page.mouse.move(separator.x+separator.width/2,separator.y+separator.height/2);await page.mouse.down();
-    await page.mouse.move(separator.x+separator.width/2,separator.y+separator.height/2+90,{steps:5});await page.mouse.up();
-    assert.equal(await page.locator('#spectrumHeight').inputValue(),'350');
-    assert((await spectrum.boundingBox()).height>320,'Spectrum resize did not update canvas layout');
+    assert((await spectrum.boundingBox()).height>=400,'Spectrum must already be large');
+    assert((await waterfall.boundingBox()).height>=440,'2D waterfall must already be large');
+    assert((await page.locator('#waterfall3D').boundingBox()).height>=480,'3D waterfall must already be large');
+    assert.equal(await page.locator('#spectrumHeight,#waterfallHeight,#waterfall3DHeight,.plot-resize').count(),0,'Height sliders and resize handles must be removed');
     assert.equal(await page.locator('#expandPlots,#frequencyMin,#frequencyMax,#resetFrequency').count(),0,'Zoom controls must be removed');
     assert.equal(await page.locator('#spectrumPanel').getAttribute('aria-modal'),null);
-    assert.equal(await page.locator('#waterfallHeight').inputValue(),'510');
-    assert.equal(await page.locator('#spectrumHeight').inputValue(),'350');
     const fixed=await snapshot();
     assert(fixed.waterfall3D.rows>1&&fixed.waterfall3D.rows<=2048);
     assert(fixed.waterfall3D.columns>1&&fixed.waterfall3D.columns<=1024);
     assert.equal(await page.locator('#waterfallMode,#waterfallOrbit').count(),0);
-    await page.locator('#waterfall3DHeight').fill('400');
-    assert.equal(await page.locator('#waterfall3DResize').getAttribute('aria-valuenow'),'400');
+    assert.equal(fixed.waterfall3D.elevation,18,'Fixed low frontal elevation');
+    assert.equal(fixed.waterfall3D.azimuth,0,'Frontal FNIRSI view must not rotate laterally');
     await registered();
     if(process.env.NGENE_SCREENSHOTS){
       await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'relief-desktop.png'),style:'.workspace-topbar{visibility:hidden!important}'});
@@ -110,6 +194,8 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     }
     await page.setViewportSize({width:390,height:844});
     await page.locator('#waterfall3D').scrollIntoViewIfNeeded();
+    assert((await spectrum.boundingBox()).height>=300,'Mobile spectrum must remain observable');
+    assert((await waterfall.boundingBox()).height>=360,'Mobile waterfall must remain observable');
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile plot controls overflowed');
     assert.deepEqual((await snapshot()).history,original.history,'Resizing mutated PSD history');
     if(process.env.NGENE_SCREENSHOTS)await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'relief-mobile.png'),style:'.workspace-topbar{visibility:hidden!important}'});
@@ -132,6 +218,6 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     await page.locator('#showWaterfall').check();
     assert.deepEqual((await snapshot()).history,[],'A changed FFT configuration must clear history before fresh receiver data');
     assert.deepEqual(errors,[]);
-    console.log('PASS: live plot sizing, mouse/keyboard resize, removed zoom controls, synchronized relief, shared clear, paused reenable, independent height and mobile layout under production CSP.');
-  }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
+    console.log('PASS: large default plots, no zoom/height controls, increased relief tilt, synchronized history, shared clear, paused reenable and mobile visibility under production CSP.');
+  }finally{clearInterval(liveTimer);liveSocket?.destroy();if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

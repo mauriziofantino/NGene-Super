@@ -21,7 +21,8 @@ async function until(fn,label){for(let n=0;n<200;n++){const v=await fn();if(v)re
   await page.locator('#showConfiguration').click();await page.locator('[data-settings="source"]').click();
   await page.locator('#sigePreset').click();
   assert.equal(await page.locator('[name^="conditioning."]').count(),0,'Retired DC controls');
-  for(const key of ['frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','frontend.stream_format','hackrf.bandwidth_hz'])assert(await page.locator(`[name="${key}"]`).isDisabled(),key+' must be fixed for SiGe');
+  assert.equal(await page.locator('[name="frontend.stream_format"]').count(),0,'Native precision is automatic');
+  for(const key of ['frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz'])assert(await page.locator(`[name="${key}"]`).isDisabled(),key+' must be fixed for SiGe');
   assert.equal(await page.locator('[name="frontend.sample_rate_hz"]').inputValue(),'8.1838');
   assert.equal(await page.locator('[name="frontend.center_frequency_hz"]').inputValue(),'1575.3816');
   assert.equal(await page.locator('[name="frontend.signal_frequency_hz"]').inputValue(),'1.57542');

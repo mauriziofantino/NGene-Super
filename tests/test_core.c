@@ -75,6 +75,10 @@ static void TestConfig(void)
     CHECK(Parse("[bladerf]\nformat=SC8_Q7\n", &c) == NG_ERROR);
     CHECK(Parse("[bladerf]\nformat=\n", &c) == NG_ERROR);
     CHECK(Parse("[bladerf]\nformat=CI8\nformat=SC16_Q11\n", &c) == NG_ERROR);
+    CHECK(Parse("[rtlsdr]\nif_gain_db=48\n", &c) == NG_OK && c.rtlIfGainDb == 48);
+    CHECK(Parse("[rtlsdr]\nif_gain_db=2\n", &c) == NG_ERROR);
+    CHECK(Parse("[rtlsdr]\nif_gain_db=57\n", &c) == NG_ERROR);
+    CHECK(Parse("[rtlsdr]\nif_gain_db=-1\n", &c) == NG_OK && c.rtlIfGainDb == -1);
     {
         FILE *profile = tmpfile();
         TNgConfig loaded;
@@ -82,11 +86,13 @@ static void TestConfig(void)
         NgConfigDefaults(&c);
         c.frontend = NG_FRONTEND_HACKRF;
         c.bladeFormat = NG_FORMAT_CI8;
+        c.rtlIfGainDb = 48;
         CHECK(profile != NULL && NgConfigWrite(profile, &c, &error) == NG_OK);
         rewind(profile);
         CHECK(NgConfigRead(profile, &loaded, &error) == NG_OK);
         CHECK(loaded.frontend == NG_FRONTEND_HACKRF && loaded.replayPath[0] == '\0');
         CHECK(loaded.bladeFormat == NG_FORMAT_CI8);
+        CHECK(loaded.rtlIfGainDb == 48);
         CHECK(fclose(profile) == 0);
     }
     CHECK(Parse("[buffer]\nwindow_samples=1048576\ningress_blocks=4096\n", &c) == NG_ERROR);

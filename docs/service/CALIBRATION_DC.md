@@ -58,7 +58,8 @@ Probing HackRF does not start RX or change gains, tuning or antenna power.
 | HackRF MAX2837 | Measure all 384 settings, including both RF-amp states. |
 | HackRF MAX2839 | Apply the firmware's LNA/VGA compensation map, deduplicate equivalent states and measure all 252 distinct settings. |
 | HackRF MAX2831 | Collapse legacy LNA aliases into three physical states and measure all 192 distinct settings. |
-| RTL R82xx, E4000, FC001x | Identify the tuner and sweep every distinct reported manual gain through its native allocation. Automatic mode is not an alternative fixed gain configuration. E4000's separate IF-stage controls are not changed. |
+| RTL R82xx, FC001x | Identify the tuner and sweep every distinct reported manual gain through its native allocation. Automatic mode is not an alternative fixed gain configuration. |
+| RTL E4000 | Sweep the native LNA/mixer list and all 54 realizable IF totals (3..56 dB): 756 settings with the stock 14-entry list. Allocate each IF total to earlier stages first. Within each accepted equal RF+IF total group prefer more RF gain, then compare group representatives by loading score. |
 | bladeRF 1 / 2 | Identify the board, query the tuned device's gain limits and sweep its overall manual gain through the native allocation/table. |
 | Unknown models, RTL FC2580, SiGe, files | No gain calibration. Unknown/no-op policies fail before starting capture; SiGe/files remain excluded. |
 
@@ -76,6 +77,24 @@ This is an early-gain preference under the stated loading checks. RF amplifier
 on/off remains a separate measured comparison; its gain is frequency dependent.
 ADC histograms alone do not rule out compression inside an earlier RF stage.
 Native bladeRF allocation is retained instead of imposing a generic LNA/VGA rule.
+
+E4000's overall tuner gain setter leaves its six IF stages unchanged; the driver's
+default `[6,0,0,0,9,9]` is only 24 dB IF. A weak input can therefore fail at every
+reported tuner gain. `rtlsdr.if_gain_db` now persists the selected manual IF total;
+`-1` preserves driver defaults. The adapter programs all six stages with native
+tenth-dB units after tuning and selecting manual RF gain. Other tuners and automatic
+mode do not receive these calls. A failed stage application aborts the open and
+closes the device. The GUI exposes IF only after identifying an E4000.
+
+IF stage values are `[-3,6]`, `[0,3,6,9]`, `[0,3,6,9]`, `[0,1,2]`,
+`[3,6,9,12,15]`, `[3,6,9,12,15]` dB, from the
+[native E4000 driver](https://github.com/osmocom/rtl-sdr/blob/v2.0.2/src/tuner_e4k.c).
+The search uses one earlier-stage-first allocation per total, rather than measuring
+all 2400 IF splits. This is a noise-allocation preference, not a measured NF model.
+The same three-window acceptance gates remain in force; a rejected result does not
+change the profile. Tests reproduce an input around 0.4% ADC RMS with the default
+IF that becomes acceptable with more analog IF gain, and check persistence and
+native application. Live RF performance still requires hardware validation.
 
 Tests cover direct split-ranking cases in both visitation orders, replacement of
 the global winner, rejection of a higher-LNA overloaded split, and a complete
@@ -202,7 +221,7 @@ has different gain backends for different tuners:
 | Tuner | Verified behaviour | Proposed policy |
 | --- | --- | --- |
 | R820T / R828D family | [Manual gain](https://github.com/osmocom/rtl-sdr/blob/v2.0.2/src/tuner_r82xx.c) fixes VGA at 16.3 dB and alternates LNA/mixer increments. Automatic mode uses another VGA setting. The public backend has no independent IF-gain callback. | Sweep the reported manual list through the native allocation. Do not assume generic LNA/VGA controls or compare automatic mode as a fixed physical split. |
-| E4000 | The overall setter apportions LNA/mixer; a separate callback controls six IF stages. | Use the native overall policy initially. A separate IF-stage search requires E4000-specific profile fields, limits and application of the selected stages; the current Evo profile does not contain them. |
+| E4000 | The overall setter apportions LNA/mixer; a separate callback controls six IF stages. | The implemented strategy now searches RF gain and all canonical IF totals and persists/applies `rtlsdr.if_gain_db`, as described above. |
 | FC0012 / FC0013 | Gain operations and automatic-mode support differ between these backends. | Query the list and identify which operations actually alter hardware; validate suitability at the requested RF before calibration. |
 | FC2580 | Gain and gain-mode setters are no-ops; the reported list contains a placeholder zero. | Report gain calibration unavailable rather than interpreting successful API returns as adjustable gain. |
 
@@ -323,6 +342,19 @@ selection and driver identity use their separate deterministic C fixtures, rathe
 than the scripted browser measurements. The earlier RF-view/DC results remain from
 the 6 November review; this increment does not change their arithmetic or layout.
 
+The subsequent E4000/plot correction on 7 November reran all 21 native MSVC Release
+CTest checks (`build/msvc-x64-multisdr/frontend-fixes-20261107.xml`), both display-only
+browser checks and all three real-service browser scripts above. The C calibration
+fixture tests all 756 E4000 RF/IF candidates and a weak-to-acceptable input. The native
+RTL adapter fixture checks all 54 IF totals, the six native calls and tenth-dB units,
+default/automatic/other-tuner exclusion and failure cleanup. Browser calibration now
+also checks E4000-only IF controls, accepted RF/IF draft values, saved IF gain and
+automatic common precision. Evidence: `build/calibration-ui-kzDZ26/`,
+`build/frontend-stream-ui-MVcqI9/`, `build/rf-views-validation-l5xNdn/`.
+The updated plots have large default heights, no height/zoom controls and a fixed
+44% vertical projection in 3D. The standalone geometry check passes every age/bin
+and full-grid coverage for empty, partial and single-row histories.
+
 Build that optional target explicitly with tests, web and HackRF support enabled, then
 set `NGENE_EXECUTABLE` to its path for `tests/web_calibration.cjs`. Set that variable to
 the normal receiver for the other browser tests. `PLAYWRIGHT_MODULE` and
@@ -330,3 +362,143 @@ the normal receiver for the other browser tests. `PLAYWRIGHT_MODULE` and
 
 These checks do not validate gain choices on live RF hardware. Linux compilation,
 ARM64 NEON execution and sustained on-device USB captures still need native verification.
+
+## Calibration stop and RTL transport reuse, 7 November 2026
+
+The 756-setting E4000 sweep previously reopened and initialized USB for every
+setting. Live feedback showed 385 settings taking 523 seconds. The sweep now keeps
+one opened RTL handle, stops and joins RX before changing gains, replaces ingress,
+resets native USB buffers and restarts capture. Settling is performed once per
+gain change, followed by the same three non-overlapping 32768-pair windows. No
+candidates or acceptance gates are removed. The normal source remains one-shot;
+only the private calibration path can prepare another capture on that handle.
+Actual improved elapsed time has not yet been measured on the user's hardware.
+
+The red **Stop calibration** control requests cooperative cancellation. It changes
+to **Stopping** until capture and USB resources have been released. Cancel checks
+occur before capture, after configuration and between bounded 50 ms acquire waits.
+Stopped jobs do not apply a suggestion or save a profile. Native USB calls still
+depend on their driver's completion; there is no unsafe thread termination.
+
+All 21 MSVC Release tests pass (`stop-and-frontal-waterfall-20261107.xml`). Fixtures
+verify one measurement open for all 756 E4000 settings, fresh ingress between
+captures, rejection of gain changes during RX, and cancellation during RTL/HackRF
+capture. The HTTP/browser fixture also stops a running E4000 job and verifies that
+draft and saved gains are preserved (`build/calibration-ui-hkRhoj/`).
+
+The accompanying display correction preserves the requested fixed frontal view:
+18-degree elevation, zero azimuth, global height fit over visible history and
+unchanged global colours. The time slices animate over 180 ms without adding or
+changing observations. Source/browser tests check visible scrolling, full viewport
+height for weak input, every transient age/bin, and idle disabled views. Evidence:
+`build/frontal-waterfall-review/`, `build/rf-views-validation-RL0vOt/` and
+`build/frontend-stream-ui-pGcyI2/`. The delivered test build is
+`build/msvc-x64-multisdr/Review/ngene.exe`; the existing running Release service
+was left untouched.
+
+## Verification on the connected SDRs and 3D mesh, 7 November 2026
+
+Windows Application Error/WER confirms an access-violation crash of the earlier
+Release service, matching the reported `Failed to fetch`. That record alone does
+not identify the faulty native call. Live measurements showed that repeatedly
+stopping/restarting RTL asynchronous RX also dominated calibration time.
+
+RTL calibration now keeps both the device and native asynchronous RX open across
+the whole sweep, as supported by the driver's own
+[rtl_tcp gain-command thread](https://github.com/osmocom/rtl-sdr/blob/v2.0.2/src/rtl_tcp.c).
+Publication is gated with an atomic callback handshake before draining old queued
+samples and changing gains. Two 32768-pair native buffers bound in-flight old-gain
+data; those pairs plus the settling interval are discarded before the three
+non-overlapping measurement windows. Publication is paused during statistics, so
+the ingress cannot fill while they run. Completion, cancellation or failure joins
+RX and closes USB. Ordinary receiver capture does not use this calibration mode.
+
+`tests/web_rtlsdr_live.cjs` is explicitly opt-in (`NGENE_RTL_LIVE=1`). It tests
+cancellation during capture, then a complete sweep while polling both calibration
+and receiver status, checks that the profile was not saved, and reopens capabilities
+to prove that USB was released. `NGENE_LIVE_SOURCE=hackrf` tests that adapter instead.
+
+| Connected hardware | Complete measured search | Elapsed | Stop request to cancelled state | Result |
+| --- | --- | --- | --- | --- |
+| RTL-SDR E4000 | 756 RF/IF settings, 2268 windows | 89.62 s (90.37 s including HTTP polling) | 125 ms | Completed, accepted |
+| HackRF One r9 / MAX2839 | 252 physical settings, 756 windows | 25.84 s (25.93 s including HTTP polling) | 68 ms | Completed, accepted |
+
+Evidence: `build/rtl-live-WN37e8/calibration.json` and
+`build/hackrf-live-eZ4iMn/calibration.json`, with service logs alongside. Neither
+full sweep lost its HTTP service. These tests demonstrate transport and selection
+behaviour on the attached boards, not calibrated RF noise figure or GNSS sensitivity.
+
+The final waterfall uses an actual WebGL frequency/power/time triangle mesh,
+depth testing, surface normals, directional lighting and time-profile outlines.
+The camera has zero azimuth and 18-degree elevation. A front face joins the most
+recent spectrum to the base, avoiding a hollow appearance under raised carriers.
+All bins and observations remain in the mesh. The palettes, vertical legends,
+initial global range fit and animated scrolling follow the supplied instrument
+reference. The full scene is fitted without height/zoom/orbit controls.
+
+`tests/web_plot_interactions.cjs` optionally accepts `NGENE_LIVE_ENDPOINT`: it opens
+a read-only diagnostic-interest WebSocket, copies real published PSD frames into
+the current UI and saves both frames and screenshots. It does not change the
+existing receiver profile or stop its capture. The connected RTL's actual data
+was checked this way in `build/fnirsi-live-rtl-review/`. The pure geometry contract
+checks actual height/depth, unchanged frequency positions, full viewport fit and
+retention of all input values; browser tests exercise the actual WebGL renderer.
+All 21 native CTest contracts also passed (`live-sdr-and-mesh-20261107.xml`).
+
+Final embedded-asset browser runs passed with the mesh implementation:
+`build/calibration-ui-i7s60J/`, `build/rf-views-validation-9rDnKZ/` and
+`build/frontend-stream-ui-HBHe9K/`. The source-asset interaction check also verifies
+visible animated motion, fixed frontal camera, triangle rendering, independent
+view switches, full-band history and mobile layout. The optional live view check
+captured 40 actual RTL PSD observations without changing or stopping the user's
+running receiver. The updated executable is in `build/msvc-x64-multisdr/Review/`;
+the actively receiving Release process prevented replacing its loaded binaries.
+
+## Stable scrolling, gain priority and histogram axes, 7 November 2026
+
+The subsequent motion review identified three independent causes of the reported
+up/down vibration: redistributing partial history over the full time axis, resetting
+an unfinished animation at each arrival, and refitting the 3D camera from changing
+data extrema/front-floor values. Both views now use the selected history capacity
+from the first frame. The oldest known edge fills unused history without increasing
+the actual observation count. A shared scroll accumulator retains pending movement
+across arrivals, including updates faster than the animation duration. Pause freezes
+that accumulator and resume continues from the same position.
+
+The 3D projection is now constant. Boundary relief tapers smoothly at the pane edges
+while retaining true height/depth in its interior. The height gain is bounded so an
+unchanging sample moves monotonically along time for every permitted power level.
+There is no dynamic camera fit or moving front floor. `web_waterfall_geometry.cjs`
+checks these invariants; `NGENE_MOTION_TEST=1` in `web_plot_interactions.cjs` tracks
+one isolated feature in the actual rendered pixels through initial filling,
+overlapping updates, changing outliers and full history. The 132 recorded samples
+show 202.5 px forward in 2D and 196 px forward in 3D, with zero backward movement
+in either view. Pixel samples and a browser-recorded side-by-side video are in
+`build/waterfall-motion-review/`.
+
+A direct audit of the connected HackRF r9 is recorded in
+`build/hackrf-gain-probe-20261107.csv`. At the same physical relative total 57 dB,
+legacy requests 0/62, 24/38, 32/30 and 40/22 produce different output noise/loading;
+the higher-LNA cases were rejected as weak. At a higher total, 40/42 passes all
+three windows, but its loading score (about 0.61) was slightly worse than 0/62
+(about 0.55). The prior inter-group loading comparison therefore undid the intended
+early-gain preference. Accepted HackRF groups now rank physical early-stage gain
+first and loading score second. Weak/overloaded/non-Gaussian/imbalanced candidates
+still cannot acquire that preference. This remains an allocation heuristic rather
+than a measured noise-figure model.
+
+A complete new hardware sweep selected **LNA 40 / VGA 44, RF amp off**, accepted
+RMS 12.05%, in about 26 seconds. Evidence is in
+`build/hackrf-live-63SW47/calibration.json`; the saved user profile was unchanged.
+The optional `ngene_gain_probe` target lives in `development/profiling/` and is
+excluded from ordinary builds and packages. No profiling was added to the main.
+
+The displayed histogram example had means 0.0752/0.1533 counts but grouped four
+ADC values per bar. Its zero text was also shifted left. Axis labels now use the
+inclusive ADC levels' half-integer bin edges and centred text; a zero reference,
+exact sample-mean marker and counts-per-bin annotation expose the difference
+between a grouped bar's centre and the mean. Statistics and fixed DC removal are
+unchanged. `web_histogram_axis.cjs` checks the example numerically. All 21 native
+contracts passed (`scrolling-gain-priority-20261107.xml`). The updated executable
+is in `build/msvc-x64-multisdr/Release/`; the user's older Review process was left
+untouched.

@@ -9,6 +9,9 @@
  * @return NG_OK on success, NG_ERROR after cleanup on failure.
  */
 int NgRtlsdrOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error);
+/** Prepare another calibration capture on a gated continuous USB stream. */
+int NgRtlsdrCalibrationNext(const TNgConfig *config, TNgFrontend *frontend, TNgError *error);
+int NgRtlsdrCalibrationPause(TNgFrontend *frontend, TNgError *error);
 /** @brief Enumerate native USB devices without starting RX.
  * @param output Caller-owned output stream.
  * @param error Optional diagnostic.

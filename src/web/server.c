@@ -214,6 +214,7 @@ static cJSON *CalibrationJson(TNgWebServer *server)
     Number(reply, "current_vga_gain_db", candidate->vgaGainDb);
     cJSON_AddBoolToObject(reply, "current_rf_amp", candidate->rfAmp);
     Number(reply, "current_rtl_gain_tenths_db", candidate->rtlGainTenthsDb);
+    Number(reply, "current_rtl_if_gain_db", candidate->rtlIfGainDb);
     Number(reply, "current_blade_gain_db", candidate->bladeGainDb);
     Number(reply, "rms_fraction", quality->rmsFraction);
     Number(reply, "clipped_fraction", quality->clippedFraction);
@@ -230,6 +231,9 @@ static cJSON *CalibrationJson(TNgWebServer *server)
     cJSON_AddBoolToObject(reply, "rf_amp", selected->rfAmp);
     cJSON_AddBoolToObject(reply, "rtl_auto_gain", selected->rtlAutoGain);
     Number(reply, "rtl_gain_tenths_db", selected->rtlGainTenthsDb);
+    Number(reply, "rtl_if_gain_db", selected->rtlIfGainDb);
+    cJSON_AddBoolToObject(reply, "e4000_if_gain_available",
+                          result->capabilities.gainPolicy == NG_GAIN_POLICY_RTL_E4000);
     Number(reply, "blade_gain_db", selected->bladeGainDb);
     Number(reply, "sample_rate_min_hz", result->capabilities.sampleRateMinHz);
     Number(reply, "sample_rate_max_hz", result->capabilities.sampleRateMaxHz);
@@ -1440,6 +1444,8 @@ static int Handle(struct mg_connection *connection, void *context)
                 String(reply, "device_model", caps.deviceModel);
                 String(reply, "device_serial", caps.deviceSerial);
                 String(reply, "gain_policy", NgFrontendGainPolicyName(caps.gainPolicy));
+                cJSON_AddBoolToObject(reply, "e4000_if_gain_available",
+                                      caps.gainPolicy == NG_GAIN_POLICY_RTL_E4000);
                 cJSON_AddBoolToObject(reply, "gain_calibration_available",
                                       caps.gainPolicy != NG_GAIN_POLICY_UNAVAILABLE);
                 Number(reply, "sample_rate_min_hz", caps.sampleRateMinHz);

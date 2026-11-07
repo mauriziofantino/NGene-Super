@@ -45,6 +45,9 @@ typedef struct {
     int antennaPower;
     /** RTL-SDR manual tuner gain, in tenth-dB; validated against the connected tuner. */
     int rtlGainTenthsDb;
+    /** E4000 manual total IF gain, 3..56 dB; -1 retains the driver's defaults.
+     * Ignored for other tuners and automatic tuner gain. */
+    int rtlIfGainDb;
     /** Use the RTL-SDR tuner automatic gain mode when nonzero. */
     int rtlAutoGain;
     /** RTL-SDR oscillator correction in ppm. */

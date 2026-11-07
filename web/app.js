@@ -2,7 +2,7 @@ import {createReceiverWorkspace} from './workspace.js';
 import {createReceiverConfiguration} from './receiver-config.js';
 import {moduleParameters} from './module-parameters.js';
 import {frequencyUnits, frequencyToHz, frequencyFromHz} from './frequency-units.js';
-import {paintWaterfallRelief} from './waterfall-relief.js';
+import {createWaterfallSurface, createWaterfallScroll, reliefPalette} from './waterfall-relief.js';
 
 const selectedSession = 'receiver';
 const sessionPrefix = () => '';
@@ -13,7 +13,6 @@ const $ = id => document.getElementById(id);
 let receiverConfiguration = null, moduleForm = null;
 const fields = [
   ['Frontend', 'frontend.type', 'Source', 'select', ['file', 'hackrf', 'rtlsdr', 'bladerf', 'sige']],
-  ['Frontend', 'frontend.stream_format', 'Common stream precision', 'select', ['auto','CI8','CI16'], '', 'Auto preserves native precision. CI8 discards precision from wider ADCs; CI16 widens losslessly.'],
   ['Frontend', 'frontend.serial', 'Device serial', 'text', null, '', 'Empty selects the only connected device of the selected type'],
   ['Frontend', 'frontend.sample_rate_hz', 'Sample rate', 'number', null, 'pairs/s'],
   ['Frontend', 'frontend.center_frequency_hz', 'SDR hardware tuning frequency', 'number', null, 'Hz'],
@@ -25,6 +24,7 @@ const fields = [
   ['HackRF', 'hackrf.antenna_power', 'Antenna power', 'select', ['false', 'true']],
   ['RTL-SDR', 'rtlsdr.auto_gain', 'Automatic tuner gain', 'select', ['true','false']],
   ['RTL-SDR', 'rtlsdr.gain_tenths_db', 'Tuner gain', 'select', [], '0.1 dB', 'Query device limits to load this tuner’s exact supported gains'],
+  ['RTL-SDR', 'rtlsdr.if_gain_db', 'E4000 IF gain', 'select', [-1,...Array.from({length:54},(_,k)=>k+3)], 'dB', '-1 = driver default; manual E4000 only. Earlier IF stages receive gain first.'],
   ['RTL-SDR', 'rtlsdr.ppm', 'Frequency correction', 'number', null, 'ppm'],
   ['RTL-SDR', 'rtlsdr.bias_tee', 'Bias tee', 'select', ['false','true']],
   ['bladeRF', 'bladerf.gain_db', 'RX gain', 'number', null, 'dB', 'Query device limits for frequency-dependent min, max and step'],
@@ -52,6 +52,7 @@ const fields = [
 let values = {}, savedValues = {}, revision = '1', token = '', status = null, capabilities = null;
 let dirty = false, httpBusy = false, pendingCommand = null, socket = null, reconnectTimer = null;
 let calibrationBusy = false, calibrationJobId = null, calibrationRequest = null;
+let calibrationStopRequested = false;
 let calibrationPolling = false, calibrationTerminal = '';
 let calibrationSeenJob = 0n;
 let waiting = false, statusRequestPending = false, lastRequest = 0, lastResponse = -Infinity, lastSample = null, lastMessage = '', lastCommand = '', lastRun = '';
@@ -272,6 +273,7 @@ function buildForm() {
         }
       }
       if (key === 'frontend.type') {
+        values['frontend.stream_format']='auto';
         if (values[key]==='sige') {applySigeProfile();buildForm();}
         profileTouched.add('frontend.sample_rate_hz');
       }
@@ -299,10 +301,16 @@ function updateSourceFields() {
   }
   const rtlGain=document.querySelector('[name="rtlsdr.gain_tenths_db"]');
   if(rtlGain)rtlGain.disabled=!editable()||source!=='rtlsdr'||values['rtlsdr.auto_gain']!=='false'||!caps;
+  const rtlIfGain=document.querySelector('[name="rtlsdr.if_gain_db"]');
+  if(rtlIfGain){
+    const available=source==='rtlsdr'&&caps?.e4000_if_gain_available;
+    rtlIfGain.closest('.field').classList.toggle('hidden',!available);
+    rtlIfGain.disabled=!editable()||!available||values['rtlsdr.auto_gain']!=='false';
+  }
   const ppm=document.querySelector('[name="rtlsdr.ppm"]');if(ppm){ppm.min=-1000;ppm.max=1000;ppm.step=1;}
   const tuning=document.querySelector('[name="frontend.center_frequency_hz"]');
   if(tuning){tuning.min=(caps?.frequency_min_hz||0)/1e6;tuning.max=(caps?.frequency_max_hz||(source==='rtlsdr'?4294967295:6000000000))/1e6;}
-  for(const key of ['frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz','frontend.stream_format']) {const input=document.querySelector(`[name="${key}"]`);if(input)input.disabled=!editable()||source==='sige';}
+  for(const key of ['frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz']) {const input=document.querySelector(`[name="${key}"]`);if(input)input.disabled=!editable()||source==='sige';}
   const bandwidth=document.querySelector('[name="hackrf.bandwidth_hz"]');if(bandwidth)bandwidth.closest('.field')?.classList.toggle('hidden',source==='sige');
   $('sigeInfo').classList.toggle('hidden',source!=='sige');
   for (const group of document.querySelectorAll('[data-group]')) {
@@ -319,7 +327,8 @@ function controls() {
   for (const id of ['browseReplay', 'filePreset', 'hackrfPreset', 'rtlPreset', 'bladePreset', 'sigePreset', 'deviceLimits', 'importIni', 'useIni', 'iniEditor', 'apply']) $(id).disabled = !ready;
   $('calibrateGains').disabled = !ready || ['file','sige'].includes(values['frontend.type']) || !capabilities?.[values['frontend.type']];
   $('cancelCalibration').classList.toggle('hidden', !calibrationBusy);
-  $('cancelCalibration').disabled = !connected() || !calibrationBusy;
+  $('cancelCalibration').disabled = !connected() || !calibrationBusy || calibrationStopRequested;
+  $('cancelCalibration').textContent = calibrationStopRequested ? 'Stopping…' : 'Stop calibration';
   $('apply').disabled = !ready || referenceSettingsOnly();
   if (capabilities && !capabilities.hackrf) $('hackrfPreset').disabled = true;
   $('rtlPreset').disabled = !ready || !capabilities?.rtlsdr;
@@ -507,6 +516,10 @@ const analysisFields = [
 ];
 let analysisDirty=false, analysisSnapshot=null, analysisSequence='0', analysisRevision='', waterfallHistory=[];
 let waterfallTime=-Infinity, skippedDisplay=0, rejectedFrames=0, histogramSequence='', analysisConfig=null;
+let waterfallAnimationFrame=0;
+const waterfallScrollDuration=180;
+const waterfallScroll=createWaterfallScroll(waterfallScrollDuration);
+let initialDisplayFit=false, displayRangeTouched=false;
 let analysisConfigRevision='0', plotConfigBusy=false, lastSpectrumComputation=null;
 const plotIds=['spectrum','waterfall','waterfall3D'];
 const plotToggle=id=>$(id==='spectrum'?'showSpectrum':id==='waterfall'?'showWaterfall':'showWaterfall3D');
@@ -514,7 +527,7 @@ const plotSelection=()=>Object.fromEntries(plotIds.map(id=>[id,plotToggle(id).ch
 const anyPlotEnabled=()=>plotIds.some(id=>plotToggle(id).checked);
 let previousPlotSelection=plotSelection();
 const plotWork={spectrum:0,waterfall:0,waterfall3D:0};
-let waterfall3DRender={mode:'3d',style:'surface',rows:0,columns:0};
+let waterfall3DRender={mode:'3d',style:'mesh',rows:0,columns:0};
 function diagnosticVisibility(){return document.hidden||activeWorkspaceView!=='rf'?0:(anyPlotEnabled()?1:0)|($('showHistogram').checked?2:0);}
 function diagnosticEnabled(name){const value=analysisConfig?.[name]??savedValues[`analysis.${name}`];return value!==false&&value!=='false';}
 function plotEnabled(id){return diagnosticEnabled('spectrum_enabled')&&plotToggle(id).checked;}
@@ -631,7 +644,7 @@ $('analysisForm').addEventListener('submit',async event=>{
   } catch(error){setAnalysisNotice(error.message,true);log(error.message,true);}
   finally{httpBusy=false;controls();}
 });
-function resetAnalysis(config=null){analysisSnapshot=null;analysisConfig=config;analysisSequence='0';histogramSequence='';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;skippedDisplay=0;rejectedFrames=0;syncPlotVisibility();drawAnalysis();}
+function resetAnalysis(config=null){analysisSnapshot=null;analysisConfig=config;analysisSequence='0';histogramSequence='';analysisRevision='';waterfallHistory=[];waterfallTime=-Infinity;waterfallScroll.reset();skippedDisplay=0;rejectedFrames=0;syncPlotVisibility();drawAnalysis();}
 function psdIntegrity(a){
   if(!Array.isArray(a.dbfs)||a.dbfs.length>1024||a.dbfs.length!==Math.min(a.fft_size,1024))return false;
   let hash=2166136261,sum=0,min=Infinity,max=-Infinity;
@@ -653,7 +666,7 @@ function renderAnalysis(a,configRevision=null){
   const mask=diagnosticMask();
   if(!mask)return;
   if(a.sequence==='0'){if(analysisSequence!=='0')resetAnalysis(a.config);return;}
-  if(a.revision!==analysisRevision){waterfallHistory=[];waterfallTime=-Infinity;analysisSequence='0';histogramSequence='';analysisRevision=a.revision;}
+  if(a.revision!==analysisRevision){waterfallHistory=[];waterfallTime=-Infinity;waterfallScroll.reset();analysisSequence='0';histogramSequence='';analysisRevision=a.revision;}
   const incoming=a.sequence_id||'0';
   const spectrumChanged=Boolean(mask&1)&&incoming!==analysisSequence&&a.dbfs.length>0;
   const histogramIncoming=a.histogram_sequence??`${a.histogram_first_sample}:${a.histogram_count}`;
@@ -663,6 +676,13 @@ function renderAnalysis(a,configRevision=null){
     if(BigInt(incoming)<BigInt(analysisSequence)||!psdIntegrity(a)){
       rejectedFrames++;$('frameIntegrity').textContent=`Rejected invalid/stale PSD: ${rejectedFrames}`;return;
     }
+    if(!initialDisplayFit&&!displayRangeTouched){
+      const sorted=[...a.dbfs].sort((x,y)=>x-y),middle=sorted[Math.floor(sorted.length/2)];
+      const centre=Math.floor(middle/5)*5,half=Math.max(20,Math.ceil((a.max-centre+5)/5)*5);
+      for(const id of ['dbMin','colourMin'])$(id).value=Math.max(-250,centre-half);
+      for(const id of ['dbMax','colourMax'])$(id).value=Math.min(100,centre+half);
+      initialDisplayFit=true;
+    }
   }
   if(!spectrumChanged&&!histogramChanged)return;
   if(spectrumChanged){
@@ -671,6 +691,7 @@ function renderAnalysis(a,configRevision=null){
     if((plotEnabled('waterfall')||plotEnabled('waterfall3D'))&&a.produced_seconds-waterfallTime>=1/Math.max(0.1,Math.min(30,Number($('waterfallRate').value)))){
       waterfallHistory.unshift({values:Object.freeze([...a.dbfs]),first:a.first_sample,epoch:a.epoch,sequence:incoming,produced:a.produced_seconds});
       waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());waterfallTime=a.produced_seconds;
+      waterfallScroll.push(performance.now());
       waterfallChanged=true;waterfall3DChanged=true;
     }
   }
@@ -685,7 +706,8 @@ function renderAnalysis(a,configRevision=null){
     $('spectrumPeak').textContent=`Peak ${displayFrequency(a.peak_hz).toFixed(4)} ${frequencyUnit()} · ${a.peak_dbfs.toFixed(1)} ${unit}`;
     }
     $('frameIntegrity').textContent=`PSD #${incoming} · produced ${a.produced_seconds.toFixed(3)} s · min/max/mean ${a.min.toFixed(2)} / ${a.max.toFixed(2)} / ${a.mean.toFixed(2)} · NaN/Inf ${a.nan_count}/${a.inf_count} · hash ${a.checksum.toString(16)} · rejected ${rejectedFrames}`;
-    drawSpectrum();if(waterfallChanged)drawWaterfall();if(waterfall3DChanged)drawWaterfall3D();
+    const offset=waterfallScroll.offset(performance.now());
+    drawSpectrum();if(waterfallChanged)drawWaterfall(offset);if(waterfall3DChanged)drawWaterfall3D(offset);if(waterfallChanged||waterfall3DChanged)animateWaterfallScroll();
   }
   if(histogramChanged){
     histogramSequence=histogramIncoming;
@@ -728,18 +750,27 @@ function drawSpectrum(){
   ctx.fillStyle='#8fa6ba';ctx.fillText(a?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin',6,11);
   for(let j=0;j<=4;j++){const y=top+j*(bottom-top)/4;ctx.strokeStyle='#233446';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText((hi-j*(hi-lo)/4).toFixed(0),6,y+4);}
   frequencyAxes(s);if(!a?.dbfs.length){ctx.fillText('Waiting for a complete spectrum burst',left+20,top+35);return;}
-  ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.clip();ctx.strokeStyle='#52edff';ctx.lineWidth=1.5;ctx.beginPath();
-  a.dbfs.forEach((v,k)=>{const f=displayFrequency((k/a.dbfs.length-0.5)*a.sample_rate_hz),x=left+(f-flo)/(fhi-flo)*(right-left),y=bottom-Math.max(0,Math.min(1,(v-lo)/(hi-lo)))*(bottom-top);if(k)ctx.lineTo(x,y);else ctx.moveTo(x,y);});ctx.stroke();ctx.lineTo(right,bottom);ctx.lineTo(left,bottom);ctx.closePath();const fill=ctx.createLinearGradient(0,top,0,bottom);fill.addColorStop(0,'#65f7ff');fill.addColorStop(0.55,'#007affaa');fill.addColorStop(1,'#001ab244');ctx.fillStyle=fill;ctx.fill();ctx.restore();
+  ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.clip();ctx.strokeStyle='#27b6ff';ctx.lineWidth=1.2;ctx.beginPath();
+  a.dbfs.forEach((v,k)=>{const f=displayFrequency((k/a.dbfs.length-0.5)*a.sample_rate_hz),x=left+(f-flo)/(fhi-flo)*(right-left),y=bottom-Math.max(0,Math.min(1,(v-lo)/(hi-lo)))*(bottom-top);if(k)ctx.lineTo(x,y);else ctx.moveTo(x,y);});ctx.stroke();ctx.lineTo(right,bottom);ctx.lineTo(left,bottom);ctx.closePath();const fill=ctx.createLinearGradient(0,top,0,bottom);fill.addColorStop(0,'#2aaaffcc');fill.addColorStop(0.6,'#0062ffbb');fill.addColorStop(1,'#06145800');ctx.fillStyle=fill;ctx.fill();ctx.restore();
 }
 const waterfallBitmap=document.createElement('canvas');
 const waterfallPalette=Array.from({length:256},(_,n)=>{
-  const stops=[[0,18,90],[0,70,215],[0,170,255],[65,245,224],[255,235,100],[255,65,25]];
+  const stops=[[0,16,100],[0,105,238],[0,205,175],[15,227,67],[239,237,45],[255,55,24]];
   const x=n/255*(stops.length-1),i=Math.min(stops.length-2,Math.floor(x)),f=x-i;
   return stops[i].map((c,k)=>Math.round(c+(stops[i+1][k]-c)*f));
 });
 const waterfall3DBitmap=document.createElement('canvas');
+let waterfallSurface=null;
 let waterfallRender={mode:'2d',rows:0,columns:0};
-function drawWaterfall(){
+function drawColourBar(s,palette,lo,hi){
+  const {ctx,top,bottom}=s,x=9,width=12,height=bottom-top;
+  for(let j=0;j<height;j++){
+    const colour=palette[Math.round(255*(1-j/Math.max(1,height-1)))];
+    ctx.fillStyle=`rgb(${colour.join(',')})`;ctx.fillRect(x,top+j,width,1);
+  }
+  ctx.fillStyle='#9eb6c9';ctx.fillText(String(hi),24,top+9);ctx.fillText(String(lo),24,bottom);
+}
+function drawWaterfall(rowOffset=waterfallScroll.offset(performance.now())){
   if(!(diagnosticMask()&1)||!plotEnabled('waterfall'))return;
   $('waterfallInfo').textContent='Newest at top · '+waterfallHistory.length+' snapshots';
   const [lo,hi]=range(true);
@@ -747,44 +778,61 @@ function drawWaterfall(){
   const s=surface('waterfall');if(!s)return;
   waterfallRender={mode:'2d',rows:0,columns:0};++plotWork.waterfall;
   const {ctx,left,right,top,bottom}=s;
-  const rows=Math.max(1,Math.min(historyRows(),waterfallHistory.length)),columns=analysisSnapshot?.dbfs.length||1024;
+  const rows=historyRows(),available=Math.min(rows,waterfallHistory.length),columns=analysisSnapshot?.dbfs.length||1024;
   waterfallBitmap.width=columns;waterfallBitmap.height=rows;
   const bitmap=waterfallBitmap.getContext('2d'),pixels=bitmap.createImageData(columns,rows);
-  waterfallHistory.slice(0,rows).forEach((row,j)=>{
+  for(let j=0;j<rows&&available;j++){
+    const row=waterfallHistory[Math.min(j,available-1)];
     for(let k=0;k<columns;k++){
       const level=Math.max(0,Math.min(255,Math.round(255*(row.values[k]-lo)/(hi-lo))));
       const colour=waterfallPalette[level],offset=4*(j*columns+k);
       pixels.data[offset]=colour[0];pixels.data[offset+1]=colour[1];pixels.data[offset+2]=colour[2];pixels.data[offset+3]=255;
     }
-  });
+  }
   bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(waterfallBitmap,0,0,columns,rows,left,top,right-left,bottom-top);
-  ctx.fillStyle='#8fa6ba';ctx.fillText('New',6,top+9);ctx.fillText('Older',6,bottom);frequencyAxes(s);
-  waterfallRender={mode:'2d',rows:Math.min(rows,waterfallHistory.length),columns,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
+  const shift=Math.min(rows-1,rowOffset)*(bottom-top)/rows;
+  ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.clip();
+  ctx.drawImage(waterfallBitmap,0,0,columns,rows,left,top-shift,right-left,bottom-top);
+  if(shift>0)ctx.drawImage(waterfallBitmap,0,rows-1,columns,1,left,bottom-shift,right-left,shift);
+  ctx.restore();drawColourBar(s,waterfallPalette,lo,hi);frequencyAxes(s);
+  waterfallRender={mode:'2d',rows:available,gridRows:rows,rowOffset,columns,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
 }
 /** Project the shared history as a solid frequency/time/power surface. */
-function drawWaterfall3D(){
+function drawWaterfall3D(rowOffset=waterfallScroll.offset(performance.now())){
   if(!(diagnosticMask()&1)||!plotEnabled('waterfall3D'))return;
   const s=surface('waterfall3D');if(!s)return;++plotWork.waterfall3D;
   const {ctx,left,right,top,bottom}=s,[lo,hi]=range(true);
-  const rows=Math.max(1,Math.min(historyRows(),waterfallHistory.length)),columns=analysisSnapshot?.dbfs.length||1024;
+  const rows=historyRows(),columns=analysisSnapshot?.dbfs.length||1024;
   const imageRows=Math.max(2,Math.round(bottom-top));
-  waterfall3DBitmap.width=columns;waterfall3DBitmap.height=imageRows;
-  const bitmap=waterfall3DBitmap.getContext('2d'),pixels=bitmap.createImageData(columns,imageRows);
-  const geometry=paintWaterfallRelief(pixels.data,waterfallHistory,columns,rows,lo,hi,imageRows);
-  bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;
-  const floorTop=top+0.38*(bottom-top);
+  let geometry;
+  try{
+    waterfallSurface??=createWaterfallSurface(waterfall3DBitmap);
+    geometry=waterfallSurface.draw(waterfallHistory,columns,rows,lo,hi,columns,imageRows,rowOffset);
+  }catch(error){$('waterfall3DInfo').textContent=error.message;ctx.fillStyle='#ffb4b8';ctx.fillText(error.message,left+15,top+25);return;}
+  const floor=ctx.createLinearGradient(0,top,0,bottom);floor.addColorStop(0,'#071b42');floor.addColorStop(1,'#031344');
+  ctx.fillStyle=floor;ctx.fillRect(left,top,right-left,bottom-top);ctx.imageSmoothingEnabled=true;
   ctx.strokeStyle='#233446';ctx.lineWidth=1;
   for(let j=0;j<=4;j++){
-    const y=floorTop+j*(bottom-floorTop)/4,x=left+j*(right-left)/4;
+    const y=top+j*(bottom-top)/4,x=left+j*(right-left)/4;
     ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(x,floorTop);ctx.lineTo(x,bottom);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();
   }
   ctx.drawImage(waterfall3DBitmap,0,0,columns,imageRows,left,top,right-left,bottom-top);
-  ctx.fillStyle='#8fa6ba';ctx.fillText(String(hi),4,top+9);ctx.fillText(String(lo),4,floorTop+4);
-  ctx.fillText('New',6,floorTop+18);ctx.fillText('Older',6,bottom);frequencyAxes(s);
-  $('waterfall3DInfo').textContent='3D surface | '+waterfallHistory.length+' snapshots | height = power | synchronized with 2D';
-  waterfall3DRender={mode:'3d',style:'surface',...geometry,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
+  drawColourBar(s,reliefPalette,lo,hi);frequencyAxes(s);
+  $('waterfall3DInfo').textContent='Frontal 3D | '+waterfallHistory.length+' snapshots | live scroll | synchronized with 2D';
+  waterfall3DRender={mode:'3d',...geometry,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
+}
+function animateWaterfallScroll(){
+  if(waterfallAnimationFrame||waterfallHistory.length<2||paused||!(plotEnabled('waterfall')||plotEnabled('waterfall3D')))return;
+  let last=0;
+  const tick=now=>{
+    waterfallAnimationFrame=0;
+    if(paused||!(diagnosticMask()&1)||!(plotEnabled('waterfall')||plotEnabled('waterfall3D'))||waterfallHistory.length<2)return;
+    const offset=waterfallScroll.offset(now),moving=offset>0;
+    if(now-last>=32||!moving){drawWaterfall(offset);drawWaterfall3D(offset);last=now;}
+    if(moving)waterfallAnimationFrame=requestAnimationFrame(tick);
+  };
+  waterfallAnimationFrame=requestAnimationFrame(tick);
 }
 function drawHistogram(id,data,color){
   if(!(diagnosticMask()&2))return;
@@ -794,53 +842,49 @@ function drawHistogram(id,data,color){
   for(let j=0;j<=2;j++){const y=top+j*(bottom-top)/2;ctx.strokeStyle='#233446';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText((max*(1-j/2)).toFixed(percent?1:0),4,y+4);}
   const dw=(right-left)/(values.length||1);ctx.fillStyle=color;
   values.forEach((v,k)=>{const bh=(bottom-top)*Math.min(1,v/max);ctx.fillRect(left+k*dw,bottom-bh,Math.max(1,dw-1),bh);});
-  ctx.fillStyle='#8fa6ba';for(let j=0;j<=4;j++)ctx.fillText(String(j===4?(analysisSnapshot?.histogram_max??127):Math.round((analysisSnapshot?.histogram_min??-128)+j*((analysisSnapshot?.histogram_max??127)-(analysisSnapshot?.histogram_min??-128)+1)/4)),Math.min(w-28,left+j*(right-left)/4-10),h-10);
+  const minimum=analysisSnapshot?.histogram_min??-128,maximum=analysisSnapshot?.histogram_max??127,span=maximum-minimum+1;
+  const amplitudeX=value=>left+(value-minimum+0.5)/span*(right-left);
+  ctx.save();ctx.fillStyle='#8fa6ba';ctx.textAlign='center';
+  for(let j=0;j<=4;j++){
+    const value=j===4?maximum:Math.round(minimum+j*span/4);
+    ctx.fillText(String(value),amplitudeX(value),h-10);
+  }
+  if(minimum<=0&&maximum>=0){
+    ctx.strokeStyle='#b3c3d0';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(amplitudeX(0),top);ctx.lineTo(amplitudeX(0),bottom);ctx.stroke();ctx.setLineDash([]);
+  }
+  const mean=analysisSnapshot?.[id==='histogramI'?'stats_i':'stats_q']?.mean;
+  if(Number.isFinite(mean)){
+    ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(amplitudeX(mean),top);ctx.lineTo(amplitudeX(mean),bottom);ctx.stroke();
+    ctx.textAlign='right';ctx.fillStyle=color;ctx.fillText(`Mean ${mean.toFixed(4)} · ${(span/(values.length||1)).toFixed(0)} counts/bin`,right,11);
+  }
+  ctx.restore();
 }
-function drawAnalysis(){drawSpectrum();drawWaterfall();drawWaterfall3D();drawHistogram('histogramI',analysisSnapshot?.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot?.histogram_q,'#62a6ff');}
+function drawAnalysis(){const offset=waterfallScroll.offset(performance.now());drawSpectrum();drawWaterfall(offset);drawWaterfall3D(offset);drawHistogram('histogramI',analysisSnapshot?.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot?.histogram_q,'#62a6ff');}
 let plotDrawPending=false;
 function schedulePlotDraw(){if(plotDrawPending||!diagnosticMask())return;plotDrawPending=true;requestAnimationFrame(()=>{plotDrawPending=false;drawAnalysis();});}
-function setPlotHeight(id,height){
-  height=Math.max(180,Math.min(720,Math.round(height/10)*10));
-  $(`${id}Wrap`).style.height=`${height}px`;$(`${id}Height`).value=height;$(`${id}HeightValue`).value=`${height} px`;
-  $(`${id}Resize`).setAttribute('aria-valuenow',height);$(`${id}Resize`).setAttribute('aria-valuetext',`${height} pixels`);schedulePlotDraw();
-}
-for(const id of ['spectrum','waterfall','waterfall3D']){
-  setPlotHeight(id,$(`${id}Wrap`).getBoundingClientRect().height);
-  $(`${id}Height`).addEventListener('input',event=>setPlotHeight(id,Number(event.target.value)));
-  const handle=$(`${id}Resize`);let drag=null;
-  handle.addEventListener('pointerdown',event=>{if(!event.isPrimary||event.button!==0)return;event.preventDefault();handle.focus();drag={pointer:event.pointerId,y:event.clientY,height:$(`${id}Wrap`).getBoundingClientRect().height};handle.setPointerCapture(event.pointerId);});
-  handle.addEventListener('pointermove',event=>{if(drag&&event.pointerId===drag.pointer)setPlotHeight(id,drag.height+event.clientY-drag.y);});
-  const finish=event=>{if(drag&&event.pointerId===drag.pointer){drag=null;if(handle.hasPointerCapture(event.pointerId))handle.releasePointerCapture(event.pointerId);}};
-  for(const name of ['pointerup','pointercancel','lostpointercapture'])handle.addEventListener(name,finish);
-  handle.addEventListener('keydown',event=>{
-    const change={ArrowUp:-10,ArrowDown:10,PageUp:-100,PageDown:100}[event.key];
-    if(change===undefined&&!['Home','End'].includes(event.key))return;
-    event.preventDefault();setPlotHeight(id,event.key==='Home'?180:event.key==='End'?720:Number($(`${id}Height`).value)+change);
-  });
-}
-function clearWaterfallHistory(){waterfallHistory=[];waterfallTime=-Infinity;drawWaterfall();drawWaterfall3D();}
+function clearWaterfallHistory(){waterfallHistory=[];waterfallTime=-Infinity;waterfallScroll.reset();drawWaterfall();drawWaterfall3D();}
 $('clearWaterfall').addEventListener('click',clearWaterfallHistory);
 $('clearWaterfall3D').addEventListener('click',clearWaterfallHistory);
-$('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());drawAnalysis();});
-for(const id of ['dbMin','dbMax','colourMin','colourMax','waterfallRate','histScale','histMax'])$(id).addEventListener('change',drawAnalysis);
+$('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());waterfallScroll.reset();drawAnalysis();});
+for(const id of ['dbMin','dbMax','colourMin','colourMax','waterfallRate','histScale','histMax'])$(id).addEventListener('change',()=>{if(['dbMin','dbMax','colourMin','colourMax'].includes(id))displayRangeTouched=true;drawAnalysis();});
 $('configForm').addEventListener('submit', event => event.preventDefault());
 $('apply').addEventListener('click', () => applyConfig()); $('validate').addEventListener('click', () => applyConfig(true));
 $('start').addEventListener('click', () => command('receiver/start')); $('stop').addEventListener('click', () => command('receiver/stop'));
 $('recordStart').addEventListener('click', () => command('recording/start')); $('recordStop').addEventListener('click', () => command('recording/stop'));
 $('reloadFiles').addEventListener('click', refreshFiles); $('clearLog').addEventListener('click', () => $('events').replaceChildren());
-$('pausePlot').addEventListener('click', () => { paused = !paused; $('pausePlot').textContent = paused ? 'Resume plots' : 'Pause plots'; if (!paused && status)renderAnalysis(status.analysis,status.revision);requestStatus(); });
+$('pausePlot').addEventListener('click', () => { paused = !paused; if(paused)waterfallScroll.pause(performance.now());else waterfallScroll.resume(performance.now());$('pausePlot').textContent = paused ? 'Resume plots' : 'Pause plots'; if (!paused && status)renderAnalysis(status.analysis,status.revision);if(!paused)animateWaterfallScroll();requestStatus(); });
 $('useIni').addEventListener('click', () => { try { values = parseIni($('iniEditor').value); buildForm(); dirtyState(true); } catch (error) { notice(error.message, true); } });
 $('importIni').addEventListener('change', async event => { try { const file = event.target.files[0]; if (!file) return; if (file.size > 12000) throw new Error('INI file exceeds 12 kB.'); values = parseIni(await file.text()); buildForm(); dirtyState(true); notice('INI imported into draft. Validate and apply before starting.'); } catch (error) { notice(error.message, true); } finally { event.target.value = ''; } });
 $('exportIni').addEventListener('click', () => { const url = URL.createObjectURL(new Blob([toIni(values)], {type:'text/plain'})), link = document.createElement('a'); link.href = url; link.download = 'receiver.ini'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); });
 $('rtlPreset').addEventListener('click', () => {
   deviceCaps = null;
-  Object.assign(values, {'frontend.type':'rtlsdr','frontend.sample_rate_hz':'2400000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'2400','hackrf.bandwidth_hz':'0','rtlsdr.auto_gain':'true','rtlsdr.gain_tenths_db':'0','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
+  Object.assign(values, {'frontend.type':'rtlsdr','frontend.stream_format':'auto','frontend.sample_rate_hz':'2400000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'2400','hackrf.bandwidth_hz':'0','rtlsdr.auto_gain':'true','rtlsdr.gain_tenths_db':'0','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
   buildForm(); dirtyState(true);
 });
 $('sigePreset').addEventListener('click',()=>{if(!editable())return;applySigeProfile();dirtyState(true);buildForm();});
 $('bladePreset').addEventListener('click', () => {
   deviceCaps = null;
-  Object.assign(values, {'frontend.type':'bladerf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','bladerf.gain_db':'30','bladerf.format':'SC16_Q11','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
+  Object.assign(values, {'frontend.type':'bladerf','frontend.stream_format':'auto','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','bladerf.gain_db':'30','bladerf.format':'SC16_Q11','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'});
   buildForm(); dirtyState(true);
 });
 let capabilityRequestId = 0;
@@ -853,9 +897,11 @@ function renderCalibration(result) {
   calibrationSeenJob = job;
   if (!calibrationBusy && result.state === 'running') notice('Gain calibration running. You can cancel it, view the console or exit the service.');
   calibrationBusy = result.state === 'running';
+  calibrationStopRequested = calibrationBusy && (calibrationStopRequested || result.cancel_requested);
   if (calibrationBusy) {
     const gains = values['frontend.type'] === 'hackrf' ?
-      ` · testing LNA ${result.current_lna_gain_db} dB, VGA ${result.current_vga_gain_db} dB, RF amp ${result.current_rf_amp ? 'on' : 'off'}` : '';
+      ` · testing LNA ${result.current_lna_gain_db} dB, VGA ${result.current_vga_gain_db} dB, RF amp ${result.current_rf_amp ? 'on' : 'off'}` :
+      values['frontend.type'] === 'rtlsdr' ? ` · testing RF ${result.current_rtl_gain_tenths_db / 10} dB${result.e4000_if_gain_available ? ', IF '+result.current_rtl_if_gain_db+' dB' : ''}` : '';
     $('calibrationStatus').textContent = `${result.cancel_requested ? 'Cancelling; releasing the SDR' : 'Calibrating'}${result.device_model ? ' · '+result.device_model : ''} · ${result.tested / 3} settings completed · ${Math.floor(result.elapsed_seconds)} s${gains}`;
     $('cancelCalibration').dataset.jobId = result.job_id;
     controls();
@@ -879,7 +925,7 @@ function renderCalibration(result) {
     } else {
       const source = calibrationRequest.source;
       if (source === 'hackrf') Object.assign(values, {'hackrf.lna_gain_db':String(result.lna_gain_db), 'hackrf.vga_gain_db':String(result.vga_gain_db), 'hackrf.rf_amp':String(result.rf_amp)});
-      if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':String(result.rtl_auto_gain), 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db)});
+      if (source === 'rtlsdr') Object.assign(values, {'rtlsdr.auto_gain':String(result.rtl_auto_gain), 'rtlsdr.gain_tenths_db':String(result.rtl_gain_tenths_db), 'rtlsdr.if_gain_db':String(result.rtl_if_gain_db)});
       if (source === 'bladerf') values['bladerf.gain_db'] = String(result.blade_gain_db);
       deviceCaps = source === 'hackrf' ? null : {...result, source, serial:values['frontend.serial'] || '', tuning:values['frontend.center_frequency_hz'], precision:values['bladerf.format']};
       buildForm(); dirtyState(true);
@@ -899,9 +945,9 @@ async function pollCalibration() {
   finally { calibrationPolling = false; }
 }
 $('cancelCalibration').addEventListener('click', async () => {
-  $('cancelCalibration').disabled = true;
+  calibrationStopRequested = true; controls();
   try { renderCalibration(await api('frontend/calibrate/cancel', {job_id:$('cancelCalibration').dataset.jobId})); }
-  catch (error) { notice(error.message, true); }
+  catch (error) { calibrationStopRequested = false; controls(); notice(error.message, true); }
 });
 setInterval(pollCalibration, 750);
 $('calibrateGains').addEventListener('click', async () => {
@@ -931,7 +977,7 @@ $('deviceLimits').addEventListener('click', async () => {
     buildForm(); notice(`Native device limits loaded · ${result.format}`);
   } catch(error) { if (current()) { profileRequestNotice = {message:error.message,error:true}; profileSummary(); notice(error.message, true); } }
 });
-$('filePreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'file','replay.realtime':'true','replay.loop':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
+$('filePreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'file','frontend.stream_format':'auto','replay.realtime':'true','replay.loop':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
 $('frequencyReference').addEventListener('change',drawAnalysis);
 $('autoScale').addEventListener('click',()=>{if(!anyPlotEnabled()||!diagnosticEnabled('spectrum_enabled')||!analysisSnapshot?.dbfs.length)return;const lo=Math.floor(Math.min(...analysisSnapshot.dbfs)/10)*10,hi=Math.ceil(Math.max(...analysisSnapshot.dbfs)/10)*10+10;for(const id of ['dbMin','colourMin'])$(id).value=lo;for(const id of ['dbMax','colourMax'])$(id).value=hi;drawAnalysis();});
 for(const id of ['showSpectrum','showWaterfall','showWaterfall3D'])$(id).addEventListener('change',changePlotEnabled);
@@ -953,7 +999,7 @@ $('showHistogram').addEventListener('change',()=>{syncHistogramVisibility();
   requestStatus();});
 syncHistogramVisibility();
 document.addEventListener('visibilitychange',requestStatus);
-$('hackrfPreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'hackrf','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','hackrf.lna_gain_db':'16','hackrf.vga_gain_db':'20','hackrf.rf_amp':'false','hackrf.antenna_power':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
+$('hackrfPreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'hackrf','frontend.stream_format':'auto','frontend.sample_rate_hz':'16000000','frontend.center_frequency_hz':'1575420000','frontend.signal_frequency_hz':'1575420000','buffer.window_samples':'16000','hackrf.bandwidth_hz':'0','hackrf.lna_gain_db':'16','hackrf.vga_gain_db':'20','hackrf.rf_amp':'false','hackrf.antenna_power':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
 $('exit').addEventListener('click', async () => { if (!confirm('Stop the receiver, finish recording and close the local NGene service?')) return; try { await api('shutdown', {}); quitting = true; notice('NGene is closing. Restart ngene --web to reconnect.'); } catch (error) { notice(error.message, true); } });
 setInterval(() => { if (waiting && performance.now() - lastRequest > 4000) socket?.close(); else if (statusRequestPending||performance.now() - lastRequest >= Number($('refresh').value)) requestStatus(); }, 10);
 

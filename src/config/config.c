@@ -58,6 +58,7 @@ void NgConfigDefaults(TNgConfig *config)
     config->frontend = NG_FRONTEND_FILE;
     NgAnalysisDefaults(&config->analysis);
     config->rtlAutoGain = 1;
+    config->rtlIfGainDb = -1;
     config->bladeGainDb = 30;
     config->bladeFormat = NG_FORMAT_SC16_Q11;
     config->replayFormat = NG_FORMAT_CI8;
@@ -271,7 +272,7 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     BOOL_KEY("bladerf.bias_tee", bladeBiasTee)
     UINT_KEY("frontend.bandwidth_hz", bandwidthHz)
     if (strcmp(key, "rtlsdr.gain_tenths_db") == 0 || strcmp(key, "rtlsdr.ppm") == 0 ||
-        strcmp(key, "bladerf.gain_db") == 0) {
+        strcmp(key, "bladerf.gain_db") == 0 || strcmp(key, "rtlsdr.if_gain_db") == 0) {
         double valueReal;
         if (ParseReal(value, &valueReal) != NG_OK || valueReal < -1000 || valueReal > 1000 ||
             valueReal != floor(valueReal)) {
@@ -281,6 +282,8 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
             c->rtlPpm = (int)valueReal;
         } else if (strcmp(key, "bladerf.gain_db") == 0) {
             c->bladeGainDb = (int)valueReal;
+        } else if (strcmp(key, "rtlsdr.if_gain_db") == 0) {
+            c->rtlIfGainDb = (int)valueReal;
         } else {
             c->rtlGainTenthsDb = (int)valueReal;
         }
@@ -575,7 +578,8 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
         config->rtlAutoGain > 1 || config->rtlBiasTee < 0 || config->rtlBiasTee > 1 ||
         config->bladeBiasTee < 0 || config->bladeBiasTee > 1 || config->rtlPpm < -1000 ||
         config->rtlPpm > 1000 || config->rtlGainTenthsDb < -1000 ||
-        config->rtlGainTenthsDb > 1000 || config->bladeGainDb < -100 || config->bladeGainDb > 100) {
+        config->rtlGainTenthsDb > 1000 || config->bladeGainDb < -100 || config->bladeGainDb > 100 ||
+        (config->rtlIfGainDb != -1 && (config->rtlIfGainDb < 3 || config->rtlIfGainDb > 56))) {
         return NgFail(error, "Invalid native frontend controls or replay format");
     }
     if (config->frontend == NG_FRONTEND_RTLSDR &&
@@ -699,8 +703,8 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             config->bandwidthHz, config->lnaGainDb, config->vgaGainDb,
             (config->rfAmp) != 0 ? "true" : "false",
             (config->antennaPower) != 0 ? "true" : "false");
-    fprintf(output, "\n[rtlsdr]\nauto_gain=%s\ngain_tenths_db=%d\nppm=%d\nbias_tee=%s\n",
-            config->rtlAutoGain ? "true" : "false", config->rtlGainTenthsDb, config->rtlPpm,
+    fprintf(output, "\n[rtlsdr]\nauto_gain=%s\ngain_tenths_db=%d\nif_gain_db=%d\nppm=%d\nbias_tee=%s\n",
+            config->rtlAutoGain ? "true" : "false", config->rtlGainTenthsDb, config->rtlIfGainDb, config->rtlPpm,
             config->rtlBiasTee ? "true" : "false");
     fprintf(output, "\n[bladerf]\ngain_db=%d\nbias_tee=%s\nformat=%s\n", config->bladeGainDb,
             config->bladeBiasTee ? "true" : "false", NgSampleFormatName(config->bladeFormat));

@@ -2,6 +2,7 @@
  * @brief NGene frontend implementation.
  */
 #include "ngene/frontend.h"
+#include "frontend/calibration_frontend.h"
 #include <string.h>
 #include "frontend/file.h"
 #ifdef NGENE_HAVE_SIGE
@@ -62,6 +63,28 @@ int NgFrontendOpenNative(const TNgConfig *config, TNgFrontend *frontend, TNgErro
 #endif
     }
     return NgFail(error, "Selected native frontend is disabled in this build");
+}
+
+int NgFrontendCalibrationNext(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
+{
+#ifdef NGENE_HAVE_RTLSDR
+    if (config->frontend == NG_FRONTEND_RTLSDR)
+        return NgRtlsdrCalibrationNext(config, frontend, error);
+#else
+    (void)config;
+    (void)frontend;
+#endif
+    return NgFail(error, "Calibration source cannot reuse its native handle");
+}
+
+int NgFrontendCalibrationPause(TNgFrontend *frontend, TNgError *error)
+{
+#ifdef NGENE_HAVE_RTLSDR
+    return NgRtlsdrCalibrationPause(frontend, error);
+#else
+    (void)frontend;
+    return NgFail(error, "RTL calibration is unavailable");
+#endif
 }
 
 /**
@@ -240,7 +263,7 @@ const char *NgFrontendGainPolicyName(TNgGainPolicy policy)
     case NG_GAIN_POLICY_HACKRF_MAX2839: return "HackRF MAX2839: compensated physical gains";
     case NG_GAIN_POLICY_HACKRF_MAX2831: return "HackRF MAX2831: three physical LNA states";
     case NG_GAIN_POLICY_RTL_R82XX: return "RTL R82xx: native manual LNA/mixer allocation";
-    case NG_GAIN_POLICY_RTL_E4000: return "RTL E4000: native LNA/mixer allocation";
+    case NG_GAIN_POLICY_RTL_E4000: return "RTL E4000: LNA/mixer and six IF stages, earlier gain preferred";
     case NG_GAIN_POLICY_RTL_FC001X: return "RTL FC001x: native discrete manual gain";
     case NG_GAIN_POLICY_BLADERF1: return "bladeRF 1: native LNA/RXVGA1/RXVGA2 allocation";
     case NG_GAIN_POLICY_BLADERF2: return "bladeRF 2: native AD9361 full gain table";
