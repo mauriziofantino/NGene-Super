@@ -1,0 +1,80 @@
+/* End-to-end optional GPS search: real controller, ring, worker, API and browser form. */
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const {spawn} = require('node:child_process');
+const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function until(fn, label) {
+  for (let k = 0; k < 300; k++) { const value = await fn(); if (value) return value; await delay(25); }
+  throw Error('Timeout: ' + label);
+}
+(async () => {
+  const root = path.resolve('build/web-acquisition-' + Date.now());
+  fs.mkdirSync(root, {recursive: true}); fs.mkdirSync(path.join(root, 'profile'));
+  const chips = [], iq = Buffer.alloc(2 * 2400000);
+  let g1 = 1023, g2 = 1023, random = 177;
+  for (let k = 0; k < 1023; k++) {
+    chips.push(((g1 >> 9) ^ g2 ^ (g2 >> 7)) & 1 ? 1 : -1);
+    const f1 = ((g1 >> 2) ^ (g1 >> 9)) & 1;
+    const f2 = ((g2 >> 1) ^ (g2 >> 2) ^ (g2 >> 5) ^ (g2 >> 7) ^ (g2 >> 8) ^ (g2 >> 9)) & 1;
+    g1 = ((g1 << 1) | f1) & 1023; g2 = ((g2 << 1) | f2) & 1023;
+  }
+  const noise = () => { random = (Math.imul(random, 1664525) + 1013904223) >>> 0; return 20 * (random / 4294967296 - 0.5); };
+  for (let k = 0; k < iq.length / 2; k++) {
+    const t = k / 2400000, chip = chips[Math.floor((231.3 + t * 1023000 * (1 + 1234 / 1575420000)) % 1023)];
+    const angle = 2 * Math.PI * 1234 * t;
+    iq.writeInt8(Math.round(5 * chip * Math.cos(angle) + noise()), 2 * k);
+    iq.writeInt8(Math.round(5 * chip * Math.sin(angle) + noise()), 2 * k + 1);
+  }
+  const input = path.join(root, 'gps.cs8').replaceAll('\\', '/'); fs.writeFileSync(input, iq);
+  const configPath = path.join(root, 'gps.ini');
+  fs.writeFileSync(configPath, `[frontend]\ntype=file\nsample_rate_hz=2400000\ncenter_frequency_hz=1575420000\nsignal_frequency_hz=1575420000\n[receiver]\nrun_seconds=0\n[replay]\npath=${input}\nrealtime=true\nloop=true\n[acquisition]\nenabled=true\nfirst_prn=7\nlast_prn=7\nsquare_carrier=false\nxor_correlation=true\n`);
+  const port = Number(process.env.NGENE_TEST_PORT || 19528), base = `http://127.0.0.1:${port}`;
+  const child = spawn(path.resolve(process.env.NGENE_EXECUTABLE || 'build/ngene'),
+    ['--web', '--port', String(port), '--config', configPath, '--output-dir', path.join(root, 'profile')],
+    {stdio: ['ignore', 'pipe', 'pipe']});
+  let log = '', browser;
+  child.stdout.on('data', data => log += data); child.stderr.on('data', data => log += data);
+  const exited = new Promise(resolve => child.once('exit', resolve));
+  try {
+    const bootstrap = await until(async () => {
+      if (child.exitCode !== null) throw Error(log);
+      try { return await (await fetch(base + '/api/v1/bootstrap')).json(); } catch { return false; }
+    }, 'startup');
+    const get = async route => (await fetch(base + '/api/v1/' + route)).json();
+    const post = async (route, body) => {
+      const response = await fetch(base + '/api/v1/' + route, {method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-NGene-Token': bootstrap.token}, body: JSON.stringify(body)});
+      const reply = await response.json(); assert(response.ok, JSON.stringify(reply)); return reply;
+    };
+    assert.equal(bootstrap.gps_acquisition, true);
+    const config = await get('config'); assert.match(config.ini, /xor_correlation=true/);
+    browser = await chromium.launch({headless: true,
+      ...(process.env.BROWSER_EXECUTABLE ? {executablePath: process.env.BROWSER_EXECUTABLE} : {})});
+    const page = await browser.newPage({viewport: {width: 1440, height: 1000}}), errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(base); await until(async () => (await page.locator('#connection').textContent()) === 'Connected', 'GUI');
+    await page.locator('.workspace-nav-item[data-view="acquisition"]').click();
+    await page.locator('[data-open-settings="acquisition"]').first().click();
+    await page.locator('[name="acquisition.enabled"]').waitFor({state: 'visible'});
+    assert.equal(await page.locator('[name="acquisition.first_prn"]').inputValue(), '7');
+    assert.equal(await page.locator('[name="acquisition.xor_correlation"]').inputValue(), 'true');
+    assert.equal(await page.locator('[name="acquisition.enabled"]').isEnabled(), true);
+    await post('receiver/start', {revision: config.revision});
+    const found = await until(async () => {
+      const status = await get('status'); return status.acquisition?.results.find(result => result.confirmed);
+    }, 'GPS confirmation');
+    assert.equal(found.prn, 7); assert(Math.abs(found.doppler_hz - 1234) < 35);
+    assert(Math.abs(found.code_phase_chips - 231.3) < 0.6); assert.equal(found.successes, 3);
+    await page.locator('.workspace-nav-item[data-view="acquisition"]').click();
+    await until(async () => (await page.locator('[data-acquisition-results]').textContent()).includes('Confirmed'), 'result table');
+    await page.screenshot({path: path.join(root, 'acquisition.png'), fullPage: true});
+    await post('receiver/stop', {revision: config.revision});
+    await until(async () => (await get('status')).state === 'stopped', 'stop');
+    assert.deepEqual(errors, []);
+    await post('shutdown', {}); assert.equal(await exited, 0);
+    console.log('PASS: GPS form, persisted modes, worker confirmation, provenance, result table and stop. ' + root);
+  } finally {
+    if (browser) await browser.close();
+    if (child.exitCode === null) { child.kill('SIGTERM'); await exited; }
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

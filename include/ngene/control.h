@@ -39,6 +39,8 @@ typedef struct {
     TNgRecordingStats recording;
     /** Optional diagnostic settings or an owned diagnostic snapshot. */
     TNgAnalysisSnapshot analysis;
+    /** Copied GPS search outcomes; not tracking locks or navigation observables. */
+    TNgAcquisitionSnapshot acquisition;
     /** Cumulative written pairs including completed capture sessions. */
     uint64_t totalWrittenSamples;
     /** Baseband filter bandwidth applied by the source, in hertz. */

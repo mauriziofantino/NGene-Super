@@ -348,6 +348,7 @@ int NgSigeOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
     frontend->info.centerFrequencyHz = NG_SIGE_CENTER_HZ;
     frontend->info.signalFrequencyHz = NG_SIGE_SIGNAL_HZ;
     frontend->info.digitalIfHz = NG_SIGE_IF_HZ;
+    frontend->info.spectrumInverted = 1;
     frontend->info.format = NG_FORMAT_CI8;
     frontend->info.adcBits = 1;
     frontend->info.sourceName = "sige";

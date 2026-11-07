@@ -13,6 +13,8 @@ typedef struct {
     TNgSampleFormat format;
     /** Original ADC precision when available; zero for historical/unknown sources. */
     unsigned sourceAdcBits;
+    /** Hardware spectrum convention preserved with the unmodified ADC samples. */
+    int spectrumInverted;
     /** Sampling frequency in complex pairs per second; recorded nominal clock rate. */
     uint32_t sampleRateHz;
     /** SDR hardware tuning frequency in Hz. */

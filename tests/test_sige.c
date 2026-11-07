@@ -285,7 +285,7 @@ static void Run(int mode)
     NgConfigSige(&config);
     config.windowSamples = 13;
     CHECK(NgSigeOpen(&config, &source, &error) == NG_OK);
-    CHECK(source.info.sampleRateHz == 8183800 && source.info.digitalIfHz == 38400 &&
+    CHECK(source.info.sampleRateHz == 8183800 && source.info.digitalIfHz == 38500 &&
           source.info.adcBits == 1);
     if (failStart) {
         CHECK(source.ops->start(source.context, &error) == NG_ERROR);

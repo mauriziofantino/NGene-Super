@@ -41,7 +41,7 @@ add_library(NGene::Platform ALIAS ngene_platform)
 
 add_library(ngene_dsp STATIC src/dsp/fft/fft.c src/dsp/sample_backend.c
     src/dsp/statistics/moments.c src/dsp/statistics/dc_block.c src/dsp/power/power.c
-    src/dsp/gps_ca.c src/dsp/nco.c)
+    src/dsp/gps_ca.c src/dsp/nco.c src/dsp/search.c)
 target_include_directories(ngene_dsp PUBLIC include PRIVATE src)
 target_link_libraries(ngene_dsp PUBLIC ngene_base)
 add_library(NGene::Dsp ALIAS ngene_dsp)
@@ -51,7 +51,7 @@ add_library(ngene_core
     src/stream/ring.c
     src/frontend/frontend.c src/frontend/common.c src/frontend/file.c src/frontend/sige_decode.c src/frontend/ingress.c src/frontend/calibration.c
     src/conditioning/bypass.c src/recording/recording.c src/recording/metadata.c
-    src/analysis/analysis.c)
+    src/analysis/analysis.c src/acquisition/acquisition.c src/acquisition/gps.c)
 target_include_directories(ngene_core PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated" PRIVATE src)
 target_link_libraries(ngene_core PUBLIC ngene_platform ngene_dsp)
 add_library(NGene::Engine ALIAS ngene_core)
@@ -177,6 +177,11 @@ if(NGENE_WITH_WEB)
     target_link_libraries(ngene PRIVATE ngene_control ngene_http)
 endif()
 if(NGENE_BUILD_TESTS)
+    add_executable(ngene_acquisition_tests tests/test_acquisition.c)
+    target_include_directories(ngene_acquisition_tests PRIVATE src)
+    target_link_libraries(ngene_acquisition_tests PRIVATE ngene_core)
+    add_test(NAME gps_acquisition_contract COMMAND ngene_acquisition_tests)
+    set_tests_properties(gps_acquisition_contract PROPERTIES TIMEOUT 90)
     enable_testing()
     add_executable(ngene_sdr_tests tests/test_sdr.c)
     target_include_directories(ngene_sdr_tests PRIVATE src)
@@ -332,7 +337,7 @@ if(NGENE_BUILD_TESTS)
     endif()
 endif()
 # Keep upstream dependencies outside first-party warning policy.
-foreach(target ngene_gain_probe ngene_web_calibration_fixture ngene_sige_tests ngene_frontend_stream_tests ngene_calibration_tests ngene_base ngene_platform ngene_dsp ngene_core ngene_rtlsdr_tests ngene_bladerf_tests ngene_sdr_tests ngene ngene_hackrf_tests ngene_replay_tests ngene_control ngene_tests ngene_sample_tests ngene_analysis_tests ngene_fft_tests ngene_fft_fallback_tests ngene_engine_scheduler_tests ngene_control_tests)
+foreach(target ngene_acquisition_tests ngene_gain_probe ngene_web_calibration_fixture ngene_sige_tests ngene_frontend_stream_tests ngene_calibration_tests ngene_base ngene_platform ngene_dsp ngene_core ngene_rtlsdr_tests ngene_bladerf_tests ngene_sdr_tests ngene ngene_hackrf_tests ngene_replay_tests ngene_control ngene_tests ngene_sample_tests ngene_analysis_tests ngene_fft_tests ngene_fft_fallback_tests ngene_engine_scheduler_tests ngene_control_tests)
     if(TARGET ${target})
         if(MSVC)
             target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)

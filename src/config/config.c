@@ -57,6 +57,9 @@ void NgConfigDefaults(TNgConfig *config)
     memset(config, 0, sizeof(*config));
     config->frontend = NG_FRONTEND_FILE;
     NgAnalysisDefaults(&config->analysis);
+    NgAcquisitionDefaults(&config->acquisition);
+    /* Generic capture profiles remain capture-only unless explicitly enabled. */
+    config->acquisition.enabled = 0;
     config->rtlAutoGain = 1;
     config->rtlIfGainDb = -1;
     config->bladeGainDb = 30;
@@ -224,8 +227,11 @@ static int CopyText(char *out, size_t capacity, const char *text)
 static int Apply(TNgConfig *c, const char *key, const char *value)
 {
     uint64_t n;
-    /* Retired acquisition profiles remain readable, but cannot enable processing. */
-    if (strncmp(key, "acquisition.", 12) == 0) return NG_OK;
+    BOOL_KEY("acquisition.enabled", acquisition.enabled)
+    UINT_KEY("acquisition.first_prn", acquisition.firstPrn)
+    UINT_KEY("acquisition.last_prn", acquisition.lastPrn)
+    BOOL_KEY("acquisition.square_carrier", acquisition.squareCarrier)
+    BOOL_KEY("acquisition.xor_correlation", acquisition.xorCorrelation)
     if (strcmp(key, "frontend.type") == 0) {
         if (strcmp(value, "hackrf") == 0) {
             c->frontend = NG_FRONTEND_HACKRF;
@@ -424,6 +430,7 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     U64_KEY("replay.sample_limit", replaySampleLimit)
     BOOL_KEY("replay.realtime", replayRealtime)
     BOOL_KEY("replay.loop", replayLoop)
+    BOOL_KEY("replay.spectrum_inverted", replaySpectrumInverted)
     return NG_ERROR;
 }
 
@@ -537,9 +544,15 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (config == NULL) {
         return NgFail(error, "Missing config");
     }
+    if (config->replaySpectrumInverted != 0 && config->replaySpectrumInverted != 1)
+        return NgFail(error, "Invalid replay spectrum convention");
     if (NgAnalysisValidate(&config->analysis, error) != NG_OK) {
         return NG_ERROR;
     }
+    if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK) return NG_ERROR;
+    if (config->acquisition.enabled && !config->recordOnly &&
+        (config->sampleRateHz < 2048000u || config->sampleRateHz > 20000000u))
+        return NgFail(error, "GPS acquisition requires 2.048..20 Msps");
     if (config->dcRemoval != 0 || (config->streamFormat != 0 && config->streamFormat != NG_FORMAT_CI8 && config->streamFormat != NG_FORMAT_CI16)) return NgFail(error,"DC removal is retired or common stream format is invalid");
     if ((config->dcRemoval != 0 && config->dcRemoval != 1) || config->dcShift < 4 ||
         config->dcShift > 24) {
@@ -718,6 +731,11 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     fprintf(output, "\n[receiver]\nmode=%s\nrun_seconds=%.17g\nidle_timeout_ms=%u\n",
             (config->recordOnly) != 0 ? "record" : "capture", config->runSeconds,
             config->idleTimeoutMs);
+    fprintf(output, "\n[acquisition]\nenabled=%s\nfirst_prn=%u\nlast_prn=%u\n"
+                    "square_carrier=%s\nxor_correlation=%s\n",
+            config->acquisition.enabled ? "true" : "false", config->acquisition.firstPrn,
+            config->acquisition.lastPrn, config->acquisition.squareCarrier ? "true" : "false",
+            config->acquisition.xorCorrelation ? "true" : "false");
     fprintf(output,
             "\n[recording]\nenabled=%s\nprefix=%s\nqueue_blocks=%zu\nsegment_samples=%" PRIu64 "\n",
             (config->recordingEnabled) != 0 ? "true" : "false", config->recordingPrefix,
@@ -726,7 +744,9 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     if (config->recordingDirectory[0] != 0) {
         fprintf(output, "directory=%s\n", config->recordingDirectory);
     }
-    fprintf(output, "\n[replay]\nformat=%s\n", NgSampleFormatName(config->replayFormat));
+    fprintf(output, "\n[replay]\nformat=%s\nspectrum_inverted=%s\n",
+            NgSampleFormatName(config->replayFormat),
+            config->replaySpectrumInverted ? "true" : "false");
     if (config->replayPath[0] != '\0') {
         fprintf(output, "path=%s\n", config->replayPath);
     }

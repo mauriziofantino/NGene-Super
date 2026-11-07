@@ -52,6 +52,9 @@ typedef struct {
     TNgSampleFormat nativeFormat;
     /** Physical ADC precision, distinct from common stream storage width. */
     unsigned adcBits;
+    /** Nonzero for a hardware I/Q spectrum conjugated relative to RF frequency.
+     * Digital IF remains signal minus tuning; consumers conjugate Q before RF mixing. */
+    int spectrumInverted;
 } TNgStreamInfo;
 
 enum { NG_BLOCK_GAP = 1u, NG_BLOCK_PARTIAL = 2u, NG_BLOCK_HARDWARE_TIME = 4u };

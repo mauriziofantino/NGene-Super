@@ -44,6 +44,8 @@ struct TNgControl {
     TNgRecorder *recorder;
     /** Owned optional diagnostic worker; destroyed after the receiver stops. */
     TNgAnalysis *analysis;
+    /** Receiver-worker-owned acquisition; accessed only on its ordered callbacks. */
+    TNgAcquisition *acquisition;
     /** Cumulative pairs from completed recording sessions. */
     uint64_t completedWritten;
     /** Copied rate/RF metadata; identity strings point into controller-owned storage. */
@@ -381,6 +383,7 @@ static void Progress(void *context, const TNgReceiverStats *stats)
     TNgControl *c = context;
     if (NgMutexTryLock(&c->mutex) != 0) {
         c->status.receiver = *stats;
+        NgAcquisitionRead(c->acquisition, &c->status.acquisition);
         NgMutexUnlock(&c->mutex);
     }
 }
@@ -398,11 +401,15 @@ static void ReceiverWorker(void *context)
 {
     TNgControl *c = context;
     TNgFrontend source;
+    TNgChannel acquisitionChannel;
     TNgConditioner conditioner = NgConditionerBypass();
     TNgReceiverHooks hooks = {c, 1, Started, Block, Progress, RawBlock};
     memset(&source, 0, sizeof(source));
     memset(&c->finalStats, 0, sizeof(c->finalStats));
     memset(&c->workerError, 0, sizeof(c->workerError));
+    NgMutexLock(&c->mutex);
+    memset(&c->status.acquisition, 0, sizeof(c->status.acquisition));
+    NgMutexUnlock(&c->mutex);
     c->workerResult = NgFrontendOpen(&c->runConfig, &source, &c->workerError);
     if (c->workerResult == NG_OK) {
         (void)NgAnalysisSetSampleRate(c->analysis, source.info.sampleRateHz);
@@ -419,12 +426,25 @@ static void ReceiverWorker(void *context)
         if (c->runConfig.recordingEnabled != 0 && NgAtomicGet(&c->stop) == 0) {
             c->workerResult = OpenRecording(c, &c->workerError);
         }
+        if (c->workerResult == NG_OK && !c->runConfig.recordOnly) {
+            c->workerResult = NgAcquisitionCreate(&c->runConfig.acquisition, &source.info,
+                &c->acquisition, &acquisitionChannel, &c->workerError);
+        }
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
             c->workerResult =
-                NgReceiverRunEx(&c->runConfig, &source, &conditioner, NULL, 0,
+                NgReceiverRunEx(&c->runConfig, &source, &conditioner,
+                                      c->acquisition ? &acquisitionChannel : NULL,
+                                      c->acquisition ? 1u : 0u,
                                       StopRequested, c, &c->finalStats, &hooks,
                                       &c->workerError);
         }
+        NgMutexLock(&c->mutex);
+        NgAcquisitionRead(c->acquisition, &c->status.acquisition);
+        c->status.acquisition.searching = 0;
+        c->status.acquisition.currentPrn = 0;
+        NgMutexUnlock(&c->mutex);
+        NgAcquisitionDestroy(c->acquisition);
+        c->acquisition = NULL;
         NgFrontendDestroy(&source);
     }
     NgAtomicSet(&c->done, 1);

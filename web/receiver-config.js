@@ -7,7 +7,7 @@ export function createReceiverConfiguration(container, sectionsFromFile) {
     section.hidden = true;
     const note = document.createElement('p'); note.className = 'receiver-reference-note';
     note.textContent = ['receiver','acquisition'].includes(topic)
-      ? 'GNSS modules are not integrated. The previous GPS acquisition implementation has been removed. Reference values are not applied or saved.'
+      ? 'Historical NGene settings for other signals and future modules. Operational GPS L1 C/A settings are in the GPS acquisition form. These reference values are not applied or saved.'
       : 'GNSS module not integrated. These are original NGene reference values; they are not applied or saved by this receiver build.';
     const holder = document.createElement('div'); holder.className = 'receiver-parameter-groups';
     for (const {title, fields, note: description} of groups) {

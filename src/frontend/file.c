@@ -255,8 +255,12 @@ int NgFileOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
     frontend->info.digitalIfHz =
         (int64_t)frontend->info.signalFrequencyHz - (int64_t)frontend->info.centerFrequencyHz;
     frontend->info.format = config->replayFormat;
+    frontend->info.spectrumInverted = config->replaySpectrumInverted;
     { TNgCaptureMetadata metadata={0};TNgError ignored={{0}};
-      if(NgReplayInspect(config->replayPath,&metadata,&ignored)==NG_OK && metadata.available && metadata.format==config->replayFormat) frontend->info.adcBits=metadata.sourceAdcBits; }
+      if(NgReplayInspect(config->replayPath,&metadata,&ignored)==NG_OK && metadata.available && metadata.format==config->replayFormat) {
+          frontend->info.adcBits=metadata.sourceAdcBits;
+          frontend->info.spectrumInverted=metadata.spectrumInverted;
+      } }
     frontend->info.sourceName = "file";
     frontend->info.clockDomain = "file-playback";
     frontend->info.deviceIdentifier = source->config.replayPath;

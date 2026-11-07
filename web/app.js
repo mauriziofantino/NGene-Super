@@ -31,6 +31,7 @@ const fields = [
   ['bladeRF', 'bladerf.bias_tee', 'Bias tee', 'select', ['false','true']],
   ['bladeRF', 'bladerf.format', 'Sample precision', 'select', ['SC16_Q11','CI8'], '', 'SC16_Q11: 12-bit ADC in 16-bit I/Q; CI8: native 8-bit I/Q (requires device/FPGA support)'],
   ['File replay', 'replay.format', 'Native IQ format', 'select', ['CI8','CU8','SC16_Q11','CI16']],
+  ['File replay', 'replay.spectrum_inverted', 'I/Q spectrum inverted', 'select', ['false','true'], '', 'On for native SiGe ADC I/Q; capture metadata preserves this convention.'],
   ['File replay', 'replay.path', 'Input file on receiver computer', 'text', null, '', 'Native I/Q (.cs8, .cu8, .sc16q11); sidecar loads format, rate and tuning'],
   ['File replay', 'replay.start_sample', 'Start sample pair', 'number', null, 'pairs'],
   ['File replay', 'replay.sample_limit', 'Range length', 'number', null, 'pairs', '0 = remainder of file'],
@@ -188,7 +189,7 @@ function dirtyState(changed) {
 const settingsTopics = {
   source: ['Front end', 'Choose the live SDR or recorded input, sample format, tuning and gains.', 'Before start'],
   receiver: ['Receiver & signals', 'Configure execution and common stream buffers. GNSS processing modules are unavailable.', 'Before start'],
-  acquisition: ['Acquisition', 'The previous acquisition implementation has been removed. No acquisition settings are applied.', 'Unavailable'],
+  acquisition: ['Acquisition', 'GPS L1 C/A search, refinement and independent 3-of-4 confirmation.', 'Before start'],
   tracking: ['Tracking', 'Configure coherent integration, code and carrier loops, lock criteria and correlators.', 'Module unavailable'],
   navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
   recording: ['Capture to disk', 'Choose a name, receiver-side folder and pre/post capture point.', 'Before start'],
@@ -285,7 +286,7 @@ function buildForm() {
   }
   selectSettings(selectedSettings); controls(); refreshProfileErrors();
 }
-function applySigeProfile(){ Object.assign(values,{'frontend.type':'sige','frontend.sample_rate_hz':'8183800','frontend.center_frequency_hz':'1575381600','frontend.signal_frequency_hz':'1575420000','hackrf.bandwidth_hz':'0','hackrf.lna_gain_db':'0','hackrf.vga_gain_db':'0','hackrf.rf_amp':'false','hackrf.antenna_power':'false','frontend.stream_format':'auto'}); }
+function applySigeProfile(){ Object.assign(values,{'frontend.type':'sige','frontend.sample_rate_hz':'8183800','frontend.center_frequency_hz':'1575381500','frontend.signal_frequency_hz':'1575420000','hackrf.bandwidth_hz':'0','hackrf.lna_gain_db':'0','hackrf.vga_gain_db':'0','hackrf.rf_amp':'false','hackrf.antenna_power':'false','frontend.stream_format':'auto'}); }
 function updateSourceFields() {
   const source = values['frontend.type'];
   const caps = deviceCaps && deviceCaps.source === source && deviceCaps.serial === (values['frontend.serial'] || '') && deviceCaps.tuning === values['frontend.center_frequency_hz'] && (source !== 'bladerf' || deviceCaps.precision === values['bladerf.format']) ? deviceCaps : null;
@@ -1112,7 +1113,7 @@ $('pickerUse').addEventListener('click', () => {
   if (replaySelection.revision !== revision) { $('pickerNotice').textContent = 'The profile changed. Select the file again.'; return; }
   const draft = parseIni(replaySelection.ini);
   const keys = ['frontend.type','replay.format','replay.path','replay.start_sample','replay.sample_limit','receiver.run_seconds','receiver.mode','recording.enabled'];
-  if (replaySelection.metadata_available) keys.push('frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz','buffer.window_samples');
+  if (replaySelection.metadata_available) keys.push('frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz','buffer.window_samples','replay.spectrum_inverted');
   for (const key of keys) values[key] = draft[key];
   buildForm(); dirtyState(true); selectSettings('source'); $('showConfiguration').click();
   notice(replaySelection.metadata_available ? 'Replay metadata loaded into the draft. Review, Apply & save, then Start receiver.' : 'File selected. Set sampling rate and RF parameters, then Apply & save.');

@@ -1,6 +1,20 @@
 {
   "version": 1,
-  "modules": [],
+  "modules": [{
+    "id": "gps-l1-ca-classic",
+    "groups": [{
+      "title": "GPS acquisition", "topic": "acquisition",
+      "note": "GPS L1 C/A: coarse ±5 kHz / 667 Hz, eight 1-ms periods, Doppler refinement 10 Hz, native-sample code refinement, confirmation 3 of 4. Tracking is not integrated.",
+      "fields": [
+        {"key":"acquisition.enabled","label":"GPS L1 C/A acquisition","type":"select","default":"false","options":[{"value":"true","label":"On"},{"value":"false","label":"Off"}]},
+        {"key":"acquisition.first_prn","label":"First GPS PRN","type":"number","default":1,"integer":true,"min":1,"max":32},
+        {"key":"acquisition.last_prn","label":"Last GPS PRN","type":"number","default":32,"integer":true,"min":1,"max":32},
+        {"key":"acquisition.square_carrier","label":"Local carrier","type":"select","default":"false","options":[{"value":"false","label":"Sinusoidal"},{"value":"true","label":"Squared sin/cos"}]},
+        {"key":"acquisition.xor_correlation","label":"Code correlation","type":"select","default":"false","options":[{"value":"false","label":"SIMD products"},{"value":"true","label":"SIMD sign XOR"}],"hint":"XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."}
+      ]
+    }],
+    "rules": [{"kind":"lessEqual","keys":["acquisition.first_prn","acquisition.last_prn"],"left":"acquisition.first_prn","right":"acquisition.last_prn","message":"First GPS PRN must not exceed last GPS PRN."}]
+  }],
   "references": {
     "receiver": [
       {

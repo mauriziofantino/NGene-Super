@@ -165,6 +165,7 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
         NG_META_INTEGER_KEY("capture.significant_bits", 16, significantBits = (unsigned)number)
         NG_META_INTEGER_KEY("capture.fractional_bits", 15, fractionalBits = (unsigned)number)
         NG_META_INTEGER_KEY("capture.source_adc_bits", 32, out->sourceAdcBits = (unsigned)number)
+        NG_META_INTEGER_KEY("capture.spectrum_inverted", 1, out->spectrumInverted = (int)number)
         NG_META_INTEGER_KEY("capture.dc_shift", 24, out->dcShift = (unsigned)number)
         NG_META_INTEGER_KEY("result.written_samples", UINT64_MAX, declaredSamples = number;
                             countSeen = 1)
@@ -400,6 +401,7 @@ int NgReplayConfigure(const char *path, TNgConfig *config, TNgCaptureMetadata *m
     draft.dcRemoval = 0;
     if (found.available != 0) {
         draft.sampleRateHz = found.sampleRateHz;
+        draft.replaySpectrumInverted = found.spectrumInverted;
         draft.centerFrequencyHz = found.centerFrequencyHz;
         draft.signalFrequencyHz = found.signalFrequencyHz;
         draft.bandwidthHz = found.bandwidthHz;

@@ -99,7 +99,7 @@ static int SegmentOpen(TNgRecorder *r)
                 "significant_bits=%u\nfractional_bits=%u\nsource_native_format=%s\nsource_adc_bits=%u\ndata_file=%s\n"
                 "sample_rate_hz=%u\nsample_rate_basis=configured_nominal\n"
                 "center_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
-                "\ndigital_if_hz=%" PRId64 "\nbandwidth_hz=%u\nconditioning=%s\n"
+                "\ndigital_if_hz=%" PRId64 "\nspectrum_inverted=%d\nbandwidth_hz=%u\nconditioning=%s\n"
                 "recording_point=%s\nhardware_timestamp=%s\n"
                 "host_start_unix_seconds=%" PRId64 "\n",
                 NgSampleFormatName(r->capture.format),
@@ -109,6 +109,7 @@ static int SegmentOpen(TNgRecorder *r)
                 r->capture.format == NG_FORMAT_CI16 ? 15u : r->capture.format == NG_FORMAT_SC16_Q11 ? 11u : 0u, NgSampleFormatName(r->nativeFormat),r->adcBits,name, r->capture.sampleRateHz,
                 r->capture.centerFrequencyHz, r->capture.signalFrequencyHz,
                 (int64_t)r->capture.signalFrequencyHz - (int64_t)r->capture.centerFrequencyHz,
+                r->capture.spectrumInverted,
                 r->capture.bandwidthHz, r->capture.conditioningName,
                 r->capture.preConditioning != 0 ? "pre_conditioning" : "post_conditioning",
                 r->capture.format == NG_FORMAT_SC16_Q11 && r->config.frontend == NG_FRONTEND_BLADERF
@@ -295,6 +296,7 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
     r->adcBits=info->adcBits?info->adcBits:(info->format==NG_FORMAT_SC16_Q11?12u:info->format==NG_FORMAT_CI16?16u:8u);
     r->capture.format = info->format;
     r->capture.sampleRateHz = info->sampleRateHz;
+    r->capture.spectrumInverted = info->spectrumInverted;
     r->capture.centerFrequencyHz = info->centerFrequencyHz;
     r->capture.signalFrequencyHz =
         info->signalFrequencyHz != 0 ? info->signalFrequencyHz : info->centerFrequencyHz;
@@ -346,7 +348,7 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
                 "interleaved\ncomponent_bits=%u\ncomponent_signed=%s\n"
                 "byte_order=little_endian\nsignificant_bits=%u\nfractional_bits=%u\nsource_native_format=%s\nsource_adc_bits=%u\n"
                 "sample_rate_hz=%u\ncenter_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
-                "\ndigital_if_hz=%" PRId64 "\nbandwidth_hz=%u\n"
+                "\ndigital_if_hz=%" PRId64 "\nspectrum_inverted=%d\nbandwidth_hz=%u\n"
                 "source=%s\nclock_domain=%s\nhardware_timestamp=%s\n"
                 "host_start_unix_seconds=%" PRId64 "\nconditioning=%s\nrecording_point=%s\n"
                 "device_identifier=%s\nserial_requested=%s\nlna_gain_db=%u\nvga_gain_db=%u\nrf_amp="
@@ -357,6 +359,7 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
                 StoredPrecision(r),
                 info->format == NG_FORMAT_CI16 ? 15u : info->format == NG_FORMAT_SC16_Q11 ? 11u : 0u, NgSampleFormatName(r->nativeFormat),r->adcBits,info->sampleRateHz,
                 info->centerFrequencyHz, info->signalFrequencyHz, info->digitalIfHz,
+                info->spectrumInverted,
                 info->bandwidthHz, info->sourceName, info->clockDomain,
                 config->frontend == NG_FRONTEND_BLADERF ? "true" : "false", (int64_t)time(NULL),
                 conditioningName,

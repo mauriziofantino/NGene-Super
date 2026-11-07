@@ -3,6 +3,7 @@
 #define NGENE_CONFIG_H
 #include "ngene/types.h"
 #include "ngene/analysis.h"
+#include "ngene/acquisition.h"
 #include <stdio.h>
 
 /** @brief Implemented independent stream source kinds. */
@@ -84,6 +85,8 @@ typedef struct {
     int recordingPreConditioning;
     /** Optional diagnostic settings or an owned diagnostic snapshot. */
     TNgAnalysisConfig analysis;
+    /** Replaceable GPS L1 C/A acquisition module settings. */
+    TNgAcquisitionConfig acquisition;
     /** Capture filename prefix; CLI may include a path when no directory is set. */
     char recordingPrefix[512];
     /** Optional receiver-side directory; empty preserves legacy CLI prefix paths. */
@@ -102,11 +105,13 @@ typedef struct {
     int replayRealtime;
     /** Repeat the selected range with monotonic sample indices. */
     int replayLoop;
+    /** Spectrum conjugation for raw files without metadata, e.g. native SiGe I/Q. */
+    int replaySpectrumInverted;
 } TNgConfig;
 
 #define NG_SIGE_RATE_HZ 8183800u
 #define NG_SIGE_SIGNAL_HZ UINT64_C(1575420000)
-#define NG_SIGE_IF_HZ 38400
+#define NG_SIGE_IF_HZ 38500
 #define NG_SIGE_CENTER_HZ (NG_SIGE_SIGNAL_HZ - NG_SIGE_IF_HZ)
 /** Apply the immutable SiGe native-IQ hardware profile. */
 void NgConfigSige(TNgConfig *config);

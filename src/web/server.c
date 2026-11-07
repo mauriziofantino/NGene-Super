@@ -632,6 +632,33 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     /* Deliberate deep copy before telemetry. Snapshot arrays are values, not borrowed pointers. */
     telemetry = status.analysis;
     cJSON_AddItemToObject(object, "analysis", AnalysisJson(&telemetry, mask));
+    {
+        unsigned prn;
+        cJSON *acquisition = cJSON_AddObjectToObject(object, "acquisition");
+        cJSON *results = cJSON_AddArrayToObject(acquisition, "results");
+        cJSON_AddBoolToObject(acquisition, "enabled", status.acquisition.enabled);
+        cJSON_AddBoolToObject(acquisition, "searching", status.acquisition.searching);
+        Number(acquisition, "current_prn", status.acquisition.currentPrn);
+        Counter(acquisition, "searches", status.acquisition.searches);
+        Counter(acquisition, "skipped_samples", status.acquisition.skippedSamples);
+        Counter(acquisition, "gaps", status.acquisition.gaps);
+        String(acquisition, "message", status.acquisition.message);
+        for (prn = 0; prn < 32; ++prn) {
+            const TNgAcquisitionResult *found = &status.acquisition.results[prn];
+            cJSON *item;
+            if (found->prn == 0) continue;
+            item = cJSON_CreateObject();
+            Number(item, "prn", found->prn);
+            cJSON_AddBoolToObject(item, "confirmed", found->confirmed);
+            Number(item, "doppler_hz", found->dopplerHz);
+            Number(item, "code_phase_chips", found->codePhaseChips);
+            Number(item, "peak_ratio", found->peakRatio);
+            Number(item, "successes", found->successes);
+            Counter(item, "epoch", found->epoch);
+            Counter(item, "first_sample", found->firstSample);
+            cJSON_AddItemToArray(results, item);
+        }
+    }
     Number(object, "hardware_frequency_hz", (double)status.hardwareFrequencyHz);
     Number(object, "signal_frequency_hz", (double)status.signalFrequencyHz);
     Number(object, "digital_if_hz", (double)status.digitalIfHz);
@@ -1247,7 +1274,7 @@ static int Handle(struct mg_connection *connection, void *context)
             cJSON_AddBoolToObject(reply, "sige", NgFrontendAvailable(NG_FRONTEND_SIGE));
             cJSON_AddBoolToObject(reply, "single_source", 1);
             cJSON_AddBoolToObject(reply, "periodogram", 1);
-            cJSON_AddBoolToObject(reply, "gps_acquisition", 0);
+            cJSON_AddBoolToObject(reply, "gps_acquisition", 1);
             String(reply, "fft_backend", NgFftBackend());
             return JsonReply(connection, 200, reply);
         }

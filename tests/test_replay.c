@@ -145,6 +145,7 @@ static void CheckMetadata(const char *path)
                          "component_bits=8\ncomponent_signed=true\n"
                          "sample_rate_hz=8000000\ncenter_frequency_hz=1576420000\n"
                          "signal_frequency_hz=1575420000\ndigital_if_hz=-1000000\n"
+                         "spectrum_inverted=1\n"
                          "conditioning=dc_iir\ndc_shift=17\nrecording_point=post_conditioning\n";
     CHECK(NgReplayInspect(path, &found, &error) == NG_OK && found.available == 0);
     CHECK(found.samples == NG_TEST_PAIRS);
@@ -160,6 +161,7 @@ static void CheckMetadata(const char *path)
     CHECK(NgReplayConfigure(path, &config, &found, &error) == NG_OK);
     CHECK(found.version == 2 && found.available && found.complete && found.dcRemoval);
     CHECK(config.sampleRateHz == 8000000 && config.windowSamples == 8000);
+    CHECK(config.replaySpectrumInverted == 1 && found.spectrumInverted == 1);
     CHECK(config.centerFrequencyHz == UINT64_C(1576420000));
     CHECK(config.signalFrequencyHz == UINT64_C(1575420000) && config.dcRemoval == 0);
     CHECK(config.dcShift == 17 && config.recordingEnabled == 0);

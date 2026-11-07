@@ -1,0 +1,74 @@
+/** @file acquisition.h @brief Replaceable GPS search strategies on bounded common-ring captures. */
+#ifndef NGENE_ACQUISITION_H
+#define NGENE_ACQUISITION_H
+#include "ngene/channel.h"
+#include "ngene/dsp/search.h"
+/** Acquisition-only options; no tracking or navigation decisions are implied. */
+typedef struct {
+    int enabled; /**< Zero disables channel registration. */
+    unsigned firstPrn; /**< First GPS C/A PRN, 1..32. */
+    unsigned lastPrn; /**< Last PRN, firstPrn..32. */
+    int squareCarrier; /**< Squared local sin/cos instead of sinusoidal carrier. */
+    int xorCorrelation; /**< Exact SIMD code sign XOR instead of multiplication. */
+} TNgAcquisitionConfig;
+/** One search outcome, referenced to the first sample of its capture. */
+typedef struct {
+    unsigned prn; /**< GPS L1 C/A PRN. */
+    int confirmed; /**< Nonzero only after 3 successes out of 4 independent attempts. */
+    double dopplerHz; /**< Physical Doppler, excluding digital IF. */
+    double codePhaseChips; /**< Local replica phase at firstSample, modulo 1023. */
+    double peakRatio; /**< Coarse power divided by its statistical threshold. */
+    unsigned successes; /**< Confirmation successes, 0..4. */
+    uint64_t epoch; /**< Common-ring continuity generation. */
+    uint64_t firstSample; /**< Capture origin, not a GNSS time. */
+} TNgAcquisitionResult;
+/** Copied bounded worker telemetry. Results belong to the most recent tested capture per PRN. */
+typedef struct {
+    int enabled; /**< Registration enabled for this run. */
+    int searching; /**< Worker is processing an owned capture. */
+    unsigned currentPrn; /**< PRN being searched, zero while waiting. */
+    uint64_t searches; /**< Completed satellite searches. */
+    uint64_t skippedSamples; /**< Samples not captured while search owns the buffer. */
+    uint64_t gaps; /**< Discontinuities that invalidated the capture generation. */
+    TNgAcquisitionResult results[32]; /**< Latest result per GPS PRN. */
+    char message[256]; /**< Bounded algorithm error/status; no I/O on the sample path. */
+} TNgAcquisitionSnapshot;
+/** Strategy input. All memory is immutable and owned by the runner until search returns. */
+typedef struct {
+    const TNgComplex *samples; /**< Native-rate ADC samples, never sign-quantized. */
+    size_t count; /**< At least 56 ms of contiguous pairs. */
+    TNgStreamInfo stream; /**< Actual rate and digital IF, never inferred from device name. */
+    TNgBlockMeta origin; /**< First capture sample and continuity generation. */
+} TNgAcquisitionCapture;
+/** Cooperative cancellation predicate; nonzero invalidates any pending result. */
+typedef int (*TNgAcquisitionCancel)(void *context);
+/** Alternative algorithms implement this interface, independent of controller and ring storage.
+ * search runs exclusively on the acquisition worker. Use public ngene/dsp APIs for FFT/code/
+ * carrier/correlation. Never retain capture samples after return; check cancel in long loops.
+ * Context belongs to the caller and must outlive NgAcquisitionDestroy. */
+typedef struct {
+    int (*search)(void *context, const TNgAcquisitionCapture *capture, unsigned prn,
+                  const TNgAcquisitionConfig *config, TNgAcquisitionCancel cancel,
+                  void *cancelContext, TNgAcquisitionResult *result, TNgError *error);
+} TNgAcquisitionStrategy;
+/** Opaque owned runner with one bounded capture and one worker. */
+typedef struct TNgAcquisition TNgAcquisition;
+/** Set GPS PRN1..32, sinusoidal carrier and SIMD products; enabled by default. */
+void NgAcquisitionDefaults(TNgAcquisitionConfig *config);
+/** Validate PRNs and boolean options without allocating or opening hardware. */
+int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error);
+/** Create the default Classic-derived PCPS strategy. Allocates before reception.
+ * stream must contain the actual opened source metadata; supports CI8 and CI16 common streams.
+ * channel receives a borrowed registration, valid until runner destruction. */
+int NgAcquisitionCreate(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
+                        TNgAcquisition **out, TNgChannel *channel, TNgError *error);
+/** Create a runner using caller-owned strategy/context. Same ring and cancellation contract. */
+int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config,
+    const TNgStreamInfo *stream, const TNgAcquisitionStrategy *strategy, void *context,
+    TNgAcquisition **out, TNgChannel *channel, TNgError *error);
+/** Copy worker telemetry; safe concurrently with sample callbacks and search. */
+void NgAcquisitionRead(TNgAcquisition *acquisition, TNgAcquisitionSnapshot *snapshot);
+/** Cancel/join worker and free owned memory after the engine has stopped using channel.
+ * Accepts NULL. Results remain acquisition observations; no fake TRACKING transition. */
+void NgAcquisitionDestroy(TNgAcquisition *acquisition);
+#endif

@@ -52,8 +52,8 @@ static int ShouldStop(void *context)
  *
  * @details
  * Handles informational/device-list commands, INI loading, signal hooks and cleanup. Web mode
- * serves the embedded console; CLI mode captures/records configured samples. Does not
- * implement satellite acquisition/tracking.
+ * serves the embedded console; CLI mode captures/records samples and optionally searches GPS.
+ * Tracking and navigation are not yet integrated.
  *
  * @param argc Command-line argument count.
  * @param argv NUL-terminated argument vector valid for process lifetime.
@@ -68,6 +68,8 @@ int main(int argc, char **argv)
     TNgConfig config;
     TNgFrontend frontend;
     TNgReceiverStats stats;
+    TNgAcquisition *acquisition = NULL;
+    TNgChannel acquisitionChannel;
     TNgConditioner conditioner = NgConditionerBypass();
     int result;
     int web = 0;
@@ -78,7 +80,7 @@ int main(int argc, char **argv)
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
         puts("NGene: [--web] [--config FILE] [--replay FILE] [--port 8080] [--output-dir "
              "captures]\n       "
-             "--list-devices | --version\nC receiver and local web console; no acquisition, "
+             "--list-devices | --version\nC receiver, optional GPS acquisition and local web console; no "
              "tracking or PVT yet.");
         return 0;
     }
@@ -218,13 +220,37 @@ int main(int argc, char **argv)
            frontend.info.centerFrequencyHz, frontend.info.bandwidthHz, config.windowSamples);
     printf("signal=%" PRIu64 " Hz digital_IF=%" PRId64 " Hz conditioning=%s\n",
            frontend.info.signalFrequencyHz, frontend.info.digitalIfHz, conditioner.name);
-    result = NgReceiverRun(&config, &frontend, &conditioner, NULL, 0,
+    if (!config.recordOnly && NgAcquisitionCreate(&config.acquisition, &frontend.info,
+            &acquisition, &acquisitionChannel, &error) != NG_OK) {
+        fprintf(stderr, "%s\n", error.message);
+        NgFrontendDestroy(&frontend);
+        return 1;
+    }
+    result = NgReceiverRun(&config, &frontend, &conditioner,
+                           acquisition ? &acquisitionChannel : NULL, acquisition ? 1u : 0u,
                            ShouldStop, NULL, &stats, &error);
     printf("windows=%" PRIu64 " processed_pairs=%" PRIu64 " written_pairs=%" PRIu64 " gaps=%" PRIu64
            " known_input_drops=%" PRIu64 " queued_discarded_at_stop=%" PRIu64
            " wall_seconds=%.6f\n",
            stats.windows, stats.processedSamples, stats.recording.samples, stats.gapEvents,
            stats.frontend.droppedSamples, stats.frontend.discardedOnStop, stats.wallSeconds);
+    if (acquisition != NULL) {
+        TNgAcquisitionSnapshot snapshot;
+        unsigned prn;
+        NgAcquisitionRead(acquisition, &snapshot);
+        printf("GPS acquisition: searches=%" PRIu64 " skipped_pairs=%" PRIu64 " gaps=%" PRIu64 "\n",
+               snapshot.searches, snapshot.skippedSamples, snapshot.gaps);
+        for (prn = 0; prn < 32; ++prn) {
+            const TNgAcquisitionResult *found = &snapshot.results[prn];
+            if (found->prn != 0)
+                printf("GPS PRN%02u %s Doppler=%.1f Hz code_phase=%.6f chips peak/threshold=%.3f "
+                       "confirmation=%u/4 epoch=%" PRIu64 " sample=%" PRIu64 "\n",
+                       found->prn, found->confirmed ? "CONFIRMED" : "not confirmed",
+                       found->dopplerHz, found->codePhaseChips, found->peakRatio,
+                       found->successes, found->epoch, found->firstSample);
+        }
+    }
+    NgAcquisitionDestroy(acquisition);
     NgFrontendDestroy(&frontend);
     if (result != NG_OK) {
         fprintf(stderr, "%s\n", error.message);

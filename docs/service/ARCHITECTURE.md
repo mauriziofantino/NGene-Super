@@ -4,9 +4,10 @@ The architecture incorporates the diagram and instructions of 28 September 2026.
 
 The 17 October 2026 revision separates mathematics from the receiver and adds an optional
 parallel dispatcher. Frontends, conditioning, recording, and diagnostics are operational;
-satellite acquisition, tracking, demodulation, and PVT still need integration. The CLI and
-controller currently register zero GNSS channels: the new pool is ready for real modules,
-but does not imply those algorithms are already present.
+optional GPS L1 C/A acquisition is now registered through the same channel interface.
+Tracking, demodulation and PVT still need integration. The acquisition registration copies
+bounded captures from the borrowed common-ring window to one strategy worker; it creates
+no independent stream cursor. See [GPS acquisition](GPS_ACQUISITION.md).
 
 ```mermaid
 flowchart TD

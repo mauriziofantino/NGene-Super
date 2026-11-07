@@ -22,7 +22,8 @@ an over-the-air GNSS capture or a position solution.*
 - Common signed CI8/CI16 rings, SIMD conversion and a dedicated source worker. Automatic precision preserves native ADC information.
 - SIMD block-mean DC removal before diagnostic spectra, histograms and gain analysis;
   no IIR filter or conditioning controls. Old DC profile keys are retired and ignored.
-- GNSS acquisition is unavailable: the previous implementation has been removed.
+- Optional GPS L1 C/A acquisition: Classic-derived coarse search, Doppler/code refinement
+  and independent 3-of-4 confirmation, through a replaceable kernel channel strategy.
 - Common-stream recording with segmentation, format/ADC provenance and gap accounting.
 - Spectrum/PSD, synchronized 2D and rectangular relief waterfalls, I/Q histograms and live receiver counters.
 - Runtime diagnostic controls: switching off all three RF views stops their shared
@@ -112,10 +113,13 @@ profile first. Raw I/Q bytes do not encode those parameters.
 
 ## GNSS processing and RF views
 
-The previous GPS acquisition implementation, adapter, API and operational configuration
-have been removed. No acquisition or CAF calculation runs. Existing profiles containing
-an [acquisition] section remain readable; that retired section is ignored and omitted
-when saving. Tracking, navigation decoding and PVT are not integrated.
+GPS L1 C/A acquisition is available in the Acquisition workspace and CLI. Enable
+`acquisition.enabled` in the profile, or start with `config/gps-hackrf.ini`,
+`config/gps-rtlsdr.ini` or `config/gps-sige.ini`. Generic capture profiles default to disabled.
+The worker searches PRNs 1..32, refines Doppler/code and confirms on fresh data. Results
+include the capture epoch/sample origin; they do not represent tracking locks or a fix.
+See [GPS acquisition](docs/service/GPS_ACQUISITION.md) for the strategy contract,
+numerical adaptations, RF conventions and validation limits.
 
 RF observation has three independent, resizable views in order: spectrum, 2D waterfall,
 and a rectangular blue/cyan relief waterfall inspired by the FNIRSI DPO350P display.
