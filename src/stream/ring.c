@@ -87,8 +87,9 @@ int NgRingCreateFormat(size_t blocks, size_t blockSamples, TNgSampleFormat forma
     }
     ring->slotBytes = (blockSamples * stride + 63u) & ~(size_t)63u;
     ring->allocation = malloc(blocks * ring->slotBytes + 63u);
-    ring->samples = ring->allocation ?
-        (unsigned char *)(((uintptr_t)ring->allocation + 63u) & ~(uintptr_t)63u) : NULL;
+    ring->samples = ring->allocation
+                        ? (unsigned char *)(((uintptr_t)ring->allocation + 63u) & ~(uintptr_t)63u)
+                        : NULL;
     ring->metadata = calloc(blocks, sizeof(TNgBlockMeta));
     if (ring->samples == NULL || ring->metadata == NULL) {
         goto memory_error;
@@ -152,8 +153,7 @@ static int Push(TNgRing *ring, const TNgIqView *input, int convert, unsigned tim
     int result = NG_OK;
     const double deadline = NgMonotonicSeconds() + (double)timeoutMs * 0.001;
     if (ring == NULL || input == NULL || input->samples == NULL || input->meta.count == 0 ||
-        input->meta.count > ring->blockSamples ||
-        NgSampleBytes(input->format) == 0 ||
+        input->meta.count > ring->blockSamples || NgSampleBytes(input->format) == 0 ||
         (!convert && (input->format == 0 ? NG_FORMAT_CI8 : input->format) != ring->format) ||
         (convert && ring->format != NG_FORMAT_CI8 && ring->format != NG_FORMAT_CI16) ||
         UINT64_MAX - input->meta.firstSample < input->meta.count ||
@@ -183,7 +183,8 @@ static int Push(TNgRing *ring, const TNgIqView *input, int convert, unsigned tim
                 NgMutexUnlock(&ring->mutex);
                 return NG_ERROR;
             }
-        } else memcpy(destination, input->samples, input->meta.count * ring->stride);
+        } else
+            memcpy(destination, input->samples, input->meta.count * ring->stride);
         ring->metadata[ring->head] = input->meta;
         ring->head = (ring->head + 1) % ring->capacity;
         ++ring->used;
@@ -197,8 +198,17 @@ static int Push(TNgRing *ring, const TNgIqView *input, int convert, unsigned tim
     NgMutexUnlock(&ring->mutex);
     return result;
 }
-int NgRingPush(TNgRing *ring, const TNgIqView *input) { return Push(ring, input, 0, 0); }
-int NgRingPushConverted(TNgRing *ring, const TNgIqView *input) { return Push(ring, input, 1, 0); }
+
+int NgRingPush(TNgRing *ring, const TNgIqView *input)
+{
+    return Push(ring, input, 0, 0);
+}
+
+int NgRingPushConverted(TNgRing *ring, const TNgIqView *input)
+{
+    return Push(ring, input, 1, 0);
+}
+
 int NgRingPushConvertedWait(TNgRing *ring, const TNgIqView *input, unsigned timeoutMs)
 {
     return Push(ring, input, 1, timeoutMs);
@@ -241,8 +251,7 @@ int NgRingAcquire(TNgRing *ring, TNgIqView *view, unsigned timeoutMs)
         result = (ring->closed) != 0 ? NG_END : NG_TIMEOUT;
     } else {
         view->samples =
-            (const TNgIq8 *)(const void *)(ring->samples +
-                                           ring->tail * ring->slotBytes);
+            (const TNgIq8 *)(const void *)(ring->samples + ring->tail * ring->slotBytes);
         view->format = ring->format;
         view->meta = ring->metadata[ring->tail];
         ring->leased = 1;

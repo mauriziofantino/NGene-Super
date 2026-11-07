@@ -327,8 +327,7 @@ static int32_t Shift15(int32_t x)
 /** @brief Return whether a leased observation still has an interested consumer. */
 static int BurstCurrent(TNgAnalysis *a, const TNgBurst *b)
 {
-    return NgAtomicGet(&a->stop) == 0 &&
-           NgAtomicGet(&a->generation[b->kind]) == b->generation;
+    return NgAtomicGet(&a->stop) == 0 && NgAtomicGet(&a->generation[b->kind]) == b->generation;
 }
 
 /** @brief Cancel queued/partial work for one lane while holding its publication mutex. */
@@ -375,7 +374,9 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     int removedDc[2];
     int source = b->kind ? c->histogramPre : c->spectrumPre;
     int fftAttenuated = 0;
-    int adcLimit = b->format == NG_FORMAT_CI16 ? 32768 : b->format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
+    int adcLimit = b->format == NG_FORMAT_CI16       ? 32768
+                   : b->format == NG_FORMAT_SC16_Q11 ? 2048
+                                                     : 128;
     int fftScale = b->format == NG_FORMAT_CI16 ? 1 : b->format == NG_FORMAT_SC16_Q11 ? 8 : 128;
     if (BurstCurrent(a, b) == 0) {
         return 0;
@@ -385,7 +386,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     native.meta.count = b->count;
     if (!a->dcKnown[source] || a->dcFormat[source] != b->format) {
         if (NgIqCenterBlock(&native, a->centered, removedDc, &error) != NG_OK ||
-            BurstCurrent(a, b) == 0) return 0;
+            BurstCurrent(a, b) == 0)
+            return 0;
         a->dcOffset[source][0] = removedDc[0];
         a->dcOffset[source][1] = removedDc[1];
         a->dcFormat[source] = b->format;
@@ -395,7 +397,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         removedDc[0] = a->dcOffset[source][0];
         removedDc[1] = a->dcOffset[source][1];
         if (NgIqSubtractDc(&native, a->centered, removedDc, &error) != NG_OK ||
-            BurstCurrent(a, b) == 0) return 0;
+            BurstCurrent(a, b) == 0)
+            return 0;
     }
     memset(s, 0, sizeof(*s));
     s->histogramMin = -adcLimit;
@@ -438,7 +441,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                 }
                 stats[j]->zeros += v == 0;
                 rawClipping[j] += (unsigned)(raw == -adcLimit || raw == adcLimit - 1);
-                if (v < -adcLimit || v >= adcLimit) histogramLimit = 2 * adcLimit;
+                if (v < -adcLimit || v >= adcLimit)
+                    histogramLimit = 2 * adcLimit;
             }
         }
         /* Widen the displayed axis only when subtracting the mean exceeds the
@@ -446,10 +450,11 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         s->histogramMin = -histogramLimit;
         s->histogramMax = histogramLimit - 1;
         for (k = 0; k < c->histogramPairs; ++k) {
-            if (k % 1024 == 0 && BurstCurrent(a, b) == 0) return 0;
-            ++s->histogramI[(unsigned)(a->centered[2*k] + histogramLimit) * c->histogramBins /
+            if (k % 1024 == 0 && BurstCurrent(a, b) == 0)
+                return 0;
+            ++s->histogramI[(unsigned)(a->centered[2 * k] + histogramLimit) * c->histogramBins /
                             (unsigned)(2 * histogramLimit)];
-            ++s->histogramQ[(unsigned)(a->centered[2*k+1] + histogramLimit) * c->histogramBins /
+            ++s->histogramQ[(unsigned)(a->centered[2 * k + 1] + histogramLimit) * c->histogramBins /
                             (unsigned)(2 * histogramLimit)];
         }
         for (j = 0; j < 2; ++j) {
@@ -460,7 +465,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             stats[j]->clipping = rawClipping[j];
         }
         s->dcMagnitude = hypot(s->statsI.mean, s->statsQ.mean);
-        s->removedDcI = removedDc[0]; s->removedDcQ = removedDc[1];
+        s->removedDcI = removedDc[0];
+        s->removedDcQ = removedDc[1];
         s->dcEstimatePairs = a->dcEstimatePairs[source];
         s->clippedI = s->statsI.clipping;
         s->clippedQ = s->statsQ.clipping;
@@ -470,7 +476,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         /* Offset subtraction can extend beyond the ADC range. Keep every FFT
          * component inside its Q14 contract, then restore power normalization. */
         for (k = 0; k < 2 * b->count; ++k) {
-            if (k % 2048 == 0 && BurstCurrent(a, b) == 0) return 0;
+            if (k % 2048 == 0 && BurstCurrent(a, b) == 0)
+                return 0;
             if (a->centered[k] < -adcLimit || a->centered[k] > adcLimit) {
                 fftAttenuated = 1;
                 break;
@@ -517,14 +524,22 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                 int iValue, qValue;
                 iValue = a->centered[2 * (offset + k)];
                 qValue = a->centered[2 * (offset + k) + 1];
-                { int32_t product = (int32_t)iValue * fftScale * a->window[k];
-                  if (b->format == NG_FORMAT_CI16) product = product>=0 ? product/2 : -1-((-1-product)/2);
-                  if (fftAttenuated) product = product>=0 ? product/2 : -1-((-1-product)/2);
-                  a->input[2*k]=(int16_t)Shift15(product); }
-                { int32_t product = (int32_t)qValue * fftScale * a->window[k];
-                  if (b->format == NG_FORMAT_CI16) product = product>=0 ? product/2 : -1-((-1-product)/2);
-                  if (fftAttenuated) product = product>=0 ? product/2 : -1-((-1-product)/2);
-                  a->input[2*k+1]=(int16_t)Shift15(product); }
+                {
+                    int32_t product = (int32_t)iValue * fftScale * a->window[k];
+                    if (b->format == NG_FORMAT_CI16)
+                        product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                    if (fftAttenuated)
+                        product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                    a->input[2 * k] = (int16_t)Shift15(product);
+                }
+                {
+                    int32_t product = (int32_t)qValue * fftScale * a->window[k];
+                    if (b->format == NG_FORMAT_CI16)
+                        product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                    if (fftAttenuated)
+                        product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                    a->input[2 * k + 1] = (int16_t)Shift15(product);
+                }
             }
             if (BurstCurrent(a, b) == 0) {
                 return 0;
@@ -543,9 +558,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             a->temporalContinuity = b->continuity;
         }
         for (k = 0; k < n; ++k) {
-            double value =
-                (double)a->power[k] * (fftAttenuated ? 4.0 : 1.0) /
-                ((double)c->averages * 16384 * 16384 * gain * gain);
+            double value = (double)a->power[k] * (fftAttenuated ? 4.0 : 1.0) /
+                           ((double)c->averages * 16384 * 16384 * gain * gain);
             if (c->density != 0) {
                 value /= s->enbwHz;
             }
@@ -623,9 +637,8 @@ static void Worker(void *context)
             }
         }
         for (k = 0; k < 4; ++k) {
-            if (a->buffers[k].state == 2 &&
-                (a->buffers[k].revision != a->revision ||
-                 now > a->interestUntil[a->buffers[k].kind])) {
+            if (a->buffers[k].state == 2 && (a->buffers[k].revision != a->revision ||
+                                             now > a->interestUntil[a->buffers[k].kind])) {
                 a->buffers[k].state = 0;
             }
             if (a->buffers[k].state == 2 &&
@@ -691,7 +704,8 @@ static void Worker(void *context)
                 d->statsI = s->statsI;
                 d->statsQ = s->statsQ;
                 d->dcMagnitude = s->dcMagnitude;
-                d->removedDcI = s->removedDcI; d->removedDcQ = s->removedDcQ;
+                d->removedDcI = s->removedDcI;
+                d->removedDcQ = s->removedDcQ;
                 d->dcEstimatePairs = s->dcEstimatePairs;
                 d->clippedI = s->clippedI;
                 d->clippedQ = s->clippedQ;

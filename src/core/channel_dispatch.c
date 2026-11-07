@@ -66,7 +66,8 @@ static void Worker(void *context)
         while (dispatch->nextJob < dispatch->channelCount) {
             size_t index = dispatch->nextJob++;
             TNgChannel *channel = &dispatch->channels[index];
-            if ((channel->state == NG_CHANNEL_ACQUISITION) != dispatch->acquisitionPhase) continue;
+            if ((channel->state == NG_CHANNEL_ACQUISITION) != dispatch->acquisitionPhase)
+                continue;
             TNgChannelResult *result = &dispatch->results[index];
             TNgIqView window = dispatch->window;
             NgMutexUnlock(&dispatch->mutex);
@@ -158,27 +159,33 @@ int NgChannelDispatchProcess(TNgChannelDispatch *dispatch, const TNgIqView *wind
     int phase;
     int result = NG_OK;
     for (k = 0; k < dispatch->channelCount; ++k)
-        if (dispatch->channels[k].state != NG_CHANNEL_ACQUISITION) ++tracking;
+        if (dispatch->channels[k].state != NG_CHANNEL_ACQUISITION)
+            ++tracking;
     for (k = 0; k < dispatch->channelCount; ++k) {
         TNgChannel *channel = &dispatch->channels[k];
-        if (channel->ops->setTrackingLoad) channel->ops->setTrackingLoad(channel->context, tracking);
+        if (channel->ops->setTrackingLoad)
+            channel->ops->setTrackingLoad(channel->context, tracking);
     }
     /* Finish all tracking/holdover work before dispatching acquisition. Commit states
      * only after both waves, so a transition cannot process the same window twice. */
     for (phase = 0; phase < 2; ++phase) {
         size_t jobs = phase ? dispatch->channelCount - tracking : tracking;
-        if (!jobs) continue;
+        if (!jobs)
+            continue;
         if (!dispatch->workerCount) {
             for (k = 0; k < dispatch->channelCount; ++k) {
                 TNgChannel *channel = &dispatch->channels[k];
                 TNgChannelResult *r = &dispatch->results[k];
-                if ((channel->state == NG_CHANNEL_ACQUISITION) != phase) continue;
+                if ((channel->state == NG_CHANNEL_ACQUISITION) != phase)
+                    continue;
                 r->next = channel->state;
                 r->error.message[0] = '\0';
                 r->result = channel->ops->process(channel->context, &channel->id, channel->state,
                                                   window, &r->next, &r->error);
                 if (r->result == NG_OK && !NgChannelTransitionValid(channel->state, r->next))
-                    r->result = NgFail(&r->error, "Invalid state transition requested by channel %u", channel->id.instanceId);
+                    r->result =
+                        NgFail(&r->error, "Invalid state transition requested by channel %u",
+                               channel->id.instanceId);
             }
         } else {
             NgMutexLock(&dispatch->mutex);
@@ -189,7 +196,8 @@ int NgChannelDispatchProcess(TNgChannelDispatch *dispatch, const TNgIqView *wind
             dispatch->completed = 0;
             ++dispatch->generation;
             NgConditionSignal(&dispatch->work);
-            while (dispatch->completed != jobs) NgConditionWait(&dispatch->complete, &dispatch->mutex, UINT_MAX);
+            while (dispatch->completed != jobs)
+                NgConditionWait(&dispatch->complete, &dispatch->mutex, UINT_MAX);
             NgMutexUnlock(&dispatch->mutex);
         }
     }

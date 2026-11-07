@@ -209,8 +209,7 @@ static int OpenRecording(TNgControl *c, TNgError *error)
              (int64_t)time(NULL), suffix);
     snprintf(config.recordingPrefix, sizeof(config.recordingPrefix), "%s", name);
     config.recordingEnabled = 1;
-    if (NgRecorderOpen(&config, &c->info, "bypass", &recorder,
-                       error) != NG_OK) {
+    if (NgRecorderOpen(&config, &c->info, "bypass", &recorder, error) != NG_OK) {
         return NG_ERROR;
     }
     NgMutexLock(&c->mutex);
@@ -427,16 +426,15 @@ static void ReceiverWorker(void *context)
             c->workerResult = OpenRecording(c, &c->workerError);
         }
         if (c->workerResult == NG_OK && !c->runConfig.recordOnly) {
-            c->workerResult = NgAcquisitionCreate(&c->runConfig.acquisition, &source.info,
-                &c->acquisition, &acquisitionChannel, &c->workerError);
+            c->workerResult =
+                NgAcquisitionCreate(&c->runConfig.acquisition, &source.info, &c->acquisition,
+                                    &acquisitionChannel, &c->workerError);
         }
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
-            c->workerResult =
-                NgReceiverRunEx(&c->runConfig, &source, &conditioner,
-                                      c->acquisition ? &acquisitionChannel : NULL,
-                                      c->acquisition ? 1u : 0u,
-                                      StopRequested, c, &c->finalStats, &hooks,
-                                      &c->workerError);
+            c->workerResult = NgReceiverRunEx(&c->runConfig, &source, &conditioner,
+                                              c->acquisition ? &acquisitionChannel : NULL,
+                                              c->acquisition ? 1u : 0u, StopRequested, c,
+                                              &c->finalStats, &hooks, &c->workerError);
         }
         NgMutexLock(&c->mutex);
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);

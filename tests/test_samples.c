@@ -86,9 +86,9 @@ static void TestBlockDc(void)
     TNgError error = {{0}};
     size_t k, t;
     CHECK(allocation && storage);
-    raw = allocation + 1; out = storage + 1; /* SIMD-unaligned input/output. */
-    for (format = NG_FORMAT_CI8; format <= NG_FORMAT_CI16;
-         format = (TNgSampleFormat)(format + 1)) {
+    raw = allocation + 1;
+    out = storage + 1; /* SIMD-unaligned input/output. */
+    for (format = NG_FORMAT_CI8; format <= NG_FORMAT_CI16; format = (TNgSampleFormat)(format + 1)) {
         int limit = format == NG_FORMAT_CI16 ? 32768 : format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
         TNgIqView view = {0};
         view.samples = (const TNgIq8 *)(const void *)raw;
@@ -102,21 +102,24 @@ static void TestBlockDc(void)
             int dc[2], expected[2];
             unsigned c;
             view.meta.count = lengths[t];
-            for (k = 0; k < view.meta.count; ++k) for (c = 0; c < 2; ++c)
-                sum[c] += NgIqComponent(&view, k, c);
+            for (k = 0; k < view.meta.count; ++k)
+                for (c = 0; c < 2; ++c)
+                    sum[c] += NgIqComponent(&view, k, c);
             for (c = 0; c < 2; ++c)
                 expected[c] = (int)llround((double)sum[c] / (double)view.meta.count);
             storage[0] = storage[2 * view.meta.count + 1] = 1234567;
             CHECK(NgIqCenterBlock(&view, out, dc, &error) == NG_OK);
             CHECK(dc[0] == expected[0] && dc[1] == expected[1]);
-            for (k = 0; k < view.meta.count; ++k) for (c = 0; c < 2; ++c)
-                CHECK(out[2 * k + c] == NgIqComponent(&view, k, c) - expected[c]);
+            for (k = 0; k < view.meta.count; ++k)
+                for (c = 0; c < 2; ++c)
+                    CHECK(out[2 * k + c] == NgIqComponent(&view, k, c) - expected[c]);
             CHECK(storage[0] == 1234567 && storage[2 * view.meta.count + 1] == 1234567);
             dc[0] = limit - 1;
             dc[1] = -limit;
             CHECK(NgIqSubtractDc(&view, out, dc, &error) == NG_OK);
-            for (k = 0; k < view.meta.count; ++k) for (c = 0; c < 2; ++c)
-                CHECK(out[2 * k + c] == NgIqComponent(&view, k, c) - dc[c]);
+            for (k = 0; k < view.meta.count; ++k)
+                for (c = 0; c < 2; ++c)
+                    CHECK(out[2 * k + c] == NgIqComponent(&view, k, c) - dc[c]);
             CHECK(storage[0] == 1234567 && storage[2 * view.meta.count + 1] == 1234567);
         }
         /* Extreme mean and an opposite rail: widening must preserve excursions
@@ -133,7 +136,8 @@ static void TestBlockDc(void)
             CHECK(out[0] == -2 * limit + 1 && out[1] == 0 && out[2] == 0);
         }
     }
-    free(storage); free(allocation);
+    free(storage);
+    free(allocation);
 }
 
 int main(int argc, char **argv)

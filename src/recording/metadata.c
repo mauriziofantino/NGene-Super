@@ -249,7 +249,9 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
         }
     }
     if (out->format == NG_FORMAT_CI16) {
-        if(significantBits<1 || significantBits>16 || fractionalBits!=15) return NgFail(error,"CI16 metadata requires valid source precision and signed Q15 components");
+        if (significantBits < 1 || significantBits > 16 || fractionalBits != 15)
+            return NgFail(
+                error, "CI16 metadata requires valid source precision and signed Q15 components");
     }
     if (out->format == NG_FORMAT_SC16_Q11 || out->format == NG_FORMAT_CI16) {
         if (out->samples % 2u != 0) {
@@ -257,7 +259,8 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
         }
         out->samples /= 2u;
     }
-    if (componentBits != (out->format == NG_FORMAT_SC16_Q11 || out->format == NG_FORMAT_CI16 ? 16u : 8u) ||
+    if (componentBits !=
+            (out->format == NG_FORMAT_SC16_Q11 || out->format == NG_FORMAT_CI16 ? 16u : 8u) ||
         componentSigned != (out->format == NG_FORMAT_CU8 ? 0 : 1)) {
         return NgFail(error, "Capture format contradicts component width/signedness");
     }
@@ -321,9 +324,11 @@ int NgReplayInspect(const char *path, TNgCaptureMetadata *metadata, TNgError *er
             }
             result.metadataPath[0] = '\0';
             n = strlen(path);
-            if(n>=5 && strcmp(path+n-5,".ci16")==0) {
-                if(bytes%4u)return NgFail(error,"Incomplete CI16 IQ pair");
-                result.format=NG_FORMAT_CI16;result.samples=bytes/4u;
+            if (n >= 5 && strcmp(path + n - 5, ".ci16") == 0) {
+                if (bytes % 4u)
+                    return NgFail(error, "Incomplete CI16 IQ pair");
+                result.format = NG_FORMAT_CI16;
+                result.samples = bytes / 4u;
             } else if (n >= 8 && strcmp(path + n - 8, ".sc16q11") == 0) {
                 result.format = NG_FORMAT_SC16_Q11;
                 if (bytes % 4u != 0) {
@@ -379,7 +384,7 @@ int NgReplayConfigure(const char *path, TNgConfig *config, TNgCaptureMetadata *m
         int namedFormat = (length >= 4 && (strcmp(path + length - 4, ".cs8") == 0 ||
                                            strcmp(path + length - 4, ".cu8") == 0)) ||
                           (length >= 8 && strcmp(path + length - 8, ".sc16q11") == 0) ||
-                          (length >= 5 && strcmp(path+length-5,".ci16")==0);
+                          (length >= 5 && strcmp(path + length - 5, ".ci16") == 0);
         if (found.available != 0 || namedFormat) {
             draft.replayFormat = found.format;
         } else {

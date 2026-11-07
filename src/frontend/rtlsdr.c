@@ -81,11 +81,14 @@ static void OnSamples(unsigned char *data, uint32_t length, void *context)
         return;
     }
     if (source->calibration) {
-        if (!NgAtomicGet(&source->capture)) return;
+        if (!NgAtomicGet(&source->capture))
+            return;
         NgAtomicSet(&source->publishing, 1);
-        if (!NgAtomicGet(&source->capture)) goto done;
+        if (!NgAtomicGet(&source->capture))
+            goto done;
     }
-    if (NgAtomicGet(&source->ingress.failure) != 0) goto done;
+    if (NgAtomicGet(&source->ingress.failure) != 0)
+        goto done;
     if (data == NULL || length == 0 || (length & 1u) != 0) {
         NgIngressTransportError(&source->ingress);
         goto done;
@@ -96,7 +99,8 @@ static void OnSamples(unsigned char *data, uint32_t length, void *context)
     view.meta.count = (size_t)length / 2u;
     (void)NgIngressSubmit(&source->ingress, &view);
 done:
-    if (source->calibration) NgAtomicSet(&source->publishing, 0);
+    if (source->calibration)
+        NgAtomicSet(&source->publishing, 0);
 }
 
 /** @brief Run librtlsdr's blocking asynchronous dispatcher on a private worker.
@@ -108,8 +112,8 @@ static void Receive(void *context)
     int result = 0;
     if (NgAtomicGet(&source->stopping) == 0) {
         result = rtlsdr_read_async(source->device, OnSamples, source,
-                                  source->calibration ? NG_CAL_RTL_BUFFERS : 0u,
-                                  source->calibration ? 2u * NG_CAL_RTL_BUFFER_PAIRS : 262144u);
+                                   source->calibration ? NG_CAL_RTL_BUFFERS : 0u,
+                                   source->calibration ? 2u * NG_CAL_RTL_BUFFER_PAIRS : 262144u);
     }
     if (NgAtomicGet(&source->stopping) == 0 && NgAtomicGet(&source->ingress.failure) == 0) {
         (void)result;
@@ -127,7 +131,8 @@ static void Receive(void *context)
 static int Start(void *context, TNgError *error)
 {
     TNgRtlsdrSource *source = context;
-    if (source->calibration && source->started) return NG_OK;
+    if (source->calibration && source->started)
+        return NG_OK;
     if (source->hasRun != 0 || rtlsdr_reset_buffer(source->device) != 0) {
         return NgFail(error, "Cannot start/reset RTL-SDR source");
     }
@@ -254,7 +259,8 @@ static int SetGains(TNgRtlsdrSource *source, const TNgConfig *config, TNgError *
 {
     if (((!source->gainsKnown || source->lastAuto != config->rtlAutoGain) &&
          rtlsdr_set_tuner_gain_mode(source->device, config->rtlAutoGain == 0) != 0) ||
-        (!config->rtlAutoGain && (!source->gainsKnown || source->lastAuto || source->lastRf != config->rtlGainTenthsDb) &&
+        (!config->rtlAutoGain &&
+         (!source->gainsKnown || source->lastAuto || source->lastRf != config->rtlGainTenthsDb) &&
          (!GainSupported(source->device, config->rtlGainTenthsDb) ||
           rtlsdr_set_tuner_gain(source->device, config->rtlGainTenthsDb) != 0)))
         return NgFail(error, "RTL-SDR rejected tuner gain mode or discrete RF gain");
@@ -286,9 +292,11 @@ int NgRtlsdrCalibrationPause(TNgFrontend *frontend, TNgError *error)
         return NgFail(error, "Calibration requires a native RTL-SDR source");
     source = frontend->context;
     NgAtomicSet(&source->capture, 0);
-    while (NgAtomicGet(&source->publishing)) NgSleepMs(1);
-    return NgAtomicGet(&source->ingress.failure) ?
-        NgFail(error, "RTL-SDR calibration transport failed") : NG_OK;
+    while (NgAtomicGet(&source->publishing))
+        NgSleepMs(1);
+    return NgAtomicGet(&source->ingress.failure)
+               ? NgFail(error, "RTL-SDR calibration transport failed")
+               : NG_OK;
 }
 
 int NgRtlsdrCalibrationNext(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
@@ -301,17 +309,21 @@ int NgRtlsdrCalibrationNext(const TNgConfig *config, TNgFrontend *frontend, TNgE
     if (!source->calibration && source->started)
         return NgFail(error, "Calibration must be selected before starting RTL-SDR");
     source->calibration = 1;
-    if (NgRtlsdrCalibrationPause(frontend, error) != NG_OK) return NG_ERROR;
+    if (NgRtlsdrCalibrationPause(frontend, error) != NG_OK)
+        return NG_ERROR;
     if (source->hasRun && (!source->started || NgAtomicGet(&source->done)))
         return NgFail(error, "RTL-SDR calibration stream ended");
     for (;;) {
         TNgIqView old;
         int rc = Acquire(source, &old, 0, error);
-        if (rc == NG_TIMEOUT) break;
-        if (rc != NG_OK) return NgFail(error, "Cannot drain RTL-SDR calibration queue");
+        if (rc == NG_TIMEOUT)
+            break;
+        if (rc != NG_OK)
+            return NgFail(error, "Cannot drain RTL-SDR calibration queue");
         Release(source);
     }
-    if (SetGains(source, config, error) != NG_OK) return NG_ERROR;
+    if (SetGains(source, config, error) != NG_OK)
+        return NG_ERROR;
     NgAtomicSet(&source->capture, 1);
     return NG_OK;
 }
@@ -350,7 +362,8 @@ int NgRtlsdrOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error
                "RTL-SDR rejected sample rate, tuning, discrete gain, PPM, bandwidth or bias tee");
         goto failed;
     }
-    if (SetGains(source, config, error) != NG_OK) goto failed;
+    if (SetGains(source, config, error) != NG_OK)
+        goto failed;
     frontend->context = source;
     frontend->ops = &operations;
     frontend->info.sampleRateHz = rtlsdr_get_sample_rate(source->device);
@@ -414,7 +427,8 @@ int NgRtlsdrCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgErro
     }
     snprintf(caps->deviceSerial, sizeof(caps->deviceSerial), "%s", serial);
     switch (rtlsdr_get_tuner_type(device)) {
-    case RTLSDR_TUNER_R820T: case RTLSDR_TUNER_R828D:
+    case RTLSDR_TUNER_R820T:
+    case RTLSDR_TUNER_R828D:
         caps->gainPolicy = NG_GAIN_POLICY_RTL_R82XX;
         strcpy(caps->deviceModel, "RTL-SDR / R82xx");
         break;
@@ -422,7 +436,8 @@ int NgRtlsdrCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgErro
         caps->gainPolicy = NG_GAIN_POLICY_RTL_E4000;
         strcpy(caps->deviceModel, "RTL-SDR / E4000");
         break;
-    case RTLSDR_TUNER_FC0012: case RTLSDR_TUNER_FC0013:
+    case RTLSDR_TUNER_FC0012:
+    case RTLSDR_TUNER_FC0013:
         caps->gainPolicy = NG_GAIN_POLICY_RTL_FC001X;
         strcpy(caps->deviceModel, "RTL-SDR / FC001x");
         break;

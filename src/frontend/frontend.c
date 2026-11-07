@@ -149,7 +149,7 @@ int NgFrontendListHackrf(FILE *output, TNgError *error)
  */
 int NgFrontendAvailable(TNgFrontendKind kind)
 {
-    if(kind == NG_FRONTEND_SIGE) {
+    if (kind == NG_FRONTEND_SIGE) {
 #ifdef NGENE_HAVE_SIGE
         return 1;
 #else
@@ -189,7 +189,8 @@ int NgFrontendList(TNgFrontendKind kind, FILE *output, TNgError *error)
         return NgFail(error, "Missing enumeration output");
     }
 #ifdef NGENE_HAVE_SIGE
-    if(kind == NG_FRONTEND_SIGE) return NgSigeList(output,error);
+    if (kind == NG_FRONTEND_SIGE)
+        return NgSigeList(output, error);
 #endif
 #ifdef NGENE_HAVE_HACKRF
     if (kind == NG_FRONTEND_HACKRF) {
@@ -242,9 +243,11 @@ int NgFrontendCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgEr
     if (!NgFrontendAvailable(config->frontend)) {
         return NgFail(error, "Selected native frontend is disabled in this build");
     }
-    if(config->frontend == NG_FRONTEND_SIGE) {
-        caps->format=NG_FORMAT_CI8;caps->sampleRateMinHz=caps->sampleRateMaxHz=NG_SIGE_RATE_HZ;
-        caps->frequencyMinHz=caps->frequencyMaxHz=NG_SIGE_CENTER_HZ;return NG_OK;
+    if (config->frontend == NG_FRONTEND_SIGE) {
+        caps->format = NG_FORMAT_CI8;
+        caps->sampleRateMinHz = caps->sampleRateMaxHz = NG_SIGE_RATE_HZ;
+        caps->frequencyMinHz = caps->frequencyMaxHz = NG_SIGE_CENTER_HZ;
+        return NG_OK;
     }
     caps->format = config->frontend == NG_FRONTEND_FILE ? config->replayFormat : NG_FORMAT_CI8;
     caps->sampleRateMinHz =
@@ -259,14 +262,23 @@ int NgFrontendCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgEr
 const char *NgFrontendGainPolicyName(TNgGainPolicy policy)
 {
     switch (policy) {
-    case NG_GAIN_POLICY_HACKRF_MAX2837: return "HackRF MAX2837: prefer early gain";
-    case NG_GAIN_POLICY_HACKRF_MAX2839: return "HackRF MAX2839: compensated physical gains";
-    case NG_GAIN_POLICY_HACKRF_MAX2831: return "HackRF MAX2831: three physical LNA states";
-    case NG_GAIN_POLICY_RTL_R82XX: return "RTL R82xx: native manual LNA/mixer allocation";
-    case NG_GAIN_POLICY_RTL_E4000: return "RTL E4000: LNA/mixer and six IF stages, earlier gain preferred";
-    case NG_GAIN_POLICY_RTL_FC001X: return "RTL FC001x: native discrete manual gain";
-    case NG_GAIN_POLICY_BLADERF1: return "bladeRF 1: native LNA/RXVGA1/RXVGA2 allocation";
-    case NG_GAIN_POLICY_BLADERF2: return "bladeRF 2: native AD9361 full gain table";
-    default: return "Gain calibration unavailable for this device";
+    case NG_GAIN_POLICY_HACKRF_MAX2837:
+        return "HackRF MAX2837: prefer early gain";
+    case NG_GAIN_POLICY_HACKRF_MAX2839:
+        return "HackRF MAX2839: compensated physical gains";
+    case NG_GAIN_POLICY_HACKRF_MAX2831:
+        return "HackRF MAX2831: three physical LNA states";
+    case NG_GAIN_POLICY_RTL_R82XX:
+        return "RTL R82xx: native manual LNA/mixer allocation";
+    case NG_GAIN_POLICY_RTL_E4000:
+        return "RTL E4000: LNA/mixer and six IF stages, earlier gain preferred";
+    case NG_GAIN_POLICY_RTL_FC001X:
+        return "RTL FC001x: native discrete manual gain";
+    case NG_GAIN_POLICY_BLADERF1:
+        return "bladeRF 1: native LNA/RXVGA1/RXVGA2 allocation";
+    case NG_GAIN_POLICY_BLADERF2:
+        return "bladeRF 2: native AD9361 full gain table";
+    default:
+        return "Gain calibration unavailable for this device";
     }
 }

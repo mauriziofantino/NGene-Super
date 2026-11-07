@@ -126,7 +126,7 @@ static int CalibrationCancelled(void *context)
 }
 
 static void CalibrationProgress(void *context, const TNgConfig *candidate,
-                                 const TNgGainCalibration *result)
+                                const TNgGainCalibration *result)
 {
     TNgWebServer *server = context;
     NgMutexLock(&server->commandMutex);
@@ -146,7 +146,8 @@ static void CalibrationWorker(void *context)
     server->calibrationResult = result;
     server->calibrationError = error;
     server->calibrationSeconds = NgMonotonicSeconds() - server->calibrationStarted;
-    if (rc == NG_OK && CalibrationCancelled(server)) rc = NG_END;
+    if (rc == NG_OK && CalibrationCancelled(server))
+        rc = NG_END;
     server->calibrationState = rc == NG_OK ? 2 : rc == NG_END ? 4 : 3;
     NgMutexUnlock(&server->commandMutex);
 }
@@ -203,8 +204,9 @@ static cJSON *CalibrationJson(TNgWebServer *server)
     String(reply, "error", server->calibrationError.message);
     cJSON_AddBoolToObject(reply, "cancel_requested", NgAtomicGet(&server->calibrationCancel));
     cJSON_AddBoolToObject(reply, "accepted", server->calibrationState == 2 && result->accepted);
-    Number(reply, "elapsed_seconds", server->calibrationState == 1 ?
-           NgMonotonicSeconds() - server->calibrationStarted : server->calibrationSeconds);
+    Number(reply, "elapsed_seconds",
+           server->calibrationState == 1 ? NgMonotonicSeconds() - server->calibrationStarted
+                                         : server->calibrationSeconds);
     Number(reply, "tested", result->tested);
     String(reply, "device_model", result->capabilities.deviceModel);
     String(reply, "device_serial", result->capabilities.deviceSerial);
@@ -441,10 +443,10 @@ static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s, unsigned mask)
     cJSON *hi = cJSON_CreateArray();
     cJSON *hq = cJSON_CreateArray();
     size_t k;
-    size_t spectrumBins = ((mask & 1u) != 0 && s->config.spectrumEnabled != 0)
-                              ? s->spectrumBins : 0;
-    unsigned histogramBins = ((mask & 2u) != 0 && s->config.histogramEnabled != 0)
-                                 ? s->histogramBins : 0;
+    size_t spectrumBins =
+        ((mask & 1u) != 0 && s->config.spectrumEnabled != 0) ? s->spectrumBins : 0;
+    unsigned histogramBins =
+        ((mask & 2u) != 0 && s->config.histogramEnabled != 0) ? s->histogramBins : 0;
     TNgPsdIntegrity check = s->integrity;
     if (spectrumBins != 0) {
         NgPsdCheck(s->spectrumDbfs, spectrumBins, &check);
@@ -466,7 +468,7 @@ static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s, unsigned mask)
     Number(o, "telemetry_checksum", check.checksum);
     cJSON_AddBoolToObject(o, "integrity_ok",
                           !spectrumBins || (check.checksum == s->integrity.checksum &&
-                                               !check.nanCount && !check.infCount));
+                                            !check.nanCount && !check.infCount));
     Number(o, "enbw_hz", s->enbwHz);
     cJSON_AddItemToObject(o, "stats_i", ComponentJson(&s->statsI));
     cJSON_AddItemToObject(o, "stats_q", ComponentJson(&s->statsQ));
@@ -646,7 +648,8 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         for (prn = 0; prn < 32; ++prn) {
             const TNgAcquisitionResult *found = &status.acquisition.results[prn];
             cJSON *item;
-            if (found->prn == 0) continue;
+            if (found->prn == 0)
+                continue;
             item = cJSON_CreateObject();
             Number(item, "prn", found->prn);
             cJSON_AddBoolToObject(item, "confirmed", found->confirmed);
@@ -722,7 +725,6 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     Counter(object, "recording_segments", status.recording.segments);
     return object;
 }
-
 
 static int ConfigText(const TNgConfig *config, char *text, size_t capacity)
 {
@@ -837,7 +839,7 @@ static int FileNameValid(const char *name)
     }
     return (n > 4 && (strcmp(name + n - 4, ".cs8") == 0 || strcmp(name + n - 4, ".cu8") == 0)) ||
            (n > 8 && strcmp(name + n - 8, ".sc16q11") == 0) ||
-         (n > 5 && strcmp(name + n - 5, ".ci16") == 0) ||
+           (n > 5 && strcmp(name + n - 5, ".ci16") == 0) ||
            (n > 9 && strcmp(name + n - 9, ".meta.ini") == 0) ||
            (n > 10 && strcmp(name + n - 10, ".index.csv") == 0);
 }
@@ -969,9 +971,10 @@ static int GuardedCommand(TNgWebServer *server, TNgControl *control, TNgCommand 
 {
     int result;
     NgMutexLock(&server->commandMutex);
-    result = server->calibrationState == 1 && command == NG_CMD_START
-        ? NgFail(error, "Gain calibration owns the SDR; cancel it before starting the receiver")
-        : NgControlRequest(control, command, revision, id, error);
+    result =
+        server->calibrationState == 1 && command == NG_CMD_START
+            ? NgFail(error, "Gain calibration owns the SDR; cancel it before starting the receiver")
+            : NgControlRequest(control, command, revision, id, error);
     NgMutexUnlock(&server->commandMutex);
     return result;
 }
@@ -1043,12 +1046,15 @@ static void AddPickerEntry(void *context, const char *name, uint64_t bytes, int 
         return;
     }
     if (directory == 0) {
-        usable =
-            bytes > 0 &&
-            bytes % (((length >= 8 && strcmp(name + length - 8, ".sc16q11") == 0) || (length >= 5 && strcmp(name + length - 5, ".ci16") == 0)) ? 4u : 2u) == 0 &&
-            snprintf(full, sizeof(full), "%s/%s", list->directory, name) < (int)sizeof(full) &&
-            NgFileAbsolute(full, absolute, sizeof(absolute)) == 0 &&
-            FileInUse(list->server, absolute, 0) == 0;
+        usable = bytes > 0 &&
+                 bytes % (((length >= 8 && strcmp(name + length - 8, ".sc16q11") == 0) ||
+                           (length >= 5 && strcmp(name + length - 5, ".ci16") == 0))
+                              ? 4u
+                              : 2u) ==
+                     0 &&
+                 snprintf(full, sizeof(full), "%s/%s", list->directory, name) < (int)sizeof(full) &&
+                 NgFileAbsolute(full, absolute, sizeof(absolute)) == 0 &&
+                 FileInUse(list->server, absolute, 0) == 0;
     }
     entry = cJSON_CreateObject();
     String(entry, "name", name);
@@ -1397,7 +1403,8 @@ static int Handle(struct mg_connection *connection, void *context)
         if (!cJSON_IsString(job) || strcmp(job->valuestring, id) != 0) {
             code = Failure(connection, 409, "Calibration job changed; refresh its status");
         } else {
-            if (server->calibrationState == 1) NgAtomicSet(&server->calibrationCancel, 1);
+            if (server->calibrationState == 1)
+                NgAtomicSet(&server->calibrationCancel, 1);
             code = JsonReply(connection, 202, CalibrationJson(server));
         }
         NgMutexUnlock(&server->commandMutex);
@@ -1417,19 +1424,24 @@ static int Handle(struct mg_connection *connection, void *context)
         } else if (status.state != NG_STOPPED && status.state != NG_FAILED) {
             code = Failure(connection, 409, "Stop the receiver before calibrating gains");
         } else if (status.revision != revision || status.commandId != status.completedCommandId) {
-            code = Failure(connection, 409, "Receiver profile or command changed; reload before calibration");
+            code = Failure(connection, 409,
+                           "Receiver profile or command changed; reload before calibration");
         } else if ((input = tmpfile()) == NULL) {
             code = Failure(connection, 500, "Cannot prepare calibration profile");
         } else {
             int result = NG_ERROR;
             if (fwrite(ini->valuestring, 1, strlen(ini->valuestring), input) ==
-                    strlen(ini->valuestring) && fseek(input, 0, SEEK_SET) == 0)
+                    strlen(ini->valuestring) &&
+                fseek(input, 0, SEEK_SET) == 0)
                 result = NgConfigRead(input, &config, &error);
             fclose(input);
-            if (result == NG_OK) result = NgControlValidate(&config, &error);
-            if (result == NG_OK) result = StartCalibration(server, &config, revision, &error);
+            if (result == NG_OK)
+                result = NgControlValidate(&config, &error);
+            if (result == NG_OK)
+                result = StartCalibration(server, &config, revision, &error);
             if (result != NG_OK) {
-                code = Failure(connection, 400, error.message[0] ? error.message : "SDR calibration failed");
+                code = Failure(connection, 400,
+                               error.message[0] ? error.message : "SDR calibration failed");
             } else {
                 code = JsonReply(connection, 202, CalibrationJson(server));
             }
@@ -1445,7 +1457,8 @@ static int Handle(struct mg_connection *connection, void *context)
         NgMutexLock(&server->commandMutex);
         NgControlSnapshot(control, &status);
         if (server->calibrationState == 1) {
-            code = Failure(connection, 409, "Wait for gain calibration or cancel it before querying device limits");
+            code = Failure(connection, 409,
+                           "Wait for gain calibration or cancel it before querying device limits");
         } else if (status.state != NG_STOPPED && status.state != NG_FAILED) {
             code = Failure(connection, 409, "Stop the receiver before querying device limits");
         } else if (!cJSON_IsString(ini) || (input = tmpfile()) == NULL) {
@@ -1580,9 +1593,12 @@ static int Handle(struct mg_connection *connection, void *context)
                 NgMutexLock(&server->commandMutex);
                 if (server->calibrationState == 1 ||
                     NgControlConfigure(control, &config, revision, &error) != NG_OK)
-                    code = Failure(connection, 409, server->calibrationState == 1 ?
-                                   "Cancel gain calibration before applying a profile" : error.message);
-                else code = ConfigReply(control, connection);
+                    code = Failure(connection, 409,
+                                   server->calibrationState == 1
+                                       ? "Cancel gain calibration before applying a profile"
+                                       : error.message);
+                else
+                    code = ConfigReply(control, connection);
                 NgMutexUnlock(&server->commandMutex);
             }
         }
@@ -1817,23 +1833,37 @@ static cJSON *LoadModuleSchema(TNgError *error)
         FILE *file = fopen(path, "rb");
         char *text;
         size_t count;
-        if (!file) { NgFail(error, "Cannot open NGENE_MODULE_SCHEMA"); return NULL; }
+        if (!file) {
+            NgFail(error, "Cannot open NGENE_MODULE_SCHEMA");
+            return NULL;
+        }
         text = malloc(262145);
-        if (!text) { fclose(file); NgFail(error, "Cannot allocate module descriptor"); return NULL; }
+        if (!text) {
+            fclose(file);
+            NgFail(error, "Cannot allocate module descriptor");
+            return NULL;
+        }
         count = fread(text, 1, 262144, file);
         if (ferror(file) || count == 262144) {
-            fclose(file); free(text); NgFail(error, "Module descriptor read failed or exceeds 256 KiB"); return NULL;
+            fclose(file);
+            free(text);
+            NgFail(error, "Module descriptor read failed or exceeds 256 KiB");
+            return NULL;
         }
         fclose(file);
         text[count] = '\0';
         schema = cJSON_ParseWithOpts(text, NULL, 1);
         free(text);
-    } else schema = cJSON_ParseWithLength((const char *)ngModuleParametersJson, ngModuleParametersJsonLength);
+    } else
+        schema = cJSON_ParseWithLength((const char *)ngModuleParametersJson,
+                                       ngModuleParametersJsonLength);
     if (!schema || !cJSON_IsObject(schema) ||
         cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(schema, "version")) != 1 ||
         !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(schema, "modules")) ||
         !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(schema, "references"))) {
-        cJSON_Delete(schema); NgFail(error, "Invalid version-1 module descriptor"); return NULL;
+        cJSON_Delete(schema);
+        NgFail(error, "Invalid version-1 module descriptor");
+        return NULL;
     }
     return schema;
 }
@@ -1912,7 +1942,8 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     NgAtomicSet(&server.quit, 1);
     NgAtomicSet(&server.calibrationCancel, 1);
     mg_stop(server.http);
-    if (server.calibrationThreadStarted) NgThreadJoin(server.calibrationThread);
+    if (server.calibrationThreadStarted)
+        NgThreadJoin(server.calibrationThread);
     cJSON_Delete(server.moduleSchema);
     NgControlDestroy(server.control);
     mg_exit_library();

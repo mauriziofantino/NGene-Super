@@ -513,10 +513,12 @@ static void TestTrackingPriority(void)
         Initialize(&fixture, NG_TEST_SERIAL, 3, workers);
         fixture.channels[1].state = NG_CHANNEL_TRACKING;
         fixture.channels[2].state = NG_CHANNEL_HOLDOVER;
-        for (channel = 0; channel < 3; ++channel) fixture.channels[channel].ops = &ops;
+        for (channel = 0; channel < 3; ++channel)
+            fixture.channels[channel].ops = &ops;
         RunScheduled(&fixture);
         CHECK(fixture.result == NG_OK && fixture.hookCalls == 5);
-        for (channel = 0; channel < 3; ++channel) CHECK(fixture.calls[channel] == 5);
+        for (channel = 0; channel < 3; ++channel)
+            CHECK(fixture.calls[channel] == 5);
         Destroy(&fixture);
     }
 }

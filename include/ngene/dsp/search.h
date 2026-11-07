@@ -2,8 +2,12 @@
 #ifndef NGENE_DSP_SEARCH_H
 #define NGENE_DSP_SEARCH_H
 #include "ngene/types.h"
+
 /** Interleaved single-precision complex sample in native ADC units. */
-typedef struct { float i; float q; } TNgComplex;
+typedef struct {
+    float i;
+    float q;
+} TNgComplex;
 /** Owned immutable FFT tables, shareable by independent workspaces. */
 typedef struct TNgSearchFft TNgSearchFft;
 /** Allocate radix-2 FFT tables. size is a power of two in 8..16384.
@@ -31,6 +35,6 @@ void NgSearchMix(TNgComplex *values, const TNgComplex *carrier, size_t count);
 /** Complex prompt correlation. xorSigns selects exact IEEE sign-bit XOR with +/-1 code;
  * zero selects SIMD multiplication. Both preserve input amplitude. No sign quantization.
  * Returns double accumulators to preserve coherent-sum precision. */
-void NgSearchCorrelate(const TNgComplex *values, const float *code, size_t count,
-                       int xorSigns, double *i, double *q);
+void NgSearchCorrelate(const TNgComplex *values, const float *code, size_t count, int xorSigns,
+                       double *i, double *q);
 #endif

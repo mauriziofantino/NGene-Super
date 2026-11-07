@@ -6,17 +6,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define CHECK(condition) do { if (!(condition)) { \
-    fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #condition); return 1; } } while (0)
+#define CHECK(condition)                                                                           \
+    do {                                                                                           \
+        if (!(condition)) {                                                                        \
+            fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #condition);                           \
+            return 1;                                                                              \
+        }                                                                                          \
+    } while (0)
+
 /** Deterministic independent uniform noise source. */
 static double Noise(uint32_t *state)
 {
     *state = *state * 1664525u + 1013904223u;
     return (double)(*state >> 8) / 16777216.0 - 0.5;
 }
+
 /** Native-rate waveform oracle: double trigonometry and direct continuous code indexing. */
-static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns,
-                    int signal, int truncated)
+static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, int signal,
+                    int truncated)
 {
     TNgAcquisition *acquisition = NULL;
     TNgAcquisitionConfig config;
@@ -40,8 +47,10 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns,
         double time = (double)k / rate;
         double codePhase = fmod(phase + time * 1023000.0 * (1 + doppler / 1575420000.0), 1023);
         double carrier = 6.283185307179586 * ((double)digitalIf + doppler) * time + 0.71;
-        if (rate == 8183800) carrier = -carrier;
-        double amplitude = signal && (!truncated || time < 0.024) ? 5 * chips[(size_t)codePhase] : 0;
+        if (rate == 8183800)
+            carrier = -carrier;
+        double amplitude =
+            signal && (!truncated || time < 0.024) ? 5 * chips[(size_t)codePhase] : 0;
         samples[k].i = (int8_t)lround(amplitude * cos(carrier) + 28 * Noise(&random) + 2.3);
         samples[k].q = (int8_t)lround(amplitude * sin(carrier) + 28 * Noise(&random) - 1.7);
     }
@@ -50,17 +59,22 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns,
     stream.format = NG_FORMAT_CI8;
     stream.spectrumInverted = rate == 8183800;
     NgAcquisitionDefaults(&config);
-    config.firstPrn = 7; config.lastPrn = 7;
-    config.squareCarrier = square; config.xorCorrelation = xorSigns;
+    config.firstPrn = 7;
+    config.lastPrn = 7;
+    config.squareCarrier = square;
+    config.xorCorrelation = xorSigns;
     CHECK(NgAcquisitionCreate(&config, &stream, &acquisition, &channel, &error) == NG_OK);
-    window.samples = samples; window.meta.count = count;
-    window.meta.epoch = 3; window.meta.firstSample = 1000000;
-    CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &window,
-                               &next, &error) == NG_OK);
+    window.samples = samples;
+    window.meta.count = count;
+    window.meta.epoch = 3;
+    window.meta.firstSample = 1000000;
+    CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &window, &next,
+                               &error) == NG_OK);
     CHECK(next == NG_CHANNEL_ACQUISITION);
     for (tries = 0; tries < 3000; ++tries) {
         NgAcquisitionRead(acquisition, &snapshot);
-        if (snapshot.searches != 0) break;
+        if (snapshot.searches != 0)
+            break;
         NgSleepMs(10);
     }
     printf("rate=%u IF=%lld square=%d xor=%d signal=%d truncated=%d searches=%llu "
@@ -82,6 +96,7 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns,
     free(samples);
     return 0;
 }
+
 /** Check FFT normalization/phase and exact XOR/product agreement on nonintegral IQ. */
 static int Kernels(void)
 {
@@ -95,7 +110,8 @@ static int Kernels(void)
     double xq;
     size_t k;
     CHECK(NgSearchFftCreate(16, &fft, &error) == NG_OK);
-    values[3].i = 0.37f; values[3].q = -0.19f;
+    values[3].i = 0.37f;
+    values[3].q = -0.19f;
     NgSearchFftExecute(fft, values, 0);
     for (k = 0; k < 16; ++k) {
         double angle = -6.283185307179586 * (double)(3 * k) / 16;
@@ -103,29 +119,37 @@ static int Kernels(void)
     }
     NgSearchFftExecute(fft, values, 1);
     CHECK(fabs(values[3].i - 0.37) < 1e-6);
-    for (k = 0; k < 16; ++k) code[k] = k % 2 ? -1.0f : 1.0f;
+    for (k = 0; k < 16; ++k)
+        code[k] = k % 2 ? -1.0f : 1.0f;
     NgSearchCorrelate(values, code, 15, 0, &pi, &pq);
     NgSearchCorrelate(values, code, 15, 1, &xi, &xq);
     CHECK(pi == xi && pq == xq);
     NgSearchFftDestroy(fft);
     return 0;
 }
+
 /** Custom strategy fixture proves raw native precision and cancellation across ring gaps. */
 typedef struct {
     TNgAtomicInt entered;
     TNgAtomicInt cancelled;
     TNgAtomicInt release;
 } TNgStrategyFixture;
+
 /** Replacement strategy sees owned raw samples; cooperatively abandons stale captures. */
 static int FixtureSearch(void *context, const TNgAcquisitionCapture *capture, unsigned prn,
-    const TNgAcquisitionConfig *config, TNgAcquisitionCancel cancel, void *cancelContext,
-    TNgAcquisitionResult *result, TNgError *error)
+                         const TNgAcquisitionConfig *config, TNgAcquisitionCancel cancel,
+                         void *cancelContext, TNgAcquisitionResult *result, TNgError *error)
 {
     TNgStrategyFixture *fixture = context;
-    (void)config; (void)error;
+    (void)config;
+    (void)error;
     NgAtomicSet(&fixture->entered, 1);
-    while (!NgAtomicGet(&fixture->release) && !cancel(cancelContext)) NgSleepMs(1);
-    if (cancel(cancelContext)) { NgAtomicSet(&fixture->cancelled, 1); return NG_END; }
+    while (!NgAtomicGet(&fixture->release) && !cancel(cancelContext))
+        NgSleepMs(1);
+    if (cancel(cancelContext)) {
+        NgAtomicSet(&fixture->cancelled, 1);
+        return NG_END;
+    }
     result->prn = prn;
     result->firstSample = capture->origin.firstSample;
     result->epoch = capture->origin.epoch;
@@ -133,6 +157,7 @@ static int FixtureSearch(void *context, const TNgAcquisitionCapture *capture, un
     result->codePhaseChips = capture->samples[0].q;
     return NG_OK;
 }
+
 /** Exercise pluggability, 16-bit amplitude, raw Q convention and discontinuity invalidation. */
 static int Ownership(void)
 {
@@ -150,39 +175,51 @@ static int Ownership(void)
     int16_t *samples = calloc(2 * count, sizeof(*samples));
     unsigned wait;
     CHECK(samples != NULL);
-    samples[0] = 12345; samples[1] = -23456;
-    stream.sampleRateHz = 2048000; stream.format = NG_FORMAT_CI16;
+    samples[0] = 12345;
+    samples[1] = -23456;
+    stream.sampleRateHz = 2048000;
+    stream.format = NG_FORMAT_CI16;
     stream.spectrumInverted = 1;
-    NgAcquisitionDefaults(&config); config.firstPrn = 1; config.lastPrn = 1;
-    CHECK(NgAcquisitionCreateWithStrategy(&config, &stream, &strategy, &fixture,
-                                         &acquisition, &channel, &error) == NG_OK);
-    window.samples = (const TNgIq8 *)samples; window.format = NG_FORMAT_CI16;
-    window.meta.count = count; window.meta.epoch = 1;
-    CHECK(channel.ops->process(channel.context, &channel.id, channel.state,
-                               &window, &next, &error) == NG_OK);
-    for (wait = 0; wait < 1000 && !NgAtomicGet(&fixture.entered); ++wait) NgSleepMs(1);
+    NgAcquisitionDefaults(&config);
+    config.firstPrn = 1;
+    config.lastPrn = 1;
+    CHECK(NgAcquisitionCreateWithStrategy(&config, &stream, &strategy, &fixture, &acquisition,
+                                          &channel, &error) == NG_OK);
+    window.samples = (const TNgIq8 *)samples;
+    window.format = NG_FORMAT_CI16;
+    window.meta.count = count;
+    window.meta.epoch = 1;
+    CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &window, &next,
+                               &error) == NG_OK);
+    for (wait = 0; wait < 1000 && !NgAtomicGet(&fixture.entered); ++wait)
+        NgSleepMs(1);
     CHECK(NgAtomicGet(&fixture.entered));
-    window.meta.epoch = 2; window.meta.firstSample = count;
+    window.meta.epoch = 2;
+    window.meta.firstSample = count;
     window.meta.flags = NG_BLOCK_GAP;
-    CHECK(channel.ops->process(channel.context, &channel.id, channel.state,
-                               &window, &next, &error) == NG_OK);
-    for (wait = 0; wait < 1000 && !NgAtomicGet(&fixture.cancelled); ++wait) NgSleepMs(1);
+    CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &window, &next,
+                               &error) == NG_OK);
+    for (wait = 0; wait < 1000 && !NgAtomicGet(&fixture.cancelled); ++wait)
+        NgSleepMs(1);
     CHECK(NgAtomicGet(&fixture.cancelled));
     for (wait = 0; wait < 1000; ++wait) {
         NgAcquisitionRead(acquisition, &snapshot);
-        if (!snapshot.searching) break;
+        if (!snapshot.searching)
+            break;
         NgSleepMs(1);
     }
     CHECK(snapshot.searches == 0 && snapshot.gaps == 1);
     NgAtomicSet(&fixture.release, 1);
-    window.meta.flags = 0; window.meta.firstSample += count;
-    CHECK(channel.ops->process(channel.context, &channel.id, channel.state,
-                               &window, &next, &error) == NG_OK);
+    window.meta.flags = 0;
+    window.meta.firstSample += count;
+    CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &window, &next,
+                               &error) == NG_OK);
     /* Overwrite the ring backing store immediately after callback return. */
     memset(samples, 0, 2 * count * sizeof(*samples));
     for (wait = 0; wait < 1000; ++wait) {
         NgAcquisitionRead(acquisition, &snapshot);
-        if (snapshot.searches != 0) break;
+        if (snapshot.searches != 0)
+            break;
         NgSleepMs(1);
     }
     CHECK(snapshot.searches == 1);
@@ -190,9 +227,11 @@ static int Ownership(void)
     CHECK(snapshot.results[0].codePhaseChips == -23456);
     CHECK(snapshot.results[0].epoch == 2);
     CHECK(snapshot.results[0].firstSample == 2 * count);
-    NgAcquisitionDestroy(acquisition); free(samples);
+    NgAcquisitionDestroy(acquisition);
+    free(samples);
     return 0;
 }
+
 /** Run RF formats/rates, sinusoidal/square mixing, noise and independent confirmation cases. */
 int main(void)
 {

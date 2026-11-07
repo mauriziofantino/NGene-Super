@@ -79,9 +79,8 @@ static void Worker(void *context)
              * a slot instead of declaring loss as soon as the worker catches it.
              * Native overflow/disconnection remains the adapter's responsibility;
              * a genuinely stalled consumer still fails after the 50 ms wait. */
-            rc = s->policy == NG_OVERFLOW_DROP_NEWEST
-                     ? NgRingPushConverted(s->ring, &view)
-                     : NgRingPushConvertedWait(s->ring, &view, 50);
+            rc = s->policy == NG_OVERFLOW_DROP_NEWEST ? NgRingPushConverted(s->ring, &view)
+                                                      : NgRingPushConvertedWait(s->ring, &view, 50);
             /* Replay has no RF deadline and may keep waiting, polling stop. */
             while (rc == NG_FULL && s->native.info.sourceName &&
                    strcmp(s->native.info.sourceName, "file") == 0 && !NgAtomicGet(&s->stop)) {
@@ -97,7 +96,9 @@ static void Worker(void *context)
                 s->dropped += view.meta.count;
                 s->pending += view.meta.count;
                 rc = s->policy == NG_OVERFLOW_STOP
-                         ? NgFail(&error, "Common stream reader stalled for 50 ms; ring full, continuity lost")
+                         ? NgFail(
+                               &error,
+                               "Common stream reader stalled for 50 ms; ring full, continuity lost")
                          : NG_OK;
             }
         } else if (rc == NG_OK) {

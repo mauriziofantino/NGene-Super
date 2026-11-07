@@ -14,8 +14,12 @@ typedef struct {
     unsigned rejectionReasons;
 } TNgGainQuality;
 
-enum { NG_GAIN_WEAK = 1u, NG_GAIN_OVERLOAD = 2u,
-       NG_GAIN_DISTRIBUTION = 4u, NG_GAIN_IMBALANCE = 8u };
+enum {
+    NG_GAIN_WEAK = 1u,
+    NG_GAIN_OVERLOAD = 2u,
+    NG_GAIN_DISTRIBUTION = 4u,
+    NG_GAIN_IMBALANCE = 8u
+};
 
 typedef struct {
     TNgConfig selected;

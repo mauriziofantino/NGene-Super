@@ -49,8 +49,8 @@ struct TNgRecorder {
 
 static unsigned StoredPrecision(const TNgRecorder *r)
 {
-    unsigned width=(unsigned)NgSampleBytes(r->capture.format)*4u;
-    return r->adcBits<width?r->adcBits:width;
+    unsigned width = (unsigned)NgSampleBytes(r->capture.format) * 4u;
+    return r->adcBits < width ? r->adcBits : width;
 }
 
 /**
@@ -68,10 +68,10 @@ static int SegmentOpen(TNgRecorder *r)
 {
     char path[640];
     if (snprintf(path, sizeof(path), "%s_%06" PRIu64 ".%s", r->config.recordingPrefix, r->segment,
-                 r->capture.format == NG_FORMAT_CI16 ? "ci16"
+                 r->capture.format == NG_FORMAT_CI16       ? "ci16"
                  : r->capture.format == NG_FORMAT_SC16_Q11 ? "sc16q11"
-                 : r->capture.format == NG_FORMAT_CU8    ? "cu8"
-                                                         : "cs8") >= (int)sizeof(path)) {
+                 : r->capture.format == NG_FORMAT_CU8      ? "cu8"
+                                                           : "cs8") >= (int)sizeof(path)) {
         return NgFail(&r->writerError, "Recording path is too long");
     }
     r->raw = NgFopenExclusive(path);
@@ -99,18 +99,21 @@ static int SegmentOpen(TNgRecorder *r)
                 "significant_bits=%u\nfractional_bits=%u\nsource_native_format=%s\nsource_adc_bits=%u\ndata_file=%s\n"
                 "sample_rate_hz=%u\nsample_rate_basis=configured_nominal\n"
                 "center_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
-                "\ndigital_if_hz=%" PRId64 "\nspectrum_inverted=%d\nbandwidth_hz=%u\nconditioning=%s\n"
+                "\ndigital_if_hz=%" PRId64
+                "\nspectrum_inverted=%d\nbandwidth_hz=%u\nconditioning=%s\n"
                 "recording_point=%s\nhardware_timestamp=%s\n"
                 "host_start_unix_seconds=%" PRId64 "\n",
                 NgSampleFormatName(r->capture.format),
-                r->capture.format == NG_FORMAT_SC16_Q11 || r->capture.format == NG_FORMAT_CI16 ? 16u : 8u,
-                r->capture.format == NG_FORMAT_CU8 ? "false" : "true",
-                StoredPrecision(r),
-                r->capture.format == NG_FORMAT_CI16 ? 15u : r->capture.format == NG_FORMAT_SC16_Q11 ? 11u : 0u, NgSampleFormatName(r->nativeFormat),r->adcBits,name, r->capture.sampleRateHz,
+                r->capture.format == NG_FORMAT_SC16_Q11 || r->capture.format == NG_FORMAT_CI16 ? 16u
+                                                                                               : 8u,
+                r->capture.format == NG_FORMAT_CU8 ? "false" : "true", StoredPrecision(r),
+                r->capture.format == NG_FORMAT_CI16       ? 15u
+                : r->capture.format == NG_FORMAT_SC16_Q11 ? 11u
+                                                          : 0u,
+                NgSampleFormatName(r->nativeFormat), r->adcBits, name, r->capture.sampleRateHz,
                 r->capture.centerFrequencyHz, r->capture.signalFrequencyHz,
                 (int64_t)r->capture.signalFrequencyHz - (int64_t)r->capture.centerFrequencyHz,
-                r->capture.spectrumInverted,
-                r->capture.bandwidthHz, r->capture.conditioningName,
+                r->capture.spectrumInverted, r->capture.bandwidthHz, r->capture.conditioningName,
                 r->capture.preConditioning != 0 ? "pre_conditioning" : "post_conditioning",
                 r->capture.format == NG_FORMAT_SC16_Q11 && r->config.frontend == NG_FRONTEND_BLADERF
                     ? "true"
@@ -292,8 +295,11 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
         return NgFail(error, "Cannot initialize recorder counters");
     }
     r->config = *config;
-    r->nativeFormat=info->nativeFormat?info->nativeFormat:info->format;
-    r->adcBits=info->adcBits?info->adcBits:(info->format==NG_FORMAT_SC16_Q11?12u:info->format==NG_FORMAT_CI16?16u:8u);
+    r->nativeFormat = info->nativeFormat ? info->nativeFormat : info->format;
+    r->adcBits = info->adcBits ? info->adcBits
+                               : (info->format == NG_FORMAT_SC16_Q11 ? 12u
+                                  : info->format == NG_FORMAT_CI16   ? 16u
+                                                                     : 8u);
     r->capture.format = info->format;
     r->capture.sampleRateHz = info->sampleRateHz;
     r->capture.spectrumInverted = info->spectrumInverted;
@@ -343,30 +349,33 @@ int NgRecorderOpen(const TNgConfig *config, const TNgStreamInfo *info, const cha
         }
         goto failed;
     }
-    if (fprintf(r->metadata,
-                "[capture]\nversion=1\nformat=%s\nlayout=I,Q "
-                "interleaved\ncomponent_bits=%u\ncomponent_signed=%s\n"
-                "byte_order=little_endian\nsignificant_bits=%u\nfractional_bits=%u\nsource_native_format=%s\nsource_adc_bits=%u\n"
-                "sample_rate_hz=%u\ncenter_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
-                "\ndigital_if_hz=%" PRId64 "\nspectrum_inverted=%d\nbandwidth_hz=%u\n"
-                "source=%s\nclock_domain=%s\nhardware_timestamp=%s\n"
-                "host_start_unix_seconds=%" PRId64 "\nconditioning=%s\nrecording_point=%s\n"
-                "device_identifier=%s\nserial_requested=%s\nlna_gain_db=%u\nvga_gain_db=%u\nrf_amp="
-                "%d\nantenna_power=%d\n"
-                "segment_samples=%" PRIu64 "\n",
-                NgSampleFormatName(info->format), info->format == NG_FORMAT_SC16_Q11 || info->format == NG_FORMAT_CI16 ? 16u : 8u,
-                info->format == NG_FORMAT_CU8 ? "false" : "true",
-                StoredPrecision(r),
-                info->format == NG_FORMAT_CI16 ? 15u : info->format == NG_FORMAT_SC16_Q11 ? 11u : 0u, NgSampleFormatName(r->nativeFormat),r->adcBits,info->sampleRateHz,
-                info->centerFrequencyHz, info->signalFrequencyHz, info->digitalIfHz,
-                info->spectrumInverted,
-                info->bandwidthHz, info->sourceName, info->clockDomain,
-                config->frontend == NG_FRONTEND_BLADERF ? "true" : "false", (int64_t)time(NULL),
-                conditioningName,
-                (config->recordingPreConditioning) != 0 ? "pre_conditioning" : "post_conditioning",
-                info->deviceIdentifier == NULL ? "unavailable" : info->deviceIdentifier,
-                config->serial, config->lnaGainDb, config->vgaGainDb, config->rfAmp,
-                config->antennaPower, config->segmentSamples) < 0 ||
+    if (fprintf(
+            r->metadata,
+            "[capture]\nversion=1\nformat=%s\nlayout=I,Q "
+            "interleaved\ncomponent_bits=%u\ncomponent_signed=%s\n"
+            "byte_order=little_endian\nsignificant_bits=%u\nfractional_bits=%u\nsource_native_format=%s\nsource_adc_bits=%u\n"
+            "sample_rate_hz=%u\ncenter_frequency_hz=%" PRIu64 "\nsignal_frequency_hz=%" PRIu64
+            "\ndigital_if_hz=%" PRId64 "\nspectrum_inverted=%d\nbandwidth_hz=%u\n"
+            "source=%s\nclock_domain=%s\nhardware_timestamp=%s\n"
+            "host_start_unix_seconds=%" PRId64 "\nconditioning=%s\nrecording_point=%s\n"
+            "device_identifier=%s\nserial_requested=%s\nlna_gain_db=%u\nvga_gain_db=%u\nrf_amp="
+            "%d\nantenna_power=%d\n"
+            "segment_samples=%" PRIu64 "\n",
+            NgSampleFormatName(info->format),
+            info->format == NG_FORMAT_SC16_Q11 || info->format == NG_FORMAT_CI16 ? 16u : 8u,
+            info->format == NG_FORMAT_CU8 ? "false" : "true", StoredPrecision(r),
+            info->format == NG_FORMAT_CI16       ? 15u
+            : info->format == NG_FORMAT_SC16_Q11 ? 11u
+                                                 : 0u,
+            NgSampleFormatName(r->nativeFormat), r->adcBits, info->sampleRateHz,
+            info->centerFrequencyHz, info->signalFrequencyHz, info->digitalIfHz,
+            info->spectrumInverted, info->bandwidthHz, info->sourceName, info->clockDomain,
+            config->frontend == NG_FRONTEND_BLADERF ? "true" : "false", (int64_t)time(NULL),
+            conditioningName,
+            (config->recordingPreConditioning) != 0 ? "pre_conditioning" : "post_conditioning",
+            info->deviceIdentifier == NULL ? "unavailable" : info->deviceIdentifier, config->serial,
+            config->lnaGainDb, config->vgaGainDb, config->rfAmp, config->antennaPower,
+            config->segmentSamples) < 0 ||
         fprintf(r->index, "epoch,first_sample,count,segment,segment_offset_samples,flags,missing_"
                           "known,missing_before,hardware_time_valid,hardware_timestamp\n") < 0 ||
         fflush(r->metadata) != 0 || fflush(r->index) != 0) {

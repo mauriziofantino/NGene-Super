@@ -7,7 +7,7 @@
  */
 size_t NgSampleBytes(TNgSampleFormat format)
 {
-    return format == NG_FORMAT_SC16_Q11 || format == NG_FORMAT_CI16              ? 4u
+    return format == NG_FORMAT_SC16_Q11 || format == NG_FORMAT_CI16            ? 4u
            : format == 0 || format == NG_FORMAT_CI8 || format == NG_FORMAT_CU8 ? 2u
                                                                                : 0u;
 }

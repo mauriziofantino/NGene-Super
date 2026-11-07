@@ -25,8 +25,12 @@ typedef struct {
 _Static_assert(sizeof(TNgIq8) == 2, "CI8 must occupy exactly two bytes");
 
 /** @brief Wire representation of complex frontend samples. */
-typedef enum { NG_FORMAT_CI8 = 1, NG_FORMAT_CU8 = 2, NG_FORMAT_SC16_Q11 = 3,
-               NG_FORMAT_CI16 = 4 } TNgSampleFormat;
+typedef enum {
+    NG_FORMAT_CI8 = 1,
+    NG_FORMAT_CU8 = 2,
+    NG_FORMAT_SC16_Q11 = 3,
+    NG_FORMAT_CI16 = 4
+} TNgSampleFormat;
 
 /** @brief Rate, RF reference and borrowed frontend identity for one stream. */
 typedef struct {

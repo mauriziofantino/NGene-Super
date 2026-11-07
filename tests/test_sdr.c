@@ -338,8 +338,7 @@ static void TestDiagnostics(TNgSampleFormat format)
         NgSleepMs(1);
     }
     CHECK(snapshot.histogramSequence != 0 && snapshot.psdSequence != 0);
-    CHECK(snapshot.statsI.mean == 0 && snapshot.statsI.rms == 0 &&
-          snapshot.statsQ.zeros == 1024);
+    CHECK(snapshot.statsI.mean == 0 && snapshot.statsI.rms == 0 && snapshot.statsQ.zeros == 1024);
     CHECK(snapshot.removedDcI == value && snapshot.removedDcQ == 0);
     CHECK(NgIqComponent(&view, 0, 0) == value); /* Native input is never rewritten. */
     CHECK(snapshot.histogramMin == (format == NG_FORMAT_SC16_Q11 ? -2048 : -128));
@@ -425,8 +424,8 @@ static void TestGainQuality(void)
             NgIqStore(samples, format, k, 0, inPhase + 3 * scale);
             NgIqStore(samples, format, k, 1, quadrature + 3 * scale);
         }
-        CHECK(NgGainAnalyze(&view, &quality, &error) == NG_OK &&
-              quality.score > centeredScore && quality.acceptable);
+        CHECK(NgGainAnalyze(&view, &quality, &error) == NG_OK && quality.score > centeredScore &&
+              quality.acceptable);
         for (k = 0; k < 8192; ++k) {
             int peak = format == NG_FORMAT_SC16_Q11 ? 2047 : 127;
             NgIqStore(samples, format, k, 0, k % 2 ? peak : -peak);

@@ -10,4 +10,7 @@ AllowShortLoopsOnASingleLine: false
 SortIncludes: Never
 PointerAlignment: Right
 SeparateDefinitionBlocks: Always
-InsertBraces: true
+MaxEmptyLinesToKeep: 1
+InsertBraces: false
+BreakStringLiterals: false
+ReflowComments: false

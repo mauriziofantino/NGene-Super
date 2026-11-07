@@ -7,8 +7,9 @@
 int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *result,
                               const TNgGainCalibrationCallbacks *callbacks, TNgError *error)
 {
-    unsigned mode = config->frontend == NG_FRONTEND_HACKRF ? config->vgaGainDb :
-                    config->rtlIfGainDb == 3 ? 6u : 0u;
+    unsigned mode = config->frontend == NG_FRONTEND_HACKRF ? config->vgaGainDb
+                    : config->rtlIfGainDb == 3             ? 6u
+                                                           : 0u;
     unsigned k, count = mode == 6 ? 1000u : 60u;
     memset(result, 0, sizeof(*result));
     result->selected = *config;
@@ -24,9 +25,11 @@ int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *resul
         result->selected.rtlGainTenthsDb = 420;
         result->selected.rtlIfGainDb = 50;
     }
-    if (mode == 4) return NgFail(error, "Simulated SDR transport failure");
+    if (mode == 4)
+        return NgFail(error, "Simulated SDR transport failure");
     for (k = 0; k < count; ++k) {
-        if (callbacks->cancelled(callbacks->context)) return NG_END;
+        if (callbacks->cancelled(callbacks->context))
+            return NG_END;
         result->tested = 3 * k;
         callbacks->progress(callbacks->context, config, result);
         NgSleepMs(10);

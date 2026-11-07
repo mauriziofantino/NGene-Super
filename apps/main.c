@@ -78,10 +78,11 @@ int main(int argc, char **argv)
     const char *outputDirectory = "captures";
     int explicitConfig = 0;
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
-        puts("NGene: [--web] [--config FILE] [--replay FILE] [--port 8080] [--output-dir "
-             "captures]\n       "
-             "--list-devices | --version\nC receiver, optional GPS acquisition and local web console; no "
-             "tracking or PVT yet.");
+        puts(
+            "NGene: [--web] [--config FILE] [--replay FILE] [--port 8080] [--output-dir "
+            "captures]\n       "
+            "--list-devices | --version\nC receiver, optional GPS acquisition and local web console; no "
+            "tracking or PVT yet.");
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
@@ -220,15 +221,15 @@ int main(int argc, char **argv)
            frontend.info.centerFrequencyHz, frontend.info.bandwidthHz, config.windowSamples);
     printf("signal=%" PRIu64 " Hz digital_IF=%" PRId64 " Hz conditioning=%s\n",
            frontend.info.signalFrequencyHz, frontend.info.digitalIfHz, conditioner.name);
-    if (!config.recordOnly && NgAcquisitionCreate(&config.acquisition, &frontend.info,
-            &acquisition, &acquisitionChannel, &error) != NG_OK) {
+    if (!config.recordOnly && NgAcquisitionCreate(&config.acquisition, &frontend.info, &acquisition,
+                                                  &acquisitionChannel, &error) != NG_OK) {
         fprintf(stderr, "%s\n", error.message);
         NgFrontendDestroy(&frontend);
         return 1;
     }
-    result = NgReceiverRun(&config, &frontend, &conditioner,
-                           acquisition ? &acquisitionChannel : NULL, acquisition ? 1u : 0u,
-                           ShouldStop, NULL, &stats, &error);
+    result =
+        NgReceiverRun(&config, &frontend, &conditioner, acquisition ? &acquisitionChannel : NULL,
+                      acquisition ? 1u : 0u, ShouldStop, NULL, &stats, &error);
     printf("windows=%" PRIu64 " processed_pairs=%" PRIu64 " written_pairs=%" PRIu64 " gaps=%" PRIu64
            " known_input_drops=%" PRIu64 " queued_discarded_at_stop=%" PRIu64
            " wall_seconds=%.6f\n",
@@ -246,8 +247,8 @@ int main(int argc, char **argv)
                 printf("GPS PRN%02u %s Doppler=%.1f Hz code_phase=%.6f chips peak/threshold=%.3f "
                        "confirmation=%u/4 epoch=%" PRIu64 " sample=%" PRIu64 "\n",
                        found->prn, found->confirmed ? "CONFIRMED" : "not confirmed",
-                       found->dopplerHz, found->codePhaseChips, found->peakRatio,
-                       found->successes, found->epoch, found->firstSample);
+                       found->dopplerHz, found->codePhaseChips, found->peakRatio, found->successes,
+                       found->epoch, found->firstSample);
         }
     }
     NgAcquisitionDestroy(acquisition);

@@ -295,7 +295,8 @@ int ADDCALL hackrf_set_antenna_enable(hackrf_device *device, const uint8_t value
     CHECK(value == 1);
     CHECK(!alive);
     ++antennaRequests;
-    if (failAntenna) return HACKRF_ERROR_LIBUSB;
+    if (failAntenna)
+        return HACKRF_ERROR_LIBUSB;
     antennaConfigured = 1;
     return HACKRF_SUCCESS;
 }
@@ -500,8 +501,9 @@ int main(void)
         int powerRequests = antennaRequests;
         for (fixtureBoard = 1; fixtureBoard <= 5; ++fixtureBoard) {
             CHECK(NgHackrfCapabilities(&c, &caps, &e) == NG_OK);
-            CHECK(caps.gainPolicy == (fixtureBoard < 4 ? NG_GAIN_POLICY_HACKRF_MAX2837 :
-                  fixtureBoard == 4 ? NG_GAIN_POLICY_HACKRF_MAX2839 : NG_GAIN_POLICY_HACKRF_MAX2831));
+            CHECK(caps.gainPolicy == (fixtureBoard < 4    ? NG_GAIN_POLICY_HACKRF_MAX2837
+                                      : fixtureBoard == 4 ? NG_GAIN_POLICY_HACKRF_MAX2839
+                                                          : NG_GAIN_POLICY_HACKRF_MAX2831));
             CHECK(!strcmp(caps.deviceSerial, "test-device") && caps.boardRevision == 9);
             CHECK(!initialized && !alive && antennaRequests == powerRequests);
         }
