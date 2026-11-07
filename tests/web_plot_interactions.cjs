@@ -93,20 +93,7 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     await page.mouse.move(separator.x+separator.width/2,separator.y+separator.height/2+90,{steps:5});await page.mouse.up();
     assert.equal(await page.locator('#spectrumHeight').inputValue(),'350');
     assert((await spectrum.boundingBox()).height>320,'Spectrum resize did not update canvas layout');
-    const panelWidth=(await page.locator('#spectrumPanel').boundingBox()).width;
-    await page.locator('#expandPlots').click();
-    assert.equal(await page.locator('#expandPlots').getAttribute('aria-expanded'),'true');
-    assert((await page.locator('#spectrumPanel').boundingBox()).width>panelWidth,'Expanded plots did not use the viewport width');
-    assert.equal(await page.locator('#spectrumPanel').getAttribute('aria-modal'),'true');
-    const focusBounds=await page.locator('#spectrumPanel').evaluate(panel=>{
-      const controls=[...panel.querySelectorAll('button,input,select,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);
-      return {first:controls[0].id,last:controls.at(-1).id};
-    });
-    await page.locator(`#${focusBounds.first}`).focus();await page.keyboard.press('Shift+Tab');
-    assert.equal(await page.evaluate(()=>document.activeElement.id),focusBounds.last,'Focus escaped expanded plot dialog');
-    await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),focusBounds.first);
-    await page.keyboard.press('Escape');
-    assert.equal(await page.locator('#expandPlots').getAttribute('aria-expanded'),'false');
+    assert.equal(await page.locator('#expandPlots,#frequencyMin,#frequencyMax,#resetFrequency').count(),0,'Zoom controls must be removed');
     assert.equal(await page.locator('#spectrumPanel').getAttribute('aria-modal'),null);
     assert.equal(await page.locator('#waterfallHeight').inputValue(),'510');
     assert.equal(await page.locator('#spectrumHeight').inputValue(),'350');
@@ -145,6 +132,6 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     await page.locator('#showWaterfall').check();
     assert.deepEqual((await snapshot()).history,[],'A changed FFT configuration must clear history before fresh receiver data');
     assert.deepEqual(errors,[]);
-    console.log('PASS: live plot sizing, mouse/keyboard resize, viewport expand/restore and focus, synchronized relief, shared clear, paused reenable, independent height and mobile layout under production CSP.');
+    console.log('PASS: live plot sizing, mouse/keyboard resize, removed zoom controls, synchronized relief, shared clear, paused reenable, independent height and mobile layout under production CSP.');
   }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -96,6 +96,12 @@ struct TNgAnalysis {
     double smoothed[NG_FFT_MAX_SIZE];
     /** Owned published result, copied under mutex before telemetry. */
     TNgAnalysisSnapshot snapshot;
+    /** Worker-owned startup estimates, separate for the legacy pre/post input taps. */
+    int dcKnown[2], dcOffset[2][2];
+    /** Format in which each cached offset is expressed; a format change re-estimates it. */
+    TNgSampleFormat dcFormat[2];
+    /** Number of pairs used for each initial estimate, shared by PSD and histogram. */
+    uint32_t dcEstimatePairs[2];
     /** Owned immutable FFT plan; destroyed after worker join. */
     TNgFftPlan *plan;
     /** FFT length associated with cached window coefficients. */
@@ -110,7 +116,7 @@ struct TNgAnalysis {
     TNgAnalysisSnapshot workResult;
     /** Owned input stream or workspace; no frontend pointer is retained. */
     int16_t input[2 * NG_FFT_MAX_SIZE];
-    /** Widened ADC units after SIMD block-mean subtraction; native bursts stay immutable. */
+    /** Widened ADC units after SIMD offset subtraction; native bursts stay immutable. */
     int32_t centered[2 * NG_ANALYSIS_PAIRS];
     /** Owned output workspace, reused only by this worker. */
     int16_t output[2 * NG_FFT_MAX_SIZE];
@@ -367,6 +373,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     TNgError error = {{0}};
     TNgIqView native = {0};
     int removedDc[2];
+    int source = b->kind ? c->histogramPre : c->spectrumPre;
+    int fftAttenuated = 0;
     int adcLimit = b->format == NG_FORMAT_CI16 ? 32768 : b->format == NG_FORMAT_SC16_Q11 ? 2048 : 128;
     int fftScale = b->format == NG_FORMAT_CI16 ? 1 : b->format == NG_FORMAT_SC16_Q11 ? 8 : 128;
     if (BurstCurrent(a, b) == 0) {
@@ -375,8 +383,20 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     native.samples = (const TNgIq8 *)(const void *)b->data.native;
     native.format = b->format;
     native.meta.count = b->count;
-    if (NgIqCenterBlock(&native, a->centered, removedDc, &error) != NG_OK ||
-        BurstCurrent(a, b) == 0) return 0;
+    if (!a->dcKnown[source] || a->dcFormat[source] != b->format) {
+        if (NgIqCenterBlock(&native, a->centered, removedDc, &error) != NG_OK ||
+            BurstCurrent(a, b) == 0) return 0;
+        a->dcOffset[source][0] = removedDc[0];
+        a->dcOffset[source][1] = removedDc[1];
+        a->dcFormat[source] = b->format;
+        a->dcEstimatePairs[source] = (uint32_t)b->count;
+        a->dcKnown[source] = 1;
+    } else {
+        removedDc[0] = a->dcOffset[source][0];
+        removedDc[1] = a->dcOffset[source][1];
+        if (NgIqSubtractDc(&native, a->centered, removedDc, &error) != NG_OK ||
+            BurstCurrent(a, b) == 0) return 0;
+    }
     memset(s, 0, sizeof(*s));
     s->histogramMin = -adcLimit;
     s->histogramMax = adcLimit - 1;
@@ -441,11 +461,21 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         }
         s->dcMagnitude = hypot(s->statsI.mean, s->statsQ.mean);
         s->removedDcI = removedDc[0]; s->removedDcQ = removedDc[1];
+        s->dcEstimatePairs = a->dcEstimatePairs[source];
         s->clippedI = s->statsI.clipping;
         s->clippedQ = s->statsQ.clipping;
         s->histogramSeconds = NgMonotonicSeconds();
     }
     if (b->kind == 0) {
+        /* Offset subtraction can extend beyond the ADC range. Keep every FFT
+         * component inside its Q14 contract, then restore power normalization. */
+        for (k = 0; k < 2 * b->count; ++k) {
+            if (k % 2048 == 0 && BurstCurrent(a, b) == 0) return 0;
+            if (a->centered[k] < -adcLimit || a->centered[k] > adcLimit) {
+                fftAttenuated = 1;
+                break;
+            }
+        }
         /* Window/twiddle initialization is outside the FFT sample arithmetic.
          * Recomputed per burst here only if its shape/size changes (worker cache). */
         static const double pi2 = 6.2831853071795864769;
@@ -489,9 +519,11 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                 qValue = a->centered[2 * (offset + k) + 1];
                 { int32_t product = (int32_t)iValue * fftScale * a->window[k];
                   if (b->format == NG_FORMAT_CI16) product = product>=0 ? product/2 : -1-((-1-product)/2);
+                  if (fftAttenuated) product = product>=0 ? product/2 : -1-((-1-product)/2);
                   a->input[2*k]=(int16_t)Shift15(product); }
                 { int32_t product = (int32_t)qValue * fftScale * a->window[k];
                   if (b->format == NG_FORMAT_CI16) product = product>=0 ? product/2 : -1-((-1-product)/2);
+                  if (fftAttenuated) product = product>=0 ? product/2 : -1-((-1-product)/2);
                   a->input[2*k+1]=(int16_t)Shift15(product); }
             }
             if (BurstCurrent(a, b) == 0) {
@@ -512,7 +544,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         }
         for (k = 0; k < n; ++k) {
             double value =
-                (double)a->power[k] / ((double)c->averages * 16384 * 16384 * gain * gain);
+                (double)a->power[k] * (fftAttenuated ? 4.0 : 1.0) /
+                ((double)c->averages * 16384 * 16384 * gain * gain);
             if (c->density != 0) {
                 value /= s->enbwHz;
             }
@@ -659,6 +692,7 @@ static void Worker(void *context)
                 d->statsQ = s->statsQ;
                 d->dcMagnitude = s->dcMagnitude;
                 d->removedDcI = s->removedDcI; d->removedDcQ = s->removedDcQ;
+                d->dcEstimatePairs = s->dcEstimatePairs;
                 d->clippedI = s->clippedI;
                 d->clippedQ = s->clippedQ;
             }

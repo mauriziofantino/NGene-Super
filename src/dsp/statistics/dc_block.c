@@ -89,7 +89,26 @@ int NgIqCenterBlock(const TNgIqView *view, int32_t *output, int dc[2], TNgError 
         sum[j] += v;
     }
     dc[0] = Offset(sum[0], n); dc[1] = Offset(sum[1], n);
-    k = 0;
+    return NgIqSubtractDc(view, output, dc, error);
+}
+
+/** @brief Apply cached offsets through widened SIMD subtraction, without a sum pass. */
+int NgIqSubtractDc(const TNgIqView *view, int32_t *output, const int dc[2], TNgError *error)
+{
+    size_t k = 0, j, n;
+    int narrow, limit;
+    TNgSampleFormat format;
+    if (!view || !view->samples || !output || !dc || !view->meta.count ||
+        view->meta.count > 262144)
+        return NgFail(error, "DC subtraction requires 1..262144 I/Q pairs and owned output");
+    n = view->meta.count;
+    format = view->format ? view->format : NG_FORMAT_CI8;
+    narrow = format == NG_FORMAT_CI8 || format == NG_FORMAT_CU8;
+    if (!narrow && format != NG_FORMAT_CI16 && format != NG_FORMAT_SC16_Q11)
+        return NgFail(error, "Unsupported DC subtraction sample format");
+    limit = narrow ? 128 : format == NG_FORMAT_SC16_Q11 ? 2048 : 32768;
+    if (dc[0] < -limit || dc[0] >= limit || dc[1] < -limit || dc[1] >= limit)
+        return NgFail(error, "DC offset outside the input format range");
 #if NG_SSE2
     {
         const __m128i offset = _mm_set_epi32(dc[1], dc[0], dc[1], dc[0]);
@@ -103,7 +122,13 @@ int NgIqCenterBlock(const TNgIqView *view, int32_t *output, int dc[2], TNgError 
                 if (format == NG_FORMAT_CU8) raw = _mm_xor_si128(raw, _mm_set1_epi8((char)-128));
                 sign = _mm_cmpgt_epi8(_mm_setzero_si128(), raw);
                 lo = _mm_unpacklo_epi8(raw, sign); hi = _mm_unpackhi_epi8(raw, sign);
-            } else { lo = raw; hi = _mm_setzero_si128(); }
+            } else {
+                if (format == NG_FORMAT_SC16_Q11 &&
+                    _mm_movemask_epi8(_mm_or_si128(_mm_cmpgt_epi16(raw, _mm_set1_epi16(2047)),
+                                                   _mm_cmpgt_epi16(_mm_set1_epi16(-2048), raw))))
+                    return NgFail(error, "SC16 Q11 level outside ADC range");
+                lo = raw; hi = _mm_setzero_si128();
+            }
             for (half = 0; half < (narrow ? 2u : 1u); ++half) {
                 __m128i v = half ? hi : lo, sign = _mm_srai_epi16(v, 15);
                 size_t base = 2 * k + half * 8u;
@@ -126,7 +151,14 @@ int NgIqCenterBlock(const TNgIqView *view, int32_t *output, int dc[2], TNgError 
                 int8x16_t raw = vld1q_s8((const int8_t *)(const void *)(p + 2 * k));
                 if (format == NG_FORMAT_CU8) raw = veorq_s8(raw, vdupq_n_s8(-128));
                 lo = vmovl_s8(vget_low_s8(raw)); hi = vmovl_s8(vget_high_s8(raw));
-            } else { lo = vld1q_s16((const int16_t *)(const void *)(p + 4 * k)); hi = vdupq_n_s16(0); }
+            } else {
+                lo = vld1q_s16((const int16_t *)(const void *)(p + 4 * k));
+                if (format == NG_FORMAT_SC16_Q11 &&
+                    vmaxvq_u16(vorrq_u16(vcgtq_s16(lo, vdupq_n_s16(2047)),
+                                        vcltq_s16(lo, vdupq_n_s16(-2048)))))
+                    return NgFail(error, "SC16 Q11 level outside ADC range");
+                hi = vdupq_n_s16(0);
+            }
             for (half = 0; half < (narrow ? 2u : 1u); ++half) {
                 int16x8_t v = half ? hi : lo;
                 size_t base = 2 * k + half * 8u;
@@ -136,7 +168,11 @@ int NgIqCenterBlock(const TNgIqView *view, int32_t *output, int dc[2], TNgError 
         }
     }
 #endif
-    for (; k < n; ++k) for (j = 0; j < 2; ++j)
-        output[2 * k + j] = NgIqComponent(view, k, (unsigned)j) - dc[j];
+    for (; k < n; ++k) for (j = 0; j < 2; ++j) {
+        int value = NgIqComponent(view, k, (unsigned)j);
+        if (format == NG_FORMAT_SC16_Q11 && (value < -2048 || value > 2047))
+            return NgFail(error, "SC16 Q11 level outside ADC range");
+        output[2 * k + j] = value - dc[j];
+    }
     return NG_OK;
 }

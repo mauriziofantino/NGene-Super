@@ -26,6 +26,25 @@ static int antennaConfigured;
 static int antennaRequests;
 static int expectAntennaPower;
 static int failAntenna;
+static uint8_t fixtureBoard = 2;
+static int failIdentity;
+
+/** @brief Native identity fixture; probing must not start reception or change power. */
+int ADDCALL hackrf_board_id_read(hackrf_device *device, uint8_t *value)
+{
+    (void)device;
+    CHECK(!alive);
+    *value = fixtureBoard;
+    return failIdentity ? HACKRF_ERROR_USB_API_VERSION : HACKRF_SUCCESS;
+}
+
+/** @brief Report a native revision without changing the simulated device. */
+int ADDCALL hackrf_board_rev_read(hackrf_device *device, uint8_t *value)
+{
+    (void)device;
+    *value = 9;
+    return HACKRF_SUCCESS;
+}
 
 /**
  * @brief Increment the simulated vendor initialization balance.
@@ -476,6 +495,22 @@ int main(void)
     CHECK(antennaRequests == 2 && !alive);
     DestroySource(&f, &e);
     failAntenna = 0;
+    {
+        TNgFrontendCaps caps;
+        int powerRequests = antennaRequests;
+        for (fixtureBoard = 1; fixtureBoard <= 5; ++fixtureBoard) {
+            CHECK(NgHackrfCapabilities(&c, &caps, &e) == NG_OK);
+            CHECK(caps.gainPolicy == (fixtureBoard < 4 ? NG_GAIN_POLICY_HACKRF_MAX2837 :
+                  fixtureBoard == 4 ? NG_GAIN_POLICY_HACKRF_MAX2839 : NG_GAIN_POLICY_HACKRF_MAX2831));
+            CHECK(!strcmp(caps.deviceSerial, "test-device") && caps.boardRevision == 9);
+            CHECK(!initialized && !alive && antennaRequests == powerRequests);
+        }
+        fixtureBoard = 255;
+        CHECK(NgHackrfCapabilities(&c, &caps, &e) == NG_OK &&
+              caps.gainPolicy == NG_GAIN_POLICY_UNAVAILABLE);
+        failIdentity = 1;
+        CHECK(NgHackrfCapabilities(&c, &caps, &e) == NG_ERROR && !initialized && !alive);
+    }
     puts("PASS: native HackRF API config, callback lifetime, overflow/drop indices, malformed "
          "transfer and cleanup (simulated driver)");
     return 0;

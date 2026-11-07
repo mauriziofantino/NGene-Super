@@ -30,4 +30,11 @@ int NgHackrfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error
  * @return NG_OK on success; NG_ERROR for initialization/enumeration failures.
  */
 int NgHackrfList(FILE *output, TNgError *error);
+/** @brief Probe the selected stopped device without RX or hardware configuration.
+ * @param config Device serial, or exactly one attached device when empty.
+ * @param caps Receives owned identity and verified gain policy.
+ * @param error Optional native error destination.
+ * @return NG_OK after a successful identity query, otherwise NG_ERROR; resources released.
+ */
+int NgHackrfCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgError *error);
 #endif

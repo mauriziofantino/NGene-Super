@@ -7,6 +7,12 @@
  * must not alias input, and never clips or rescales. No state carries between blocks.
  * Native input, metadata and recordings are unchanged. */
 int NgIqCenterBlock(const TNgIqView *view, int32_t *output, int dc[2], TNgError *error);
+/** Subtract previously estimated integer I/Q offsets without estimating another mean.
+ * Input/output ownership and count limits match NgIqCenterBlock. Offsets must lie
+ * within the input format's signed range. Output is widened and never clipped.
+ * Stateless and safe for independent callers with separate output storage.
+ */
+int NgIqSubtractDc(const TNgIqView *view, int32_t *output, const int dc[2], TNgError *error);
 /**
  * @brief Compute exact sums and sums of squares for signed I and Q.
  *

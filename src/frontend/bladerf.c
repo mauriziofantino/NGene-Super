@@ -464,6 +464,15 @@ int NgBladerfCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgErr
     result = bladerf_set_frequency(device, BLADERF_CHANNEL_RX(0), config->centerFrequencyHz);
     if (result == 0) {
         result = QueryRanges(device, config->bladeFormat, caps, error);
+        if (result == NG_OK) {
+            const char *name = bladerf_get_board_name(device);
+            snprintf(caps->deviceSerial, sizeof(caps->deviceSerial), "%s", serial);
+            snprintf(caps->deviceModel, sizeof(caps->deviceModel), "%s", name ? name : "unknown");
+            if (name && strcmp(name, "bladerf1") == 0)
+                caps->gainPolicy = NG_GAIN_POLICY_BLADERF1;
+            else if (name && strcmp(name, "bladerf2") == 0)
+                caps->gainPolicy = NG_GAIN_POLICY_BLADERF2;
+        }
     } else {
         result = NgFail(error, "bladeRF tuning for gain query failed");
     }

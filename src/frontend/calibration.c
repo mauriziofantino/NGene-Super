@@ -2,11 +2,53 @@
 #include "ngene/dsp/statistics.h"
 #include "platform/platform.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 enum { CAL_PAIRS = 32768, CAL_BLOCK = 32768, CAL_INGRESS_BLOCKS = 128,
        CAL_REPEATS = 3, CAL_HISTOGRAM_LEVELS = 8192 };
+
+/** @brief Preferred measured split for one RF-amp/physical-total-gain group. */
+typedef struct {
+    int valid, earlyDb;
+    unsigned lna, vga;
+    TNgGainQuality quality;
+} TNgGainSplit;
+
+/** @brief Bounded worker-owned sweep state; no full configuration copies per point. */
+typedef struct {
+    TNgGainSplit groups[2][103];
+    unsigned char seen[2][41][64];
+} TNgGainSweep;
+
+/** @brief Map legacy requests to physical relative gain states in firmware v2026.01.3.
+ * Values are relative to each RFIC's lowest LNA state, not antenna gain or measured NF.
+ * MAX2839 compensation is part of this mapping; MAX2831 legacy aliases collapse here.
+ */
+static void HackrfPhysicalGains(TNgGainPolicy policy, unsigned lna, unsigned vga,
+                               int *early, int *late)
+{
+    int front = (int)lna, back = (int)vga;
+    if (policy == NG_GAIN_POLICY_HACKRF_MAX2831) {
+        front = lna < 16 ? 0 : lna < 32 ? 17 : 33;
+    } else if (policy == NG_GAIN_POLICY_HACKRF_MAX2839) {
+        back += 3;
+        if (back > 63) {
+            if (front < 40) { front += 8; back -= 8; }
+            else back = 63;
+        }
+        if (front == 0) { front = 8; back = back < 8 ? 0 : back - 8; }
+        if (front == 16) {
+            int transfer = back > 32 ? 8 : -8;
+            front += transfer;
+            back -= transfer;
+        }
+        front -= 8;
+    }
+    *early = front;
+    *late = back;
+}
 
 static int Cancelled(const TNgGainCalibrationCallbacks *callbacks)
 {
@@ -201,9 +243,43 @@ done:
 }
 
 static void Consider(const TNgConfig *candidate, const TNgGainQuality *quality,
-                     TNgGainCalibration *result)
+                     TNgGainCalibration *result, TNgGainSweep *sweep)
 {
-    if (result->tested == 0 || (quality->acceptable && !result->accepted) ||
+    if (sweep) {
+        int early, late, amp, total, selected = 0;
+        TNgGainSplit *split;
+        HackrfPhysicalGains(result->capabilities.gainPolicy, candidate->lnaGainDb,
+                           candidate->vgaGainDb, &early, &late);
+        split = &sweep->groups[candidate->rfAmp][early + late];
+        if (!split->valid || quality->acceptable > split->quality.acceptable ||
+            (quality->acceptable == split->quality.acceptable &&
+             ((quality->acceptable && early > split->earlyDb) ||
+              ((!quality->acceptable || early == split->earlyDb) &&
+               quality->score < split->quality.score)))) {
+            split->valid = 1;
+            split->earlyDb = early;
+            split->lna = candidate->lnaGainDb;
+            split->vga = candidate->vgaGainDb;
+            split->quality = *quality;
+        }
+        /* Recompute after replacing a representative: its score can increase.
+         * A pairwise comparator mixing split priority and score is not transitive. */
+        for (amp = 0; amp < 2; ++amp) for (total = 0; total < 103; ++total) {
+            split = &sweep->groups[amp][total];
+            if (split->valid && (!selected ||
+                split->quality.acceptable > result->accepted ||
+                (split->quality.acceptable == result->accepted &&
+                 split->quality.score < result->quality.score))) {
+                result->selected = *candidate;
+                result->selected.rfAmp = amp;
+                result->selected.lnaGainDb = split->lna;
+                result->selected.vgaGainDb = split->vga;
+                result->quality = split->quality;
+                result->accepted = split->quality.acceptable;
+                selected = 1;
+            }
+        }
+    } else if (result->tested == 0 || (quality->acceptable && !result->accepted) ||
         (quality->acceptable == result->accepted && quality->score < result->quality.score)) {
         result->selected = *candidate;
         result->quality = *quality;
@@ -216,7 +292,7 @@ static void Consider(const TNgConfig *candidate, const TNgGainQuality *quality,
     if (quality->rejectionReasons & NG_GAIN_IMBALANCE) ++result->rejectedImbalance;
 }
 
-static int Try(const TNgConfig *candidate, TNgGainCalibration *result, int *overloaded,
+static int Try(const TNgConfig *candidate, TNgGainCalibration *result, TNgGainSweep *sweep,
                const TNgGainCalibrationCallbacks *callbacks, TNgError *error)
 {
     TNgGainQuality measurements[CAL_REPEATS], quality;
@@ -250,15 +326,9 @@ static int Try(const TNgConfig *candidate, TNgGainCalibration *result, int *over
     quality.score = Median3(measurements[0].score,
                             measurements[1].score,
                             measurements[2].score);
-    if (overloaded) {
-        *overloaded = 0;
-        for (i = 0; i < (unsigned)CAL_REPEATS; ++i)
-            if (measurements[i].clippedFraction >= 0.001 || measurements[i].rmsFraction > 0.32)
-                *overloaded = 1;
-    }
     /* A clipped window must never be hidden by the median. */
     quality.acceptable = accepted == CAL_REPEATS;
-    Consider(candidate, &quality, result);
+    Consider(candidate, &quality, result, sweep);
     if (callbacks && callbacks->progress) callbacks->progress(callbacks->context, candidate, result);
     return NG_OK;
 }
@@ -266,40 +336,62 @@ static int Try(const TNgConfig *candidate, TNgGainCalibration *result, int *over
 int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *result,
                               const TNgGainCalibrationCallbacks *callbacks, TNgError *error)
 {
-    TNgConfig candidate;
+    TNgConfig candidate, base;
     if (!config || !result || (config->frontend == NG_FRONTEND_FILE || config->frontend == NG_FRONTEND_SIGE) ||
         !NgFrontendAvailable(config->frontend))
         return NgFail(error, "Select an available live SDR for gain calibration");
     memset(result, 0, sizeof(*result));
     result->selected = *config;
+    if (Cancelled(callbacks)) return NG_END;
     if (NgFrontendCapabilities(config, &result->capabilities, error) != NG_OK) return NG_ERROR;
+    if (Cancelled(callbacks)) return NG_END;
+    if (result->capabilities.gainPolicy == NG_GAIN_POLICY_UNAVAILABLE)
+        return NgFail(error, "Gain calibration unavailable for %s",
+                      result->capabilities.deviceModel);
+    base = *config;
+    /* Pin all observations to the same probed device, including an initially empty serial. */
+    if (result->capabilities.deviceSerial[0])
+        snprintf(base.serial, sizeof(base.serial), "%s", result->capabilities.deviceSerial);
     if (config->frontend == NG_FRONTEND_HACKRF) {
+        TNgGainSweep sweep = {0};
         unsigned lna, vga;
         int amp;
-        /* Sweep from low gain and stop each VGA branch at overload. */
+        if (result->capabilities.gainPolicy < NG_GAIN_POLICY_HACKRF_MAX2837 ||
+            result->capabilities.gainPolicy > NG_GAIN_POLICY_HACKRF_MAX2831)
+            return NgFail(error, "Invalid HackRF gain policy");
+        /* Exhaust every distinct physical setting; an intermittent overload must
+         * not prune unmeasured settings in this or another gain split. */
         for (amp = 0; amp <= 1; ++amp) {
             for (lna = 0; lna <= 40u; lna += 8u) {
                 for (vga = 0; vga <= 62u; vga += 2u) {
-                    int overloaded;
-                    candidate = *config;
+                    int early, late;
+                    HackrfPhysicalGains(result->capabilities.gainPolicy, lna, vga, &early, &late);
+                    if (sweep.seen[amp][early][late]) continue;
+                    sweep.seen[amp][early][late] = 1;
+                    candidate = base;
                     candidate.lnaGainDb = lna;
                     candidate.vgaGainDb = vga;
                     candidate.rfAmp = amp;
-                    int rc = Try(&candidate, result, &overloaded, callbacks, error);
+                    int rc = Try(&candidate, result, &sweep, callbacks, error);
                     if (rc != NG_OK) return rc;
-                    if (overloaded) break;
                 }
             }
         }
     } else if (config->frontend == NG_FRONTEND_RTLSDR) {
         size_t count = result->capabilities.tunerGainCount;
         size_t i;
-        candidate = *config;
-        candidate.rtlAutoGain = 1;
-        int rc = Try(&candidate, result, NULL, callbacks, error);
-        if (rc != NG_OK) return rc;
+        if (result->capabilities.gainPolicy < NG_GAIN_POLICY_RTL_R82XX ||
+            result->capabilities.gainPolicy > NG_GAIN_POLICY_RTL_FC001X)
+            return NgFail(error, "Invalid RTL-SDR gain policy");
+        if (!count || count > 64) return NgFail(error, "Invalid native RTL gain list");
         for (i = 0; i < count; ++i) {
-            candidate = *config;
+            size_t earlier;
+            int rc;
+            for (earlier = 0; earlier < i; ++earlier)
+                if (result->capabilities.tunerGains[earlier] == result->capabilities.tunerGains[i])
+                    break;
+            if (earlier < i) continue;
+            candidate = base;
             candidate.rtlAutoGain = 0;
             candidate.rtlGainTenthsDb = result->capabilities.tunerGains[i];
             rc = Try(&candidate, result, NULL, callbacks, error);
@@ -309,9 +401,12 @@ int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *resul
         int min = result->capabilities.gainMinDb, max = result->capabilities.gainMaxDb;
         int step = result->capabilities.gainStepDb;
         int64_t gain;
+        if (result->capabilities.gainPolicy != NG_GAIN_POLICY_BLADERF1 &&
+            result->capabilities.gainPolicy != NG_GAIN_POLICY_BLADERF2)
+            return NgFail(error, "Invalid bladeRF gain policy");
         if (step <= 0 || max < min) return NgFail(error, "bladeRF reports invalid gain limits");
         for (gain = min; gain <= max; gain += step) {
-            candidate = *config;
+            candidate = base;
             candidate.bladeGainDb = (int)gain;
             int rc = Try(&candidate, result, NULL, callbacks, error);
             if (rc != NG_OK) return rc;

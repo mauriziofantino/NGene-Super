@@ -43,6 +43,8 @@ async function until(fn, label) {
     assert.equal(await page.locator('[name="hackrf.vga_gain_db"]').isDisabled(), true, 'Only owned source controls are locked');
     const running = await get('frontend/calibrate'), config = await get('config');
     assert.equal(running.state, 'running');
+    assert.match(running.device_model, /MAX2837/);
+    assert.match(running.gain_policy, /prefer early gain/);
     const response = await Promise.race([get('status'), delay(3000).then(() => { throw Error('Status blocked by calibration'); })]);
     assert.equal(response.state, 'stopped');
     await post('receiver/start', {revision:config.revision}, 409);

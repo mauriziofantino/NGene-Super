@@ -21,6 +21,14 @@ struct rtlsdr_dev {
 
 /** @brief Inject an odd byte count; never exposed outside this fixture. */
 static int malformed;
+static enum rtlsdr_tuner fixtureTuner = RTLSDR_TUNER_R820T;
+
+/** @brief Return the native tuner ID used to select actual supported gain operations. */
+enum rtlsdr_tuner rtlsdr_get_tuner_type(rtlsdr_dev_t *device)
+{
+    (void)device;
+    return fixtureTuner;
+}
 
 /** @brief Return the one fixture device. @return One connected fixture. */
 uint32_t rtlsdr_get_device_count(void)
@@ -211,6 +219,20 @@ int main(void)
     strcpy(config.serial, "rtl-test");
     CHECK(NgRtlsdrCapabilities(&config, &caps, &error) == NG_OK && caps.tunerGainCount == 3 &&
           caps.tunerGains[1] == 77);
+    CHECK(caps.gainPolicy == NG_GAIN_POLICY_RTL_R82XX && !strcmp(caps.deviceSerial, "rtl-test"));
+    fixtureTuner = RTLSDR_TUNER_E4000;
+    CHECK(NgRtlsdrCapabilities(&config, &caps, &error) == NG_OK &&
+          caps.gainPolicy == NG_GAIN_POLICY_RTL_E4000);
+    fixtureTuner = RTLSDR_TUNER_FC0012;
+    CHECK(NgRtlsdrCapabilities(&config, &caps, &error) == NG_OK &&
+          caps.gainPolicy == NG_GAIN_POLICY_RTL_FC001X);
+    fixtureTuner = RTLSDR_TUNER_FC2580;
+    CHECK(NgRtlsdrCapabilities(&config, &caps, &error) == NG_OK &&
+          caps.gainPolicy == NG_GAIN_POLICY_UNAVAILABLE);
+    fixtureTuner = RTLSDR_TUNER_UNKNOWN;
+    CHECK(NgRtlsdrCapabilities(&config, &caps, &error) == NG_OK &&
+          caps.gainPolicy == NG_GAIN_POLICY_UNAVAILABLE);
+    fixtureTuner = RTLSDR_TUNER_R820T;
     config.rtlAutoGain = 0;
     config.rtlGainTenthsDb = 1;
     CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_ERROR);

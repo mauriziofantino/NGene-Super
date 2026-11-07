@@ -1,7 +1,6 @@
 /* Orthographic frequency/time/power surface. Each PSD bin is a vertex;
  * power displaces its screen position, rather than merely changing its colour.
- * The time grid uses the configured history capacity, so filling history does
- * not move existing vertices relative to their age. */
+ * The populated history spans the time grid; the oldest strip meets the floor. */
 const stops = [[5,9,35],[12,23,77],[23,48,127],[22,118,193],[63,218,234],[197,255,252]];
 export const reliefPalette = Array.from({length:256}, (_, level) => {
   const x=level/255*(stops.length-1),i=Math.min(stops.length-2,Math.floor(x)),f=x-i;
@@ -26,10 +25,10 @@ export function paintWaterfallRelief(pixels, history, columns, rows, lo, hi, ima
   const horizon=new Int32Array(columns);horizon.fill(imageRows);
   const levelOf=value=>Number.isFinite(value)?Math.max(0,Math.min(1,(value-lo)/(hi-lo))):0;
   pixels.fill(0);
-  const rise=(imageRows-1)*0.38,step=(imageRows-1-rise)/Math.max(1,rows-1);
+  const rise=(imageRows-1)*0.38,step=(imageRows-1-rise)/Math.max(1,active-1);
   for(let j=active-1;j>=0;j--)for(let k=0;k<columns;k++){
     const values=history[j].values,level=levelOf(values[k]);
-    const hasFront=j<active-1,y=rise+j*step-level*rise,back=hasFront?previousY[k]:y;
+    const hasFront=j<active-1,y=rise+j*step-level*rise,back=hasFront?previousY[k]:imageRows-1;
     const frontLevel=previousLevel[k];previousY[k]=y;previousLevel[k]=level;
     const first=Math.max(0,Math.floor(Math.min(y,back))),last=Math.min(horizon[k]-1,imageRows-1,Math.ceil(Math.max(y,back)));
     // A per-frequency horizon removes hidden strips before shading. No row or

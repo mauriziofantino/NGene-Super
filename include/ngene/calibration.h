@@ -40,7 +40,11 @@ typedef struct {
  * This evaluates ADC loading, not GNSS C/N0 or receiver sensitivity.
  */
 int NgGainAnalyze(const TNgIqView *view, TNgGainQuality *quality, TNgError *error);
-/** Test live SDR gains while stopped; HackRF VGA sweeps stop at overload.
+/** Test live SDR gains while stopped using the identified device's allocation policy.
+ * HackRF exhausts distinct physical states and prefers earlier gain within each
+ * accepted equal-total-gain/RF-amp group; loading score chooses between groups.
+ * RTL-SDR uses manual native allocations; bladeRF retains its native gain table.
+ * Unsupported/unknown devices fail before RX rather than pretending to calibrate.
  * Three independent 32768-pair windows must pass per setting. RX stops before
  * statistical analysis; this may take
  * several minutes for a frontend with many combinations (HackRF: up to 384).

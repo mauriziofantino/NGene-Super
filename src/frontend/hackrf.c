@@ -244,6 +244,44 @@ static void Destroy(void *context)
     free(s);
 }
 
+/** @brief Open the selected device only; caller closes device/library on every outcome. */
+static int OpenDevice(const TNgConfig *config, TNgHackrfSource *s, TNgError *error)
+{
+    hackrf_device_list_t *list = NULL;
+    int code;
+    code = hackrf_init();
+    if (code != HACKRF_SUCCESS) {
+        NgFail(error, "hackrf_init: %s", hackrf_error_name((enum hackrf_error)code));
+        return NG_ERROR;
+    }
+    s->libraryInitialized = 1;
+    if (config->serial[0] != '\0') {
+        (void)snprintf(s->serial, sizeof(s->serial), "%s", config->serial);
+        code = hackrf_open_by_serial(config->serial, &s->device);
+    } else {
+        list = hackrf_device_list();
+        if (list == NULL || list->devicecount != 1) {
+            NgFail(
+                error,
+                "Expected one HackRF; found %d. Use --list-devices and configure frontend.serial",
+                list == NULL ? 0 : list->devicecount);
+            if (list != NULL) {
+                hackrf_device_list_free(list);
+            }
+            return NG_ERROR;
+        }
+        (void)snprintf(s->serial, sizeof(s->serial), "%s",
+                       list->serial_numbers[0] == NULL ? "unavailable" : list->serial_numbers[0]);
+        code = hackrf_device_list_open(list, 0, &s->device);
+        hackrf_device_list_free(list);
+    }
+    if (code != HACKRF_SUCCESS) {
+        NgFail(error, "Cannot open HackRF: %s", hackrf_error_name((enum hackrf_error)code));
+        return NG_ERROR;
+    }
+    return NG_OK;
+}
+
 /** Immutable native operations table; no per-run mutable state. */
 static const TNgFrontendOps operations = {Start, Acquire, Release, Stop, Stats, Destroy};
 
@@ -264,7 +302,6 @@ static const TNgFrontendOps operations = {Start, Acquire, Release, Stop, Stats, 
 int NgHackrfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
 {
     TNgHackrfSource *s = calloc(1, sizeof(*s));
-    hackrf_device_list_t *list = NULL;
     uint32_t bandwidth;
     int code;
     if (s == NULL) {
@@ -275,36 +312,7 @@ int NgHackrfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error
         free(s);
         return NG_ERROR;
     }
-    code = hackrf_init();
-    if (code != HACKRF_SUCCESS) {
-        NgFail(error, "hackrf_init: %s", hackrf_error_name((enum hackrf_error)code));
-        goto failed;
-    }
-    s->libraryInitialized = 1;
-    if (config->serial[0] != '\0') {
-        (void)snprintf(s->serial, sizeof(s->serial), "%s", config->serial);
-        code = hackrf_open_by_serial(config->serial, &s->device);
-    } else {
-        list = hackrf_device_list();
-        if (list == NULL || list->devicecount != 1) {
-            NgFail(
-                error,
-                "Expected one HackRF; found %d. Use --list-devices and configure frontend.serial",
-                list == NULL ? 0 : list->devicecount);
-            if (list != NULL) {
-                hackrf_device_list_free(list);
-            }
-            goto failed;
-        }
-        (void)snprintf(s->serial, sizeof(s->serial), "%s",
-                       list->serial_numbers[0] == NULL ? "unavailable" : list->serial_numbers[0]);
-        code = hackrf_device_list_open(list, 0, &s->device);
-        hackrf_device_list_free(list);
-    }
-    if (code != HACKRF_SUCCESS) {
-        NgFail(error, "Cannot open HackRF: %s", hackrf_error_name((enum hackrf_error)code));
-        goto failed;
-    }
+    if (OpenDevice(config, s, error) != NG_OK) goto failed;
     bandwidth = config->bandwidthHz == 0
                     ? hackrf_compute_baseband_filter_bw_round_down_lt(config->sampleRateHz)
                     : config->bandwidthHz;
@@ -370,4 +378,48 @@ int NgHackrfList(FILE *output, TNgError *error)
     hackrf_device_list_free(list);
     (void)hackrf_exit();
     return NG_OK;
+}
+
+/** @brief Read board identity without changing gains, tuning, antenna power or RX state. */
+int NgHackrfCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgError *error)
+{
+    TNgHackrfSource source = {0};
+    uint8_t board = 255, revision = 0;
+    int rc = NG_ERROR;
+    memset(caps, 0, sizeof(*caps));
+    if (OpenDevice(config, &source, error) != NG_OK) goto done;
+    if (hackrf_board_id_read(source.device, &board) != HACKRF_SUCCESS) {
+        NgFail(error, "Cannot identify HackRF board for gain calibration");
+        goto done;
+    }
+    /* Numeric native IDs also work with older installed headers lacking Pro names. */
+    switch (board) {
+    case 1: case 2: case 3:
+        caps->gainPolicy = NG_GAIN_POLICY_HACKRF_MAX2837;
+        snprintf(caps->deviceModel, sizeof(caps->deviceModel), "HackRF board %u / MAX2837", board);
+        break;
+    case 4:
+        caps->gainPolicy = NG_GAIN_POLICY_HACKRF_MAX2839;
+        strcpy(caps->deviceModel, "HackRF One r9 / MAX2839");
+        break;
+    case 5:
+        caps->gainPolicy = NG_GAIN_POLICY_HACKRF_MAX2831;
+        strcpy(caps->deviceModel, "HackRF Pro / MAX2831");
+        break;
+    default:
+        snprintf(caps->deviceModel, sizeof(caps->deviceModel), "Unknown HackRF board %u", board);
+        break;
+    }
+    if (hackrf_board_rev_read(source.device, &revision) == HACKRF_SUCCESS)
+        caps->boardRevision = revision;
+    snprintf(caps->deviceSerial, sizeof(caps->deviceSerial), "%s", source.serial);
+    caps->format = NG_FORMAT_CI8;
+    caps->sampleRateMinHz = NG_HACKRF_MIN_SAMPLE_RATE_HZ;
+    caps->sampleRateMaxHz = NG_FRONTEND_MAX_SAMPLE_RATE_HZ;
+    caps->frequencyMaxHz = UINT64_C(6000000000);
+    rc = NG_OK;
+done:
+    if (source.device) (void)hackrf_close(source.device);
+    if (source.libraryInitialized) (void)hackrf_exit();
+    return rc;
 }

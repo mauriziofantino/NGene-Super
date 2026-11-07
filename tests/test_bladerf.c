@@ -24,6 +24,14 @@ struct bladerf {
 
 /** @brief Select normal, overload, malformed metadata and partial-timeout cases. */
 static unsigned scenario;
+static const char *fixtureBoard = "bladerf2";
+
+/** @brief Identify the RFIC family; the adapter must retain native stage allocation. */
+const char *CALL_CONV bladerf_get_board_name(struct bladerf *device)
+{
+    (void)device;
+    return fixtureBoard;
+}
 
 /** @brief Verify the selected format reaches the native API without fallback. */
 static bladerf_format expected_format;
@@ -438,6 +446,14 @@ int main(void)
     device_list_result = 1;
     CHECK(NgBladerfCapabilities(&config, &caps, &error) == NG_OK && caps.gainMinDb == -12 &&
           caps.gainMaxDb == 60);
+    CHECK(caps.gainPolicy == NG_GAIN_POLICY_BLADERF2 && !strcmp(caps.deviceSerial, "blade-test"));
+    fixtureBoard = "bladerf1";
+    CHECK(NgBladerfCapabilities(&config, &caps, &error) == NG_OK &&
+          caps.gainPolicy == NG_GAIN_POLICY_BLADERF1);
+    fixtureBoard = "future-board";
+    CHECK(NgBladerfCapabilities(&config, &caps, &error) == NG_OK &&
+          caps.gainPolicy == NG_GAIN_POLICY_UNAVAILABLE);
+    fixtureBoard = "bladerf2";
     config.bladeGainDb = 61;
     CHECK(NgBladerfOpen(&config, &source, &error) == NG_ERROR);
     CHECK(opened == closed);

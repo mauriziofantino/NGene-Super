@@ -112,6 +112,12 @@ static void TestBlockDc(void)
             for (k = 0; k < view.meta.count; ++k) for (c = 0; c < 2; ++c)
                 CHECK(out[2 * k + c] == NgIqComponent(&view, k, c) - expected[c]);
             CHECK(storage[0] == 1234567 && storage[2 * view.meta.count + 1] == 1234567);
+            dc[0] = limit - 1;
+            dc[1] = -limit;
+            CHECK(NgIqSubtractDc(&view, out, dc, &error) == NG_OK);
+            for (k = 0; k < view.meta.count; ++k) for (c = 0; c < 2; ++c)
+                CHECK(out[2 * k + c] == NgIqComponent(&view, k, c) - dc[c]);
+            CHECK(storage[0] == 1234567 && storage[2 * view.meta.count + 1] == 1234567);
         }
         /* Extreme mean and an opposite rail: widening must preserve excursions
          * beyond the original ADC container, without invented clipping. */

@@ -38,8 +38,30 @@ typedef struct {
     TNgDiagnosticState hardwareLossState;
 } TNgFrontendStats;
 
+/** @brief Verified device gain allocation; unknown/no-op devices cannot calibrate. */
+typedef enum {
+    NG_GAIN_POLICY_UNAVAILABLE,
+    NG_GAIN_POLICY_HACKRF_MAX2837,
+    NG_GAIN_POLICY_HACKRF_MAX2839,
+    NG_GAIN_POLICY_HACKRF_MAX2831,
+    NG_GAIN_POLICY_RTL_R82XX,
+    NG_GAIN_POLICY_RTL_E4000,
+    NG_GAIN_POLICY_RTL_FC001X,
+    NG_GAIN_POLICY_BLADERF1,
+    NG_GAIN_POLICY_BLADERF2
+} TNgGainPolicy;
+
+/** @brief Return a static descriptive policy name; no allocation or device access. */
+const char *NgFrontendGainPolicyName(TNgGainPolicy policy);
+
 /** @brief Owned frontend limits; zero bounds denote an unavailable queried capability. */
 typedef struct {
+    /** Device-specific allocation selected from native identity, not a user-supplied label. */
+    TNgGainPolicy gainPolicy;
+    /** Copied model/RFIC description and serial of the probed device. */
+    char deviceModel[64], deviceSerial[128];
+    /** Native HackRF revision, zero if unavailable; not used instead of board identity. */
+    unsigned boardRevision;
     /** Native input representation. */
     TNgSampleFormat format;
     /** Nominal sample-rate bounds in complex pairs/s. */
@@ -75,8 +97,9 @@ int NgFrontendAvailable(TNgFrontendKind kind);
  */
 int NgFrontendList(TNgFrontendKind kind, FILE *output, TNgError *error);
 /** @brief Query device-specific limits outside sample processing.
- * @details RTL-SDR/bladeRF briefly open the selected device to read its native gain/rate
- * capabilities, then close it. Call only while stopped; no firmware is loaded or flashed.
+ * @details Live SDR adapters briefly open the selected device to read identity and native
+ * gain/rate capabilities, then close it. HackRF probing changes no hardware settings.
+ * Call only while stopped; no firmware is loaded or flashed.
  * @param config Source type and optional serial identifier.
  * @param caps Writable copied result; no vendor-owned pointers escape.
  * @param error Optional diagnostic destination.

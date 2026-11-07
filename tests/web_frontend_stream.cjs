@@ -37,6 +37,11 @@ async function until(fn,label){for(let n=0;n<200;n++){const v=await fn();if(v)re
   await post('receiver/start',{revision:profile.revision});
   const running=await until(async()=>{const s=await get('status');return s.state==='running'&&s.analysis?.sequence_id!=='0'?s:false;},'CI16 running');
   assert.equal(running.sample_format,'CI16');assert.equal(running.native_format,'SC16_Q11');assert.equal(running.adc_bits,12);
+  const firstHistogram=await until(async()=>{const s=await get('status');return BigInt(s.analysis.histogram_sequence)>0n?s.analysis:false;},'initial histogram');
+  assert.equal(firstHistogram.dc_removal,'simd_initial_mean');assert(firstHistogram.dc_estimate_pairs>0);
+  const nextHistogram=await until(async()=>{const s=await get('status');return BigInt(s.analysis.histogram_sequence)>BigInt(firstHistogram.histogram_sequence)+2n?s.analysis:false;},'later histogram');
+  for(const key of ['removed_dc_i','removed_dc_q','dc_estimate_pairs'])assert.equal(nextHistogram[key],firstHistogram[key],'Fixed DC metadata '+key);
+  await until(async()=>/Fixed DC offset/.test(await page.locator('#dcMagnitude').textContent()),'fixed DC display');
   await page.locator('#showObservation').click();await until(async()=>Number((await page.locator('#waterfall3DInfo').textContent()).match(/(\d+) snapshots/)?.[1])>=8,'3D history');
   assert(!/NaN|Infinity/.test(await page.locator('#spectrumPeak').textContent()));
   await page.locator('#waterfall3D').screenshot({path:path.join(root,'waterfall3d.png')});

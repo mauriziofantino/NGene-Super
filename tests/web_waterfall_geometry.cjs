@@ -18,28 +18,33 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
  }
  const history=fixture(16,64,4,31),before=JSON.stringify(history),short=pixels(64,128),long=pixels(64,128);
  paintWaterfallRelief(short,history,64,128,-100,0);
- paintWaterfallRelief(long,[...history,...fixture(16,64,-1,-1)],64,128,-100,0);
- const apex=Math.floor(projectWaterfallPoint(4,1,128,128));
- assert.deepEqual([...short.slice(4*(apex*64+31),4*(apex*64+32))],[...long.slice(4*(apex*64+31),4*(apex*64+32))],'History growth moved an existing event');
+ paintWaterfallRelief(long,history,64,256,-100,0,128);
+ assert.deepEqual(short,long,'History capacity must not leave unused time rows');
  assert.equal(JSON.stringify(history),before,'Projection mutated the shared PSD history');
- assert.equal(short[4*(127*64)+3],0,'Unpopulated time must remain blank');
+ for(let y=Math.ceil(127*0.38);y<128;y++)for(let k=0;k<64;k++)
+   assert.equal(short[4*(y*64+k)+3],255,'Populated surface must cover the whole time grid');
+ for(const count of [0,1,2,16,128]){
+   const data=pixels(64,128);
+   paintWaterfallRelief(data,fixture(count,64,-1,-1),64,128,-100,0);
+   for(let k=0;k<64;k++)assert.equal(data[4*(127*64+k)+3],count?255:0);
+ }
  const flat=pixels(16,8);paintWaterfallRelief(flat,Array.from({length:8},()=>({values:Array(16).fill(-50)})),16,8,-100,0);
  const baseline=Math.floor(projectWaterfallPoint(0,0.5,8,8));
  assert.equal(flat[3],0,'A flat surface must be projected below the power ceiling');
  assert(flat[4*(baseline*16)+3]>0,'Projected flat surface missing');
- // Both views use the same frequency crop and observations. 3D has a power
+ // Both views use the full frequency band and observations. 3D has a power
  // projection and screen-height raster, deliberately different from the 2D grid.
  const source=fs.readFileSync('web/app.js','utf8'),draw=source.slice(source.indexOf('function drawWaterfall(){'),source.indexOf('function drawHistogram('));
  const calls=[],canvas=()=>({getContext:()=>({createImageData:(w,h)=>({data:pixels(w,h)}),putImageData(){}})});
  const ctx={fillText(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},drawImage(bitmap,...args){calls.push(args);}};
  const sandbox={paintWaterfallRelief,diagnosticMask:()=>1,plotEnabled:()=>true,surface:()=>({ctx,left:52,right:820,top:16,bottom:368}),range:()=>[-100,0],frequencyRange:()=>[-200,300],displayFrequency:x=>x,analysisSnapshot:{sample_rate_hz:1000,dbfs:Array(64),config:{units:"dbfs_bin"}},historyRows:()=>128,waterfallHistory:history,plotWork:{waterfall:0,waterfall3D:0},waterfallPalette:Array.from({length:256},(_,i)=>[i,i,i]),waterfallBitmap:canvas(),waterfall3DBitmap:canvas(),frequencyAxes(){},$(){return {};}};
  vm.createContext(sandbox);vm.runInContext(draw,sandbox);sandbox.drawWaterfall();sandbox.drawWaterfall3D();
- assert.equal(calls[0][0],calls[1][0],'Frequency crop start differs');
- assert.equal(calls[0][2],calls[1][2],'Frequency crop width differs');
+ for(const call of calls){assert.equal(call[0],0);assert.equal(call[2],64,'Full band missing');}
+ assert.equal(calls[0][3],16,'2D history must fill the plot before capacity is reached');
  assert.deepEqual(calls[0].slice(4),calls[1].slice(4),'Plot destination differs');
  assert.equal(sandbox.waterfall3DRender.style,'surface');
  assert.equal(sandbox.waterfall3DRender.imageRows,352);
  for(const key of ['rows','columns','newest','oldest'])assert.equal(sandbox.waterfallRender[key],sandbox.waterfall3DRender[key]);
  const count=calls.length;sandbox.plotEnabled=()=>false;sandbox.drawWaterfall3D();assert.equal(calls.length,count,'Disabled relief touched its canvas');
- console.log('PASS: power changes vertex height; narrow transients at every age/bin; stable projection as history fills; immutable history; synchronized crop/frame span; disabled canvas idle.');
+ console.log('PASS: power changes vertex height; narrow transients at every age/bin; full time grid with partial history; immutable history; synchronized full band/frame span; disabled canvas idle.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

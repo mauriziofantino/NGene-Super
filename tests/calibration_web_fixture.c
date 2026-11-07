@@ -10,6 +10,8 @@ int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *resul
     unsigned k, count = config->vgaGainDb == 6 ? 1000u : 60u;
     memset(result, 0, sizeof(*result));
     result->selected = *config;
+    result->capabilities.gainPolicy = NG_GAIN_POLICY_HACKRF_MAX2837;
+    strcpy(result->capabilities.deviceModel, "HackRF fixture / MAX2837");
     if (config->vgaGainDb == 4) return NgFail(error, "Simulated SDR transport failure");
     for (k = 0; k < count; ++k) {
         if (callbacks->cancelled(callbacks->context)) return NG_END;

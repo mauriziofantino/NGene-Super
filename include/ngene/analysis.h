@@ -141,8 +141,10 @@ typedef struct {
     TNgComponentStats statsQ;
     /** Magnitude hypot(mean I, mean Q) in ADC units; no bin is hidden. */
     double dcMagnitude;
-    /** Rounded block means subtracted before histogram statistics/bins. */
+    /** Fixed rounded startup offsets subtracted before histogram statistics/bins. */
     int removedDcI, removedDcQ;
+    /** Pairs in the initial DC estimate; independent of the current histogram size. */
+    uint32_t dcEstimatePairs;
     /** Owned FFT-shifted PSD bins in the configured logarithmic units. */
     double spectrumDbfs[NG_ANALYSIS_BINS];
     /** Statistics and checksum of this published PSD frame. */
@@ -200,7 +202,9 @@ int NgAnalysisValidate(const TNgAnalysisConfig *config, TNgError *error);
  * @details
  * One sample producer may submit pre/post views. A worker processes independent PSD and
  * histogram bursts; it never retains frontend/ring pointers. The caller owns the instance
- * until NgAnalysisDestroy.
+ * until NgAnalysisDestroy. Each input tap estimates DC once from its first complete burst
+ * and shares that fixed rounded offset between PSD and histograms. A format change estimates
+ * again. Recreate the instance after changing hardware gain or tuning.
  *
  * @param sampleRate Nominal complex sample rate in pairs per second; positive.
  * @param config Validated diagnostic settings.
@@ -235,7 +239,7 @@ void NgAnalysisDestroy(TNgAnalysis *analysis);
  * @details
  * Thread-safe with the producer and worker. A new revision discards partial/obsolete bursts
  * and resets temporal accumulation when the worker observes it. Config is copied; the caller
- * need not retain it.
+ * need not retain it. Fixed DC estimates are retained across diagnostic setting changes.
  *
  * @param analysis Live diagnostic worker.
  * @param config New validated settings.

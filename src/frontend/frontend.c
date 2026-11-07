@@ -201,6 +201,11 @@ int NgFrontendCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgEr
         return NgFail(error, "Missing capability request");
     }
     memset(caps, 0, sizeof(*caps));
+#ifdef NGENE_HAVE_HACKRF
+    if (config->frontend == NG_FRONTEND_HACKRF) {
+        return NgHackrfCapabilities(config, caps, error);
+    }
+#endif
 #ifdef NGENE_HAVE_RTLSDR
     if (config->frontend == NG_FRONTEND_RTLSDR) {
         return NgRtlsdrCapabilities(config, caps, error);
@@ -225,4 +230,20 @@ int NgFrontendCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgEr
         config->frontend == NG_FRONTEND_FILE ? 61440000u : NG_FRONTEND_MAX_SAMPLE_RATE_HZ;
     caps->frequencyMaxHz = UINT64_C(6000000000);
     return NG_OK;
+}
+
+/** @brief Describe the verified allocation used by stopped-device gain calibration. */
+const char *NgFrontendGainPolicyName(TNgGainPolicy policy)
+{
+    switch (policy) {
+    case NG_GAIN_POLICY_HACKRF_MAX2837: return "HackRF MAX2837: prefer early gain";
+    case NG_GAIN_POLICY_HACKRF_MAX2839: return "HackRF MAX2839: compensated physical gains";
+    case NG_GAIN_POLICY_HACKRF_MAX2831: return "HackRF MAX2831: three physical LNA states";
+    case NG_GAIN_POLICY_RTL_R82XX: return "RTL R82xx: native manual LNA/mixer allocation";
+    case NG_GAIN_POLICY_RTL_E4000: return "RTL E4000: native LNA/mixer allocation";
+    case NG_GAIN_POLICY_RTL_FC001X: return "RTL FC001x: native discrete manual gain";
+    case NG_GAIN_POLICY_BLADERF1: return "bladeRF 1: native LNA/RXVGA1/RXVGA2 allocation";
+    case NG_GAIN_POLICY_BLADERF2: return "bladeRF 2: native AD9361 full gain table";
+    default: return "Gain calibration unavailable for this device";
+    }
 }

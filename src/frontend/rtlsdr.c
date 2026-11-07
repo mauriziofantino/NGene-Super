@@ -330,6 +330,27 @@ int NgRtlsdrCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgErro
     if (OpenDevice(config, &device, serial, error) != NG_OK) {
         return NG_ERROR;
     }
+    snprintf(caps->deviceSerial, sizeof(caps->deviceSerial), "%s", serial);
+    switch (rtlsdr_get_tuner_type(device)) {
+    case RTLSDR_TUNER_R820T: case RTLSDR_TUNER_R828D:
+        caps->gainPolicy = NG_GAIN_POLICY_RTL_R82XX;
+        strcpy(caps->deviceModel, "RTL-SDR / R82xx");
+        break;
+    case RTLSDR_TUNER_E4000:
+        caps->gainPolicy = NG_GAIN_POLICY_RTL_E4000;
+        strcpy(caps->deviceModel, "RTL-SDR / E4000");
+        break;
+    case RTLSDR_TUNER_FC0012: case RTLSDR_TUNER_FC0013:
+        caps->gainPolicy = NG_GAIN_POLICY_RTL_FC001X;
+        strcpy(caps->deviceModel, "RTL-SDR / FC001x");
+        break;
+    case RTLSDR_TUNER_FC2580:
+        strcpy(caps->deviceModel, "RTL-SDR / FC2580 (gain control unavailable)");
+        break;
+    default:
+        strcpy(caps->deviceModel, "RTL-SDR / unknown tuner");
+        break;
+    }
     count = rtlsdr_get_tuner_gains(device, NULL);
     if (count <= 0 || count > 64 || rtlsdr_get_tuner_gains(device, caps->tunerGains) != count) {
         rtlsdr_close(device);

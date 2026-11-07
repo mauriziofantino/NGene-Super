@@ -206,6 +206,10 @@ static cJSON *CalibrationJson(TNgWebServer *server)
     Number(reply, "elapsed_seconds", server->calibrationState == 1 ?
            NgMonotonicSeconds() - server->calibrationStarted : server->calibrationSeconds);
     Number(reply, "tested", result->tested);
+    String(reply, "device_model", result->capabilities.deviceModel);
+    String(reply, "device_serial", result->capabilities.deviceSerial);
+    String(reply, "gain_policy", NgFrontendGainPolicyName(result->capabilities.gainPolicy));
+    Number(reply, "board_revision", result->capabilities.boardRevision);
     Number(reply, "current_lna_gain_db", candidate->lnaGainDb);
     Number(reply, "current_vga_gain_db", candidate->vgaGainDb);
     cJSON_AddBoolToObject(reply, "current_rf_amp", candidate->rfAmp);
@@ -465,7 +469,8 @@ static cJSON *AnalysisJson(const TNgAnalysisSnapshot *s, unsigned mask)
     Number(o, "dc_magnitude", s->dcMagnitude);
     Number(o, "removed_dc_i", s->removedDcI);
     Number(o, "removed_dc_q", s->removedDcQ);
-    String(o, "dc_removal", "simd_block_mean");
+    Number(o, "dc_estimate_pairs", s->dcEstimatePairs);
+    String(o, "dc_removal", "simd_initial_mean");
     Number(o, "histogram_min", s->histogramMin);
     Number(o, "histogram_max", s->histogramMax);
     String(o, "sample_format", NgSampleFormatName(s->sampleFormat));
@@ -1432,6 +1437,11 @@ static int Handle(struct mg_connection *connection, void *context)
                 cJSON *gains = cJSON_CreateArray();
                 reply = cJSON_CreateObject();
                 String(reply, "format", NgSampleFormatName(caps.format));
+                String(reply, "device_model", caps.deviceModel);
+                String(reply, "device_serial", caps.deviceSerial);
+                String(reply, "gain_policy", NgFrontendGainPolicyName(caps.gainPolicy));
+                cJSON_AddBoolToObject(reply, "gain_calibration_available",
+                                      caps.gainPolicy != NG_GAIN_POLICY_UNAVAILABLE);
                 Number(reply, "sample_rate_min_hz", caps.sampleRateMinHz);
                 Number(reply, "sample_rate_max_hz", caps.sampleRateMaxHz);
                 Number(reply, "frequency_min_hz", (double)caps.frequencyMinHz);

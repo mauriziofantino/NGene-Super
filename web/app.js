@@ -681,7 +681,7 @@ function renderAnalysis(a,configRevision=null){
   if(spectrumChanged){
     $('fftBackend').textContent=a.backend||'Integer FFT';
     if(plotEnabled('spectrum')){
-    $('spectrumInfo').textContent=`${a.fft_size}-point FFT · Δf ${a.bin_hz.toFixed(2)} Hz · ENBW ${a.enbw_hz.toFixed(2)} Hz · ${a.config.window} · ${a.config.averages} Welch segments · after block DC removal`;
+    $('spectrumInfo').textContent=`${a.fft_size}-point FFT · Δf ${a.bin_hz.toFixed(2)} Hz · ENBW ${a.enbw_hz.toFixed(2)} Hz · ${a.config.window} · ${a.config.averages} Welch segments · after fixed DC removal`;
     $('spectrumPeak').textContent=`Peak ${displayFrequency(a.peak_hz).toFixed(4)} ${frequencyUnit()} · ${a.peak_dbfs.toFixed(1)} ${unit}`;
     }
     $('frameIntegrity').textContent=`PSD #${incoming} · produced ${a.produced_seconds.toFixed(3)} s · min/max/mean ${a.min.toFixed(2)} / ${a.max.toFixed(2)} / ${a.mean.toFixed(2)} · NaN/Inf ${a.nan_count}/${a.inf_count} · hash ${a.checksum.toString(16)} · rejected ${rejectedFrames}`;
@@ -689,14 +689,14 @@ function renderAnalysis(a,configRevision=null){
   }
   if(histogramChanged){
     histogramSequence=histogramIncoming;
-    $('histogramInfo').textContent=a.histogram_count?`${pairs(a.histogram_count)} pairs · ${a.histogram_i.length} bins · after block DC removal`:'Histogram disabled / waiting';
+    $('histogramInfo').textContent=a.histogram_count?`${pairs(a.histogram_count)} pairs · ${a.histogram_i.length} bins · after fixed DC removal`:'Histogram disabled / waiting';
     for(const [id,t] of [['statsI',a.stats_i],['statsQ',a.stats_q]]){
       const dl=document.createElement('dl');
       for(const [label,value] of [['Mean',t.mean],['Std',t.std],['RMS',t.rms],['Min',t.min],['Max',t.max],['Clipping / rail count',t.clipping_count],['Zero count',t.zero_count]]){
         const div=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=Number.isInteger(value)?pairs(value):value.toFixed(4);div.append(dt,dd);dl.append(div);
       }$(id).replaceChildren(dl);
     }
-    $('dcMagnitude').textContent=`Removed block DC: I ${a.removed_dc_i ?? 0}, Q ${a.removed_dc_q ?? 0} counts · residual DC ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
+    $('dcMagnitude').textContent=`Fixed DC offset: I ${a.removed_dc_i ?? 0}, Q ${a.removed_dc_q ?? 0} counts · estimated from ${pairs(a.dc_estimate_pairs ?? 0)} pairs · residual DC ${a.dc_magnitude.toFixed(4)} counts · histogram sample ${a.histogram_first_sample} · age ${a.histogram_age_seconds.toFixed(2)} s`;
     $('histogramRails').textContent=`Input stream rail counts, before DC removal: I ${pairs(a.clipped_i)} · Q ${pairs(a.clipped_q)}`;
     drawHistogram('histogramI',analysisSnapshot.histogram_i,'#39d5b0');drawHistogram('histogramQ',analysisSnapshot.histogram_q,'#62a6ff');
   }
@@ -707,9 +707,7 @@ function frequencyUnit(){return $('frequencyReference').value==='rf'?'MHz':'kHz'
 function displayFrequency(bin){const ref=$('frequencyReference').value,hardware=status?.hardware_frequency_hz||Number(savedValues['frontend.center_frequency_hz'])||0,di=status?.digital_if_hz||0;return ref==='rf'?(hardware+bin)/1e6:ref==='signal'?(bin-di)/1000:bin/1000;}
 function frequencyRange(){
   const fs=analysisSnapshot?.sample_rate_hz||Number(savedValues['frontend.sample_rate_hz'])||100000;
-  let lo=displayFrequency(-fs/2),hi=displayFrequency(fs/2),l=$('frequencyMin').value,h=$('frequencyMax').value;
-  if(l!==''&&h!==''&&Number.isFinite(Number(l))&&Number.isFinite(Number(h))&&Number(l)<Number(h)){lo=Math.max(lo,Number(l));hi=Math.min(hi,Number(h));}
-  if(lo>=hi)return [displayFrequency(-fs/2),displayFrequency(fs/2)];return [lo,hi];
+  return [displayFrequency(-fs/2),displayFrequency(fs/2)];
 }
 function surface(id){
   const canvas=$(id),rect=canvas.getBoundingClientRect(),w=rect.width,h=rect.height;
@@ -749,7 +747,7 @@ function drawWaterfall(){
   const s=surface('waterfall');if(!s)return;
   waterfallRender={mode:'2d',rows:0,columns:0};++plotWork.waterfall;
   const {ctx,left,right,top,bottom}=s;
-  const rows=historyRows(),columns=analysisSnapshot?.dbfs.length||1024;
+  const rows=Math.max(1,Math.min(historyRows(),waterfallHistory.length)),columns=analysisSnapshot?.dbfs.length||1024;
   waterfallBitmap.width=columns;waterfallBitmap.height=rows;
   const bitmap=waterfallBitmap.getContext('2d'),pixels=bitmap.createImageData(columns,rows);
   waterfallHistory.slice(0,rows).forEach((row,j)=>{
@@ -759,8 +757,8 @@ function drawWaterfall(){
       pixels.data[offset]=colour[0];pixels.data[offset+1]=colour[1];pixels.data[offset+2]=colour[2];pixels.data[offset+3]=255;
     }
   });
-  bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2),[flo,fhi]=frequencyRange();
-  ctx.drawImage(waterfallBitmap,(flo-fullLo)/(fullHi-fullLo)*columns,0,(fhi-flo)/(fullHi-fullLo)*columns,rows,left,top,right-left,bottom-top);
+  bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(waterfallBitmap,0,0,columns,rows,left,top,right-left,bottom-top);
   ctx.fillStyle='#8fa6ba';ctx.fillText('New',6,top+9);ctx.fillText('Older',6,bottom);frequencyAxes(s);
   waterfallRender={mode:'2d',rows:Math.min(rows,waterfallHistory.length),columns,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
 }
@@ -769,13 +767,12 @@ function drawWaterfall3D(){
   if(!(diagnosticMask()&1)||!plotEnabled('waterfall3D'))return;
   const s=surface('waterfall3D');if(!s)return;++plotWork.waterfall3D;
   const {ctx,left,right,top,bottom}=s,[lo,hi]=range(true);
-  const rows=historyRows(),columns=analysisSnapshot?.dbfs.length||1024;
+  const rows=Math.max(1,Math.min(historyRows(),waterfallHistory.length)),columns=analysisSnapshot?.dbfs.length||1024;
   const imageRows=Math.max(2,Math.round(bottom-top));
   waterfall3DBitmap.width=columns;waterfall3DBitmap.height=imageRows;
   const bitmap=waterfall3DBitmap.getContext('2d'),pixels=bitmap.createImageData(columns,imageRows);
   const geometry=paintWaterfallRelief(pixels.data,waterfallHistory,columns,rows,lo,hi,imageRows);
   bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;
-  const fs=analysisSnapshot?.sample_rate_hz||100000,fullLo=displayFrequency(-fs/2),fullHi=displayFrequency(fs/2),[flo,fhi]=frequencyRange();
   const floorTop=top+0.38*(bottom-top);
   ctx.strokeStyle='#233446';ctx.lineWidth=1;
   for(let j=0;j<=4;j++){
@@ -783,7 +780,7 @@ function drawWaterfall3D(){
     ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
     ctx.beginPath();ctx.moveTo(x,floorTop);ctx.lineTo(x,bottom);ctx.stroke();
   }
-  ctx.drawImage(waterfall3DBitmap,(flo-fullLo)/(fullHi-fullLo)*columns,0,(fhi-flo)/(fullHi-fullLo)*columns,imageRows,left,top,right-left,bottom-top);
+  ctx.drawImage(waterfall3DBitmap,0,0,columns,imageRows,left,top,right-left,bottom-top);
   ctx.fillStyle='#8fa6ba';ctx.fillText(String(hi),4,top+9);ctx.fillText(String(lo),4,floorTop+4);
   ctx.fillText('New',6,floorTop+18);ctx.fillText('Older',6,bottom);frequencyAxes(s);
   $('waterfall3DInfo').textContent='3D surface | '+waterfallHistory.length+' snapshots | height = power | synchronized with 2D';
@@ -821,33 +818,11 @@ for(const id of ['spectrum','waterfall','waterfall3D']){
     event.preventDefault();setPlotHeight(id,event.key==='Home'?180:event.key==='End'?720:Number($(`${id}Height`).value)+change);
   });
 }
-let plotsExpanded=false,plotFocusReturn=null,plotScrollReturn=0;
-function setPlotsExpanded(expanded){
-  if(expanded===plotsExpanded)return;
-  if(expanded){plotFocusReturn=document.activeElement;plotScrollReturn=scrollY;}
-  plotsExpanded=expanded;const panel=$('spectrumPanel');
-  panel.classList.toggle('plot-focused',expanded);document.body.classList.toggle('plots-focused',expanded);
-  $('expandPlots').textContent=expanded?'Restore plots':'Expand plots';$('expandPlots').setAttribute('aria-expanded',String(expanded));
-  if(expanded){panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');$('expandPlots').focus({preventScroll:true});}
-  else {panel.removeAttribute('role');panel.removeAttribute('aria-modal');scrollTo(0,plotScrollReturn);if(plotFocusReturn?.isConnected)plotFocusReturn.focus({preventScroll:true});}
-  schedulePlotDraw();
-}
-$('expandPlots').addEventListener('click',()=>setPlotsExpanded(!plotsExpanded));
-document.addEventListener('keydown',event=>{
-  if(!plotsExpanded)return;
-  if(event.key==='Escape'){event.preventDefault();setPlotsExpanded(false);}
-  else if(event.key==='Tab'){
-    const controls=[...$('spectrumPanel').querySelectorAll('button,input,select,[tabindex="0"]')].filter(el=>!el.disabled&&el.getClientRects().length);
-    const first=controls[0],last=controls[controls.length-1];
-    if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
-    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
-  }
-});
 function clearWaterfallHistory(){waterfallHistory=[];waterfallTime=-Infinity;drawWaterfall();drawWaterfall3D();}
 $('clearWaterfall').addEventListener('click',clearWaterfallHistory);
 $('clearWaterfall3D').addEventListener('click',clearWaterfallHistory);
 $('waterfallRows').addEventListener('change',()=>{waterfallHistory.length=Math.min(waterfallHistory.length,historyRows());drawAnalysis();});
-for(const id of ['dbMin','dbMax','colourMin','colourMax','waterfallRate','frequencyMin','frequencyMax','histScale','histMax'])$(id).addEventListener('change',drawAnalysis);
+for(const id of ['dbMin','dbMax','colourMin','colourMax','waterfallRate','histScale','histMax'])$(id).addEventListener('change',drawAnalysis);
 $('configForm').addEventListener('submit', event => event.preventDefault());
 $('apply').addEventListener('click', () => applyConfig()); $('validate').addEventListener('click', () => applyConfig(true));
 $('start').addEventListener('click', () => command('receiver/start')); $('stop').addEventListener('click', () => command('receiver/stop'));
@@ -870,7 +845,7 @@ $('bladePreset').addEventListener('click', () => {
 });
 let capabilityRequestId = 0;
 function calibrationDetails(result) {
-  return `RMS ${(result.rms_fraction * 100).toFixed(1)}% of ADC range · DC ${(result.dc_fraction * 100).toFixed(2)}% · near clipping ${(result.clipped_fraction * 100).toFixed(3)}% · distribution error ${Number(result.gaussian_error).toFixed(2)} · I/Q imbalance ${(result.iq_imbalance * 100).toFixed(1)}%`;
+  return `${result.device_model ? result.device_model+' · '+result.gain_policy+' · ' : ''}RMS ${(result.rms_fraction * 100).toFixed(1)}% of ADC range · DC ${(result.dc_fraction * 100).toFixed(2)}% · near clipping ${(result.clipped_fraction * 100).toFixed(3)}% · distribution error ${Number(result.gaussian_error).toFixed(2)} · I/Q imbalance ${(result.iq_imbalance * 100).toFixed(1)}%`;
 }
 function renderCalibration(result) {
   const job = BigInt(result.job_id || '0');
@@ -881,7 +856,7 @@ function renderCalibration(result) {
   if (calibrationBusy) {
     const gains = values['frontend.type'] === 'hackrf' ?
       ` · testing LNA ${result.current_lna_gain_db} dB, VGA ${result.current_vga_gain_db} dB, RF amp ${result.current_rf_amp ? 'on' : 'off'}` : '';
-    $('calibrationStatus').textContent = `${result.cancel_requested ? 'Cancelling; releasing the SDR' : 'Calibrating'} · ${result.tested / 3} settings completed · ${Math.floor(result.elapsed_seconds)} s${gains}`;
+    $('calibrationStatus').textContent = `${result.cancel_requested ? 'Cancelling; releasing the SDR' : 'Calibrating'}${result.device_model ? ' · '+result.device_model : ''} · ${result.tested / 3} settings completed · ${Math.floor(result.elapsed_seconds)} s${gains}`;
     $('cancelCalibration').dataset.jobId = result.job_id;
     controls();
     return;
@@ -957,8 +932,7 @@ $('deviceLimits').addEventListener('click', async () => {
   } catch(error) { if (current()) { profileRequestNotice = {message:error.message,error:true}; profileSummary(); notice(error.message, true); } }
 });
 $('filePreset').addEventListener('click', () => { Object.assign(values, {'frontend.type':'file','replay.realtime':'true','replay.loop':'false','receiver.run_seconds':'0','receiver.mode':'capture','recording.enabled':'false'}); buildForm(); dirtyState(true); });
-$('frequencyReference').addEventListener('change',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
-$('resetFrequency').addEventListener('click',()=>{$('frequencyMin').value='';$('frequencyMax').value='';drawAnalysis();});
+$('frequencyReference').addEventListener('change',drawAnalysis);
 $('autoScale').addEventListener('click',()=>{if(!anyPlotEnabled()||!diagnosticEnabled('spectrum_enabled')||!analysisSnapshot?.dbfs.length)return;const lo=Math.floor(Math.min(...analysisSnapshot.dbfs)/10)*10,hi=Math.ceil(Math.max(...analysisSnapshot.dbfs)/10)*10+10;for(const id of ['dbMin','colourMin'])$(id).value=lo;for(const id of ['dbMax','colourMax'])$(id).value=hi;drawAnalysis();});
 for(const id of ['showSpectrum','showWaterfall','showWaterfall3D'])$(id).addEventListener('change',changePlotEnabled);
 $('histogramPanel').querySelector('.panel-heading').append($('showHistogram').parentElement);
@@ -988,7 +962,6 @@ for(const id of ['spectrum','waterfall','waterfall3D','histogramI','histogramQ']
 receiverWorkspace = createReceiverWorkspace({
   onViewChange(view) {
     activeWorkspaceView = view;
-    if (view !== 'rf') setPlotsExpanded(false);
     requestStatus();
     if (view === 'rf') requestAnimationFrame(drawAnalysis);
   },

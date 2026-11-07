@@ -11,7 +11,11 @@ fields remain compatible, but their redundant UI selectors have been removed.
 Current frontend streams are common signed CI8 or CI16 Q15; legacy CU8/Q11 replay is
 converted before publication. Histogram amplitudes and rail indicators use the common
 representation. Source ADC bits are separate metadata. Before statistics or FFT processing,
-each worker subtracts its burst's rounded I/Q mean using SIMD and widened int32 storage.
+each worker subtracts fixed I/Q offsets using SIMD and widened int32 storage. The first
+complete observation estimates the rounded offsets once per input tap and format in a
+receiver session; PSD and histograms share that estimate. Later bursts reuse it, including
+after diagnostic-setting changes, gaps and pause/resume. A receiver restart or format change
+estimates again. Residual means remain observable rather than forced to zero per burst.
 There is no IIR or streaming DC remover; shared and recorded samples remain unchanged.
 See [frontend decisions](FRONTEND_STREAM_DECISIONS.md).
 
@@ -52,9 +56,11 @@ required to persist it to INI.
 The 3D view projects frequency/time/power as an orthographic surface: power changes
 vertex height and foreground surfaces can hide background surfaces. The colour-only
 relief implementation was rejected by the user on 2026-11-05. The views share stored
-rows, bins, frequency crop, power normalization, pause and Clear. Their screen time
-coordinates differ because 3D adds power height. Projection uses the configured history
-capacity, so filling history does not rescale existing ages. A per-frequency visibility
+rows, bins, full frequency band, power normalization, pause and Clear. Their screen time
+coordinates differ because 3D adds power height. Projection uses the available
+observations, so partially filled history already spans the whole time grid.
+The represented time interval grows until the configured capacity is reached. The oldest
+strip joins the floor to cover the grid beneath the raised surface. A per-frequency visibility
 horizon avoids drawing hidden strips without pooling bins or rows. The renderer is bounded
 by 2048 history rows and 1024 telemetry bins and runs only in the browser.
 
@@ -101,7 +107,7 @@ changes.
 
 ## Arithmetic and display
 
-For CI8: block mean subtraction → ×128 → Q15 window → Q14 FFT /N → uint64 power and Welch accumulation. Segment
+For CI8: fixed DC subtraction → ×128 → Q15 window → Q14 FFT /N → uint64 power and Welch accumulation. Segment
 averaging uses linear power. Temporal mean/EMA uses double linear power, followed by log10
 for display. FFT butterflies remain integer. Configuration, epoch or detected discontinuity
 changes reset temporal state.
@@ -109,20 +115,20 @@ changes reset temporal state.
 Coherent gain G=sum(w)/N; ENBW=Fs*sum(w²)/(sum(w))². dBFS/bin uses tone normalization
 (CI8 radius 128 = 0 dBFS); dBFS/Hz divides normalized power by ENBW. This is not dBm.
 Integer quantization and numerical noise remain: a longer FFT does not guarantee greater
-dynamic range. Bin zero is not overwritten; block-mean subtraction removes the constant
-component before windowing. Any useful signal exactly at DC is removed along with offset.
+dynamic range. Bin zero is not overwritten; the fixed estimated offset is subtracted
+before windowing. Any useful constant component in that estimate is removed with the offset.
 
 FFT-shifted output is reduced to at most 1024 display values using maximum pooling for larger
 FFTs; peak frequency and Δf retain native resolution. Pooling preserves peaks rather than
 integrated noise power. The waterfall is a sequence of snapshots, rather than a continuous
 STFT. Every row uses the same colour scale; history, rate and axes have separate controls.
 
-Histograms describe samples after mean subtraction, using uint32 counts and 64-bit moment
+Histograms describe samples after fixed offset subtraction, using uint32 counts and 64-bit moment
 accumulators. The axis covers the input format's signed range and doubles if needed to retain
 centered excursions without clipping into an end bin. NGene computes residual mean,
 standard deviation, RMS, minimum/maximum, zeros and residual DC magnitude, and separately
-reports the removed I/Q offsets. Endpoint counts refer to input stream values before subtraction;
-they do not establish physical ADC or RF clipping. Burst-mean subtraction and its checks are
+reports the removed I/Q offsets and initial estimate size. Endpoint counts refer to input
+stream values before subtraction; they do not establish physical ADC or RF clipping. DC arithmetic and checks are
 documented in [calibration and DC verification](CALIBRATION_DC.md).
 
 [Implementation, tuning, ownership, benchmarks and limitations](ITERATION_04.md).

@@ -21,6 +21,19 @@ async function until(fn,label){for(let i=0;i<160;i++){const r=await fn();if(r)re
   await page.goto(base);await until(async()=>await page.locator('#connection').textContent()==='Connected','GUI connected');await page.locator('#refresh').selectOption('33');await post('receiver/start',{revision:config.revision});
   const snapshot=()=>page.evaluate(async()=>({...(await import('/app.js')).diagnosticSnapshot(),calls:{...window.canvasCalls}}));
   await until(async()=>(await snapshot()).waterfall3D.history>=24,'3D live history');
+  assert.equal(await page.locator('#expandPlots,#frequencyMin,#frequencyMax,#resetFrequency').count(),0,'Zoom controls removed');
+  for(const id of ['waterfall','waterfall3D']){
+    const filled=await page.locator('#'+id).evaluate(canvas=>{
+      const d=Math.min(devicePixelRatio||1,2),ctx=canvas.getContext('2d');
+      const y=Math.floor((canvas.getBoundingClientRect().height-34)*d);
+      for(let x=60*d;x<canvas.width-25*d;x+=13*d){
+        const pixel=ctx.getImageData(Math.floor(x),y,1,1).data;
+        if(pixel[0]===12&&pixel[1]===21&&pixel[2]===32)return false;
+      }
+      return true;
+    });
+    assert(filled,id+' must fill the time grid while history is below capacity');
+  }
   assert.equal(await page.locator('#waterfallMode,#waterfallOrbit').count(),0,'rotating view removed');
   for(const id of ['spectrum','waterfall','waterfall3D'])assert(await page.locator('#'+id+'Body').isVisible());
   const rects=await page.locator('#spectrum,#waterfall,#waterfall3D').evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().top));assert(rects[0]<rects[1]&&rects[1]<rects[2],'spectrum, 2D, 3D order');
