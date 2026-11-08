@@ -10,6 +10,8 @@ int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, void **out, TNgError 
 void NgAcquisitionGpsFree(void *context);
 /** Default GPS operations, immutable for the process lifetime. */
 extern const TNgAcquisitionStrategy ngGpsAcquisitionStrategy;
+/** Copy default-strategy display data on its owning worker only. */
+void NgAcquisitionGpsSearchSpace(void *context, TNgAcquisitionSearchSpace *space);
 
 /** Owned capture handoff; slot is published only through release/acquire atomics. */
 struct TNgAcquisition {
@@ -34,6 +36,7 @@ struct TNgAcquisition {
     const TNgAcquisitionStrategy *strategy;
     void *context;
     int ownsContext;
+    TNgAcquisitionSearchSpace spaces[32]; /**< Last completed map per PRN, heap-owned. */
 };
 
 /** Default first functional GPS configuration. */
@@ -94,6 +97,11 @@ static void SearchWorker(void *context)
             if (!Cancelled(acquisition)) {
                 acquisition->snapshot.results[prn - 1] = result;
                 acquisition->snapshot.searches++;
+                if (status == NG_OK && acquisition->strategy == &ngGpsAcquisitionStrategy) {
+                    TNgAcquisitionSearchSpace *space = &acquisition->spaces[prn - 1];
+                    NgAcquisitionGpsSearchSpace(acquisition->context, space);
+                    space->result = result;
+                }
                 if (status == NG_ERROR)
                     snprintf(acquisition->snapshot.message, sizeof(acquisition->snapshot.message),
                              "%s", error.message);
@@ -241,6 +249,17 @@ void NgAcquisitionRead(TNgAcquisition *acquisition, TNgAcquisitionSnapshot *snap
     }
     NgMutexLock(&acquisition->mutex);
     *snapshot = acquisition->snapshot;
+    NgMutexUnlock(&acquisition->mutex);
+}
+
+void NgAcquisitionReadSearchSpace(TNgAcquisition *acquisition, unsigned prn,
+                                 TNgAcquisitionSearchSpace *space)
+{
+    memset(space, 0, sizeof(*space));
+    if (acquisition == NULL || prn < 1 || prn > 32)
+        return;
+    NgMutexLock(&acquisition->mutex);
+    *space = acquisition->spaces[prn - 1];
     NgMutexUnlock(&acquisition->mutex);
 }
 

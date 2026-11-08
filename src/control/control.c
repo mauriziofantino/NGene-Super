@@ -46,6 +46,7 @@ struct TNgControl {
     TNgAnalysis *analysis;
     /** Receiver-worker-owned acquisition; accessed only on its ordered callbacks. */
     TNgAcquisition *acquisition;
+    TNgAcquisitionSearchSpace searchSpaces[32]; /**< Heap-owned display archive, mutex-protected. */
     /** Cumulative pairs from completed recording sessions. */
     uint64_t completedWritten;
     /** Copied rate/RF metadata; identity strings point into controller-owned storage. */
@@ -367,22 +368,28 @@ static int RawBlock(void *context, const TNgIqView *view, TNgError *error)
     return result;
 }
 
-/**
- * @brief Publish optional receiver counters without waiting for GUI locks.
- *
- * @details
- * Try-lock skips this status update if control is busy. Sample processing and recording
- * continue regardless.
- *
- * @param context Controller.
- * @param stats Borrowed engine counters copied if the lock is available.
- */
+/** Archive newly completed maps on the receiver worker, with the controller mutex held.
+ * Copy only changed PRNs; API readers never access the run-owned acquisition pointer. */
+static void ArchiveSearchSpaces(TNgControl *c)
+{
+    unsigned k;
+    for (k = 0; k < 32; ++k) {
+        const TNgAcquisitionResult *result = &c->status.acquisition.results[k];
+        const TNgAcquisitionResult *archived = &c->searchSpaces[k].result;
+        if (result->prn && (!archived->prn || result->epoch != archived->epoch ||
+                            result->firstSample != archived->firstSample))
+            NgAcquisitionReadSearchSpace(c->acquisition, k + 1, &c->searchSpaces[k]);
+    }
+}
+
+/** Publish counters and completed display maps without waiting for GUI locks. */
 static void Progress(void *context, const TNgReceiverStats *stats)
 {
     TNgControl *c = context;
     if (NgMutexTryLock(&c->mutex) != 0) {
         c->status.receiver = *stats;
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
+        ArchiveSearchSpaces(c);
         NgMutexUnlock(&c->mutex);
     }
 }
@@ -408,6 +415,7 @@ static void ReceiverWorker(void *context)
     memset(&c->workerError, 0, sizeof(c->workerError));
     NgMutexLock(&c->mutex);
     memset(&c->status.acquisition, 0, sizeof(c->status.acquisition));
+    memset(c->searchSpaces, 0, sizeof(c->searchSpaces));
     NgMutexUnlock(&c->mutex);
     c->workerResult = NgFrontendOpen(&c->runConfig, &source, &c->workerError);
     if (c->workerResult == NG_OK) {
@@ -438,6 +446,7 @@ static void ReceiverWorker(void *context)
         }
         NgMutexLock(&c->mutex);
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
+        ArchiveSearchSpaces(c);
         c->status.acquisition.searching = 0;
         c->status.acquisition.currentPrn = 0;
         NgMutexUnlock(&c->mutex);
@@ -824,6 +833,17 @@ void NgControlSnapshot(TNgControl *control, TNgControlStatus *status)
         NgAnalysisRead(control->analysis, &control->status.analysis);
     }
     *status = control->status;
+    NgMutexUnlock(&control->mutex);
+}
+
+void NgControlAcquisitionSearchSpace(TNgControl *control, unsigned prn,
+                                    TNgAcquisitionSearchSpace *space)
+{
+    memset(space, 0, sizeof(*space));
+    if (prn < 1 || prn > 32)
+        return;
+    NgMutexLock(&control->mutex);
+    *space = control->searchSpaces[prn - 1];
     NgMutexUnlock(&control->mutex);
 }
 

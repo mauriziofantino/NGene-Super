@@ -175,6 +175,9 @@ void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double
  * @param status Receives a by-value status snapshot.
  */
 void NgControlSnapshot(TNgControl *control, TNgControlStatus *status);
+/** Copy an archived completed coarse map, retained after stop and reset on start. */
+void NgControlAcquisitionSearchSpace(TNgControl *control, unsigned prn,
+                                    TNgAcquisitionSearchSpace *space);
 /**
  * @brief Copy the current receiver configuration and revision.
  *

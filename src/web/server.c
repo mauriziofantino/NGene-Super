@@ -726,6 +726,44 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     return object;
 }
 
+/** Serialize one explicitly requested completed map; never add arrays to status broadcasts. */
+static cJSON *SearchSpaceJson(TNgControl *control, unsigned prn)
+{
+    TNgAcquisitionSearchSpace space;
+    cJSON *object = cJSON_CreateObject();
+    cJSON *frequencies;
+    cJSON *power;
+    unsigned row;
+    NgControlAcquisitionSearchSpace(control, prn, &space);
+    cJSON_AddBoolToObject(object, "valid", space.valid);
+    if (!space.valid)
+        return object;
+    Number(object, "prn", space.result.prn);
+    cJSON_AddBoolToObject(object, "confirmed", space.result.confirmed);
+    Counter(object, "epoch", space.result.epoch);
+    Counter(object, "first_sample", space.result.firstSample);
+    Number(object, "peak_ratio", space.result.peakRatio);
+    Number(object, "peak_doppler_hz", space.peakDopplerHz);
+    Number(object, "peak_code_phase_chips", space.peakCodePhaseChips);
+    Number(object, "threshold", space.threshold);
+    Number(object, "fft_size", space.fftSize);
+    Number(object, "code_bins", NG_ACQUISITION_CODE_BINS);
+    Number(object, "code_period_chips", 1023);
+    String(object, "units", "power / coarse threshold");
+    String(object, "reduction", "maximum per code-phase cell");
+    frequencies = cJSON_AddArrayToObject(object, "doppler_hz");
+    power = cJSON_AddArrayToObject(object, "power");
+    for (row = 0; row < NG_ACQUISITION_DOPPLER_BINS; ++row) {
+        unsigned column;
+        cJSON *values = cJSON_CreateArray();
+        cJSON_AddItemToArray(frequencies, cJSON_CreateNumber(row == 15 ? 5000 : -5000 + row * 667.0));
+        for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column)
+            cJSON_AddItemToArray(values, cJSON_CreateNumber(space.power[row][column]));
+        cJSON_AddItemToArray(power, values);
+    }
+    return object;
+}
+
 static int ConfigText(const TNgConfig *config, char *text, size_t capacity)
 {
     FILE *file = tmpfile();
@@ -1251,6 +1289,11 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngWaterfallReliefJs, ngWaterfallReliefJsLength);
             return 200;
         }
+        if (strcmp(path, "/acquisition-search-space.js") == 0) {
+            Headers(connection, 200, "text/javascript; charset=utf-8", ngAcquisitionSearchSpaceJsLength);
+            mg_write(connection, ngAcquisitionSearchSpaceJs, ngAcquisitionSearchSpaceJsLength);
+            return 200;
+        }
         if (strcmp(path, "/frequency-units.js") == 0) {
             Headers(connection, 200, "text/javascript; charset=utf-8", ngFrequencyUnitsJsLength);
             mg_write(connection, ngFrequencyUnitsJs, ngFrequencyUnitsJsLength);
@@ -1286,6 +1329,18 @@ static int Handle(struct mg_connection *connection, void *context)
         }
         if (strcmp(path, "/api/v1/status") == 0) {
             return JsonReply(connection, 200, StatusJson(control, 3u));
+        }
+        if (strcmp(path, "/api/v1/acquisition/search-space") == 0) {
+            const char *query = mg_get_request_info(connection)->query_string;
+            char value[8];
+            char *end;
+            unsigned long prn;
+            if (query == NULL || mg_get_var(query, strlen(query), "prn", value, sizeof(value)) <= 0)
+                return Failure(connection, 400, "Expected GPS PRN 1..32");
+            prn = strtoul(value, &end, 10);
+            if (*end != 0 || prn < 1 || prn > 32)
+                return Failure(connection, 400, "Expected GPS PRN 1..32");
+            return JsonReply(connection, 200, SearchSpaceJson(control, (unsigned)prn));
         }
         if (strcmp(path, "/api/v1/frontend/calibrate") == 0) {
             NgMutexLock(&server->commandMutex);

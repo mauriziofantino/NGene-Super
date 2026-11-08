@@ -29,7 +29,14 @@ typedef struct {
     int prepared;
     double meanI;
     double meanQ;
+    TNgAcquisitionSearchSpace space;
 } TNgGpsSearch;
+
+/** Worker-only copy, called after a successful search and before its publication. */
+void NgAcquisitionGpsSearchSpace(void *context, TNgAcquisitionSearchSpace *space)
+{
+    *space = ((TNgGpsSearch *)context)->space;
+}
 
 /** Release all strategy-owned resources; accepts NULL and partial construction. */
 void NgAcquisitionGpsFree(void *context)
@@ -315,6 +322,7 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     unsigned bin;
     (void)error;
     memset(result, 0, sizeof(*result));
+    memset(&search->space, 0, sizeof(search->space));
     result->prn = prn;
     result->epoch = capture->origin.epoch;
     result->firstSample = capture->origin.firstSample;
@@ -339,6 +347,11 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
             return NG_END;
         Coarse(search, prn, frequency, config->squareCarrier);
         for (k = 0; k < search->size; ++k) {
+            size_t column = ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS /
+                            search->size;
+            float value = (float)(search->power[k] / threshold);
+            if (value > search->space.power[bin][column])
+                search->space.power[bin][column] = value;
             if (search->power[k] > best) {
                 best = search->power[k];
                 doppler = frequency;
@@ -349,6 +362,11 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     result->peakRatio = best / threshold;
     result->dopplerHz = doppler;
     result->codePhaseChips = fmod(phase + NG_GPS_CA_LENGTH, NG_GPS_CA_LENGTH);
+    search->space.valid = 1;
+    search->space.fftSize = (unsigned)search->size;
+    search->space.threshold = threshold;
+    search->space.peakDopplerHz = doppler;
+    search->space.peakCodePhaseChips = result->codePhaseChips;
     if (best <= threshold)
         return NG_OK;
     /* Doppler refinement: +/-667 Hz, 10 Hz step, eight noncoherent periods. */

@@ -362,6 +362,11 @@ td a{color:#80dce4}
 .search-space-tick{fill:#819cb3;font-size:9px}
 .search-space-point{fill:#f3ba64;stroke:#18273b;stroke-width:2}
 .search-space-point.acquired{fill:#56dbc0}
+.workspace-table .acquisition-searching{background:#342b1c;color:#f3ba64}
+.workspace-table .acquisition-acquired{background:#12352f;color:#74e3c4}
+.workspace-table .acquisition-searching td:first-child{box-shadow:inset 3px 0 #f3ba64}
+.workspace-table .acquisition-acquired td:first-child{box-shadow:inset 3px 0 #56dbc0}
+.workspace-table .acquisition-searching td:nth-child(2),.workspace-table .acquisition-acquired td:nth-child(2){font-weight:700}
 .search-space-summary{margin:4px 19px 18px;color:#91abc0;font-size:10px;line-height:1.7}
 @media(max-width:980px){.search-space-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.caf-controls{margin:14px 13px 9px}.caf-plot-wrap{height:300px;margin:0 13px 8px}.caf-details,.caf-cursor{margin-left:13px;margin-right:13px}.caf-cursor{margin-bottom:14px}.search-space-grid{margin:14px 13px 7px;gap:10px}.search-space-panel{padding:11px 8px 8px}.search-space-panel h3{font-size:10px}.search-space-panel p{font-size:8px}.search-space-summary{margin:4px 13px 14px;font-size:9px}}

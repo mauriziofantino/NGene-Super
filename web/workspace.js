@@ -1,4 +1,5 @@
 /* Receiver workspace: navigation and presentation of controller snapshots only. */
+import {createAcquisitionSearchSpace} from './acquisition-search-space.js';
 const ROUTES = {
   journey: {label: 'Overview', id: 'journeyView'},
   setup: {label: 'Receiver configuration', id: 'configurationView'},
@@ -50,7 +51,9 @@ function acquisitionMarkup() {
   return heading('GNSS / GPS L1 C/A', 'Acquisition', 'Coarse search, Doppler and code refinement, then independent 3-of-4 confirmation.', settingsButton('acquisition', 'Acquisition settings')) +
     card('Satellite searches', 'Confirmed results are referenced to the captured sample epoch. Tracking and navigation are not integrated.',
       rows([['Search worker',field('acquisitionState','Disabled')],['Satellite searches',field('acquisitionSearches','0')],['Capture gaps',field('acquisitionGaps','0')],['Samples outside capture',field('acquisitionSkipped','0')]]) +
-      '<p class="muted" data-acquisition-message></p><div class="table-wrap workspace-table"><table><thead><tr><th>GPS PRN</th><th>Result</th><th>Doppler (Hz)</th><th>Code phase (chips)</th><th>Peak / threshold</th><th>Confirmation</th><th>Capture epoch / sample</th></tr></thead><tbody data-acquisition-results><tr><td colspan="7">Enable acquisition in settings, apply the profile and start reception.</td></tr></tbody></table></div>') + route('rf', 'tracking');
+      '<p class="muted" data-acquisition-message></p><div class="table-wrap workspace-table"><table><thead><tr><th>GPS PRN</th><th>Result</th><th>Doppler (Hz)</th><th>Code phase (chips)</th><th>Peak / threshold</th><th>Confirmation</th><th>Capture epoch / sample</th></tr></thead><tbody data-acquisition-results><tr><td colspan="7">Enable acquisition in settings, apply the profile and start reception.</td></tr></tbody></table></div>') +
+    card('Completed search space', 'Inspect the last completed coarse round for each satellite, including searches below threshold.',
+      '<div data-search-space></div>') + route('rf', 'tracking');
 }
 
 function trackingMarkup() {
@@ -194,6 +197,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   const tourCounter = tour.querySelector('[data-tour-counter]'), tourTitle = tour.querySelector('[data-tour-title]'), tourDescription = tour.querySelector('[data-tour-description]');
   const previous = tour.querySelector('[data-tour="previous"]'), next = tour.querySelector('[data-tour="next"]');
   let selected = 'rf', guided = false, tourIndex = 0;
+  const searchSpace = createAcquisitionSearchSpace(document.querySelector('[data-search-space]'));
   const text = (key, value) => {
     const string = String(value ?? UNAVAILABLE);
     for (const node of bindings.get(key) || []) if (node.textContent !== string) node.textContent = string;
@@ -222,6 +226,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     if (crumb && crumb.textContent !== ROUTES[view].label) crumb.textContent = ROUTES[view].label;
     if (writeHistory && location.hash !== `#${view}` && (changed || location.hash)) history.pushState(null, '', `#${view}`);
     updateTour();
+    searchSpace.setVisible(view === 'acquisition');
     onViewChange(view);
     if (focus) {
       const panel = document.getElementById(ROUTES[view].id), title = panel?.querySelector('h1,h2');
@@ -260,19 +265,32 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     const {status, capabilities, profile = {}, draft = {}, revision, dirty = false, connected = false} = snapshot;
     const live = connected && status ? status : null;
     const acquisition = live?.acquisition;
+    searchSpace.update(live);
     text('acquisitionState', acquisition?.enabled ? (acquisition.searching ? `Searching GPS ${acquisition.current_prn || ''}` : 'Waiting for capture') : 'Disabled');
     text('acquisitionSearches', acquisition?.searches || '0');
     text('acquisitionGaps', acquisition?.gaps || '0');
     text('acquisitionSkipped', acquisition?.skipped_samples || '0');
     const acquisitionBody = document.querySelector('[data-acquisition-results]');
-    if (acquisitionBody && acquisition?.results?.length) {
-      acquisitionBody.replaceChildren(...acquisition.results.map(result => {
+    const searchingPrn = acquisition?.enabled && acquisition.searching && acquisition.current_prn > 0 ? Number(acquisition.current_prn) : null;
+    if (acquisitionBody && (acquisition?.results?.length || searchingPrn !== null)) {
+      const results = (acquisition.results || []).filter(result => Number(result.prn) !== searchingPrn);
+      const resultRows = results.map(result => {
         const row = document.createElement('tr');
+        if (result.confirmed) row.className = 'acquisition-acquired';
         const values = [result.prn, result.confirmed ? 'Confirmed' : result.peak_ratio > 1 ? 'Rejected in confirmation' : 'Below threshold',
           Number(result.doppler_hz).toFixed(1), Number(result.code_phase_chips).toFixed(4), Number(result.peak_ratio).toFixed(2), `${result.successes}/4`, `${result.epoch} / ${result.first_sample}`];
         for (const value of values) { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); }
         return row;
-      }));
+      });
+      if (searchingPrn !== null) {
+        const row = document.createElement('tr');
+        row.className = 'acquisition-searching';
+        for (const value of [searchingPrn, 'Acquiring', '—', '—', '—', '—', '—']) {
+          const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
+        }
+        resultRows.unshift(row);
+      }
+      acquisitionBody.replaceChildren(...resultRows);
     } else if (acquisitionBody) {
       const row = document.createElement('tr'), cell = document.createElement('td');
       cell.colSpan = 7; cell.textContent = acquisition?.enabled ? 'Waiting for completed satellite searches.' : 'Enable acquisition in settings, apply the profile and start reception.';

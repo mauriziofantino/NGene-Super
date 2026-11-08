@@ -22,12 +22,12 @@ async function until(fn, label) {
   for (let k = 0; k < iq.length / 2; k++) {
     const t = k / 2400000, chip = chips[Math.floor((231.3 + t * 1023000 * (1 + 1234 / 1575420000)) % 1023)];
     const angle = 2 * Math.PI * 1234 * t;
-    iq.writeInt8(Math.round(5 * chip * Math.cos(angle) + noise()), 2 * k);
-    iq.writeInt8(Math.round(5 * chip * Math.sin(angle) + noise()), 2 * k + 1);
+    iq.writeInt8(Math.round(2 * chip * Math.cos(angle) + noise()), 2 * k);
+    iq.writeInt8(Math.round(2 * chip * Math.sin(angle) + noise()), 2 * k + 1);
   }
   const input = path.join(root, 'gps.cs8').replaceAll('\\', '/'); fs.writeFileSync(input, iq);
   const configPath = path.join(root, 'gps.ini');
-  fs.writeFileSync(configPath, `[frontend]\ntype=file\nsample_rate_hz=2400000\ncenter_frequency_hz=1575420000\nsignal_frequency_hz=1575420000\n[receiver]\nrun_seconds=0\n[replay]\npath=${input}\nrealtime=true\nloop=true\n[acquisition]\nenabled=true\nfirst_prn=7\nlast_prn=7\nsquare_carrier=false\nxor_correlation=true\n`);
+  fs.writeFileSync(configPath, `[frontend]\ntype=file\nsample_rate_hz=2400000\ncenter_frequency_hz=1575420000\nsignal_frequency_hz=1575420000\n[receiver]\nrun_seconds=0\n[replay]\npath=${input}\nrealtime=true\nloop=true\n[acquisition]\nenabled=true\nfirst_prn=7\nlast_prn=8\nsquare_carrier=false\nxor_correlation=true\n`);
   const port = Number(process.env.NGENE_TEST_PORT || 19528), base = `http://127.0.0.1:${port}`;
   const child = spawn(path.resolve(process.env.NGENE_EXECUTABLE || 'build/ngene'),
     ['--web', '--port', String(port), '--config', configPath, '--output-dir', path.join(root, 'profile')],
@@ -67,9 +67,41 @@ async function until(fn, label) {
     assert(Math.abs(found.code_phase_chips - 231.3) < 0.6); assert.equal(found.successes, 3);
     await page.locator('.workspace-nav-item[data-view="acquisition"]').click();
     await until(async () => (await page.locator('[data-acquisition-results]').textContent()).includes('Confirmed'), 'result table');
+    await until(async () => (await page.locator('.caf-details').first().textContent()).includes('GPS 7'), 'completed search space');
+    const space = await get('acquisition/search-space?prn=7');
+    assert.equal(space.valid, true); assert.equal(space.prn, 7); assert.equal(space.confirmed, true);
+    assert.equal(space.power.length, 16); assert.equal(space.power[0].length, 1024);
+    assert.equal(space.doppler_hz[0], -5000); assert.equal(space.doppler_hz[15], 5000);
+    assert(Math.abs(Math.max(...space.power.flat()) - space.peak_ratio) < 1e-4);
+    assert.equal((await fetch(base + '/api/v1/acquisition/search-space?prn=33')).status, 400);
+    assert.equal((await get('acquisition/search-space?prn=6')).valid, false);
+    await page.locator('[data-search-space] canvas[data-mode="2d"]').waitFor();
+    await until(async () => (await get('status')).acquisition.results.some(result => result.prn === 8), 'absent satellite round');
+    const absent = await get('acquisition/search-space?prn=8');
+    assert.equal(absent.valid, true); assert.equal(absent.confirmed, false); assert(absent.peak_ratio < 1);
+    await until(async () => await page.locator('[data-search-space] select option[value="8"]').count(), 'absent satellite picker');
+    await page.locator('[data-search-space] select').selectOption('8');
+    await until(async () => (await page.locator('.caf-details').first().textContent()).includes('GPS 8 · Below coarse threshold'), 'noise map');
+    await page.screenshot({path: path.join(root, 'acquisition-no-detection.png'), fullPage: true});
+    await page.locator('[data-search-space] select').selectOption('7');
+    await until(async () => (await page.locator('.caf-details').first().textContent()).includes('GPS 7'), 'signal map selected');
+    await page.locator('[data-mode="3d"]').click();
+    await page.locator('[data-search-space] canvas[data-mode="3d"]').waitFor();
+    await page.screenshot({path: path.join(root, 'acquisition-3d.png'), fullPage: true});
+    await page.setViewportSize({width: 390, height: 844});
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({path: path.join(root, 'acquisition-mobile.png'), fullPage: true});
+    await page.setViewportSize({width: 1440, height: 1000});
+    await page.locator('[data-mode="2d"]').click();
     await page.screenshot({path: path.join(root, 'acquisition.png'), fullPage: true});
     await post('receiver/stop', {revision: config.revision});
     await until(async () => (await get('status')).state === 'stopped', 'stop');
+    const stoppedSpace = await get('acquisition/search-space?prn=7');
+    assert.equal(stoppedSpace.valid, true, 'Completed maps survive receiver stop');
+    assert.equal(stoppedSpace.prn, 7);
+    await until(async () => await page.locator('.acquisition-acquired').count(), 'green confirmed satellite');
+    const acquiredColour = await page.locator('.acquisition-acquired').evaluate(node => getComputedStyle(node).backgroundColor);
+    assert.equal(acquiredColour, 'rgb(18, 53, 47)');
     assert.deepEqual(errors, []);
     await post('shutdown', {}); assert.equal(await exited, 0);
     console.log('PASS: GPS form, persisted modes, worker confirmation, provenance, result table and stop. ' + root);

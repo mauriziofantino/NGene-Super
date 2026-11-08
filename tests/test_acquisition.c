@@ -85,6 +85,34 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
            snapshot.results[6].peakRatio, snapshot.results[6].successes, snapshot.message);
     CHECK(snapshot.searches == 1);
     CHECK(snapshot.results[6].confirmed == (signal && !truncated));
+    {
+        TNgAcquisitionSearchSpace space;
+        double maximum = 0;
+        unsigned row;
+        unsigned column;
+        NgAcquisitionReadSearchSpace(acquisition, 7, &space);
+        CHECK(space.valid);
+        CHECK(space.result.prn == 7 && space.result.epoch == 3);
+        CHECK(space.result.firstSample == 1000000);
+        CHECK(space.result.confirmed == snapshot.results[6].confirmed);
+        CHECK(space.threshold > 0);
+        for (row = 0; row < NG_ACQUISITION_DOPPLER_BINS; ++row)
+            for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column) {
+                CHECK(isfinite(space.power[row][column]) && space.power[row][column] >= 0);
+                if (space.power[row][column] > maximum)
+                    maximum = space.power[row][column];
+            }
+        CHECK(fabs(maximum - space.result.peakRatio) < 1e-5 * (1 + maximum));
+        if (signal) {
+            unsigned peakColumn = (unsigned)(space.peakCodePhaseChips * NG_ACQUISITION_CODE_BINS / 1023);
+            unsigned peakRow = (unsigned)lround((space.peakDopplerHz + 5000) / 667);
+            CHECK(fabs(space.power[peakRow][peakColumn] - maximum) < 1e-5 * (1 + maximum));
+        }
+        NgAcquisitionReadSearchSpace(acquisition, 0, &space);
+        CHECK(!space.valid);
+        NgAcquisitionReadSearchSpace(acquisition, 6, &space);
+        CHECK(!space.valid);
+    }
     if (signal && !truncated) {
         CHECK(fabs(snapshot.results[6].dopplerHz - doppler) < 25);
         CHECK(fabs(snapshot.results[6].codePhaseChips - phase) < 0.6);

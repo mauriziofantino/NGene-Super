@@ -25,6 +25,21 @@ typedef struct {
     uint64_t firstSample;  /**< Capture origin, not a GNSS time. */
 } TNgAcquisitionResult;
 
+/** Bounded display of a completed coarse search. Code cells retain the maximum of
+ * their original FFT bins; values are power / coarse detection threshold.
+ * Display reduction never feeds acquisition decisions. */
+#define NG_ACQUISITION_CODE_BINS 1024u
+#define NG_ACQUISITION_DOPPLER_BINS 16u
+typedef struct {
+    int valid;
+    TNgAcquisitionResult result;
+    unsigned fftSize;
+    double threshold;
+    double peakDopplerHz;
+    double peakCodePhaseChips;
+    float power[NG_ACQUISITION_DOPPLER_BINS][NG_ACQUISITION_CODE_BINS];
+} TNgAcquisitionSearchSpace;
+
 /** Copied bounded worker telemetry. Results belong to the most recent tested capture per PRN. */
 typedef struct {
     int enabled;             /**< Registration enabled for this run. */
@@ -74,6 +89,9 @@ int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TN
                                     TNgAcquisition **out, TNgChannel *channel, TNgError *error);
 /** Copy worker telemetry; safe concurrently with sample callbacks and search. */
 void NgAcquisitionRead(TNgAcquisition *acquisition, TNgAcquisitionSnapshot *snapshot);
+/** Copy the last completed map for PRN 1..32; zero output if unavailable. */
+void NgAcquisitionReadSearchSpace(TNgAcquisition *acquisition, unsigned prn,
+                                 TNgAcquisitionSearchSpace *space);
 /** Cancel/join worker and free owned memory after the engine has stopped using channel.
  * Accepts NULL. Results remain acquisition observations; no fake TRACKING transition. */
 void NgAcquisitionDestroy(TNgAcquisition *acquisition);

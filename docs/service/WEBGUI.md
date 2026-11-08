@@ -6,6 +6,24 @@ The English GUI is included in the same project and C executable as the kernel. 
 
 ## Parameters and persistence
 
+The Acquisition view colours the active satellite search amber and completed confirmed
+acquisitions green. Its Completed search space panel selects the latest completed round
+per GPS PRN, including below-threshold results, in a top-down 2D heatmap or a fixed-camera
+3D surface. Values are coarse correlation power divided by the original coarse threshold
+(1); the independent confirmation result is shown separately. Code phase spans 0..1023
+chips and the 16 original Doppler trials span -5000..5000 Hz. Display cells retain maxima
+from the original 2048/4096-bin grid, including when resized; detection uses the original
+unreduced double-precision values. Colour is logarithmic and 3D height is linear, with a
+marked threshold plane and an automatic height scale.
+
+`GET /api/v1/acquisition/search-space?prn=1..32` returns one copied completed map and
+capture epoch/sample provenance, or `valid: false` before a map is available. Maps stay
+available after stop and reset on receiver start. Each process keeps a bounded latest-map
+archive, rather than an unbounded history. Arrays are fetched only for the selected PRN
+while the Acquisition view is visible; they are excluded from status/WebSocket frames.
+An incomplete or cancelled search never replaces a completed map. Acquisition decisions,
+noise estimates, refinement and confirmation are unchanged.
+
 Frequency inputs use GHz for the GNSS signal reference (`1.57542` for GPS L1),
 MHz for SDR tuning and analogue bandwidth, and Msps for the complex sample rate.
 Doppler spans and steps remain in Hz. The GUI converts these values to integer Hz
