@@ -94,7 +94,7 @@ function(ngene_resolve_hackrf)
         target_compile_definitions(ngene_hackrf_native PRIVATE _CRT_SECURE_NO_WARNINGS)
     else()
         target_link_libraries(ngene_hackrf_native PRIVATE Threads::Threads)
-        target_compile_definitions(ngene_hackrf_native PRIVATE _POSIX_C_SOURCE=200809L)
+        target_compile_definitions(ngene_hackrf_native PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
     endif()
     # Both legacy 0.9 and current 0.10 sources accept these build metadata macros.
     file(READ "${libsource}/../CMakeLists.txt" upstream_cmake)
