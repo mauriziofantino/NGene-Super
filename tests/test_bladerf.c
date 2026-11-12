@@ -274,6 +274,10 @@ int CALL_CONV bladerf_sync_rx(struct bladerf *device, void *samples, unsigned co
     if (scenario >= 2 && scenario <= 5) {
         NgSleepMs(5);
     }
+    if (scenario == 9) {
+        ++device->calls;
+        return BLADERF_ERR_IO;
+    }
     metadata->timestamp = device->calls == 0 ? 1000u : scenario == 8 ? 1032u : 1037u;
     if (scenario == 4 && device->calls != 0) {
         metadata->timestamp = 1031u;
@@ -325,7 +329,7 @@ static void CheckStream(TNgConfig *config, unsigned testCase)
           source.info.format == config->bladeFormat);
     CHECK(source.ops->start(source.context, &error) == NG_OK);
     CHECK(source.ops->start(source.context, &error) == NG_ERROR);
-    valid = scenario == 0 || scenario >= 6;
+    valid = scenario == 0 || (scenario >= 6 && scenario <= 8);
     if (valid) {
         for (index = 0; index < 10; ++index) {
             size_t sample;
@@ -361,6 +365,19 @@ static void CheckStream(TNgConfig *config, unsigned testCase)
             NgSleepMs(1);
         }
         CHECK(source.ops->acquire(source.context, &view, 0, &error) == NG_ERROR);
+        if (scenario == 2) {
+            CHECK(strstr(error.message, "actual_count=") != NULL &&
+                  strstr(error.message, "exceeds requested") != NULL);
+        } else if (scenario == 3) {
+            CHECK(strstr(error.message, "zero actual_count") != NULL);
+        } else if (scenario == 4) {
+            CHECK(strstr(error.message, "timestamp moved backwards") != NULL);
+        } else if (scenario == 5) {
+            CHECK(strstr(error.message, "timestamp overflow") != NULL);
+        } else if (scenario == 9) {
+            CHECK(strstr(error.message, "bladerf_sync_rx failed") != NULL &&
+                  strstr(error.message, "fixture error") != NULL);
+        }
     }
     CHECK(source.ops->stop(source.context, &error) == NG_OK);
     CHECK(source.ops->stop(source.context, &error) == NG_OK);
@@ -479,7 +496,7 @@ int main(void)
         CHECK(NgBladerfOpen(&config, &source, &error) == NG_ERROR);
         CHECK(configuration_calls == attempts + 2 && opened == closed);
         configuration_result = 0;
-        for (testCase = 0; testCase < 9; ++testCase) {
+        for (testCase = 0; testCase < 10; ++testCase) {
             CheckStream(&config, testCase);
         }
         CheckRequestGeometry(&config, 16000, 16000u);

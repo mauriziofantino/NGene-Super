@@ -2,6 +2,7 @@
 #include "frontend/bladerf_adapter.h"
 #include "frontend/ingress.h"
 #include <libbladeRF.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
@@ -34,9 +35,24 @@ typedef struct {
     uint64_t expectedTimestamp;
     /** Overrun reported after the previous valid prefix; annotate the next interval. */
     int pendingOverrun;
+    /** Specific terminal RX/metadata error, published under ingress.mutex. */
+    char transportDiagnostic[256];
     /** Copied native serial string; stable for the source lifetime. */
     char serial[128];
 } TNgBladerfSource;
+
+/** @brief Preserve the producer's specific terminal error before closing ingress.
+ * @param source Live source whose worker owns RX.
+ * @param message Bounded diagnostic explaining the transport or metadata failure.
+ */
+static void TransportFailure(TNgBladerfSource *source, const char *message)
+{
+    NgMutexLock(&source->ingress.mutex);
+    (void)snprintf(source->transportDiagnostic, sizeof(source->transportDiagnostic), "%s",
+                   message);
+    NgMutexUnlock(&source->ingress.mutex);
+    NgIngressTransportError(&source->ingress);
+}
 
 /** @brief Open an unambiguous device by serial without starting RX.
  * @param config Desired serial; empty requires exactly one connected bladeRF.
@@ -138,6 +154,7 @@ static void Receive(void *context)
         struct bladerf_metadata metadata;
         TNgIqView view = {0};
         uint64_t missing = 0;
+        TNgError diagnostic = {{0}};
         int result;
         memset(&metadata, 0, sizeof(metadata));
         /* BLADERF_META_FLAG_RX_NOW is bit 31; use unsigned storage without
@@ -153,10 +170,38 @@ static void Receive(void *context)
         }
         /* A timed-out sync call can still return a valid contiguous prefix.
          * libbladeRF reports that prefix in actual_count for both META formats. */
-        if ((result != 0 && result != BLADERF_ERR_TIMEOUT) || metadata.actual_count == 0 ||
-            metadata.actual_count > source->transferSamples ||
-            metadata.timestamp > UINT64_MAX - metadata.actual_count) {
-            NgIngressTransportError(&source->ingress);
+        if (result != 0 && result != BLADERF_ERR_TIMEOUT) {
+            NgFail(&diagnostic,
+                   "bladerf_sync_rx failed: %s (%d); actual_count=%u requested=%u "
+                   "timestamp=%" PRIu64 " status=0x%08" PRIx32,
+                   bladerf_strerror(result), result, metadata.actual_count,
+                   source->transferSamples, metadata.timestamp, metadata.status);
+            TransportFailure(source, diagnostic.message);
+            break;
+        }
+        if (metadata.actual_count == 0) {
+            NgFail(&diagnostic,
+                   "bladeRF RX metadata invalid: zero actual_count with result=%d "
+                   "timestamp=%" PRIu64 " status=0x%08" PRIx32,
+                   result, metadata.timestamp, metadata.status);
+            TransportFailure(source, diagnostic.message);
+            break;
+        }
+        if (metadata.actual_count > source->transferSamples) {
+            NgFail(&diagnostic,
+                   "bladeRF RX metadata invalid: actual_count=%u exceeds requested=%u "
+                   "timestamp=%" PRIu64 " status=0x%08" PRIx32,
+                   metadata.actual_count, source->transferSamples, metadata.timestamp,
+                   metadata.status);
+            TransportFailure(source, diagnostic.message);
+            break;
+        }
+        if (metadata.timestamp > UINT64_MAX - metadata.actual_count) {
+            NgFail(&diagnostic,
+                   "bladeRF RX metadata invalid: timestamp overflow; timestamp=%" PRIu64
+                   " actual_count=%u status=0x%08" PRIx32,
+                   metadata.timestamp, metadata.actual_count, metadata.status);
+            TransportFailure(source, diagnostic.message);
             break;
         }
         if (source->haveTimestamp == 0) {
@@ -165,7 +210,13 @@ static void Receive(void *context)
             source->haveTimestamp = 1;
         }
         if (metadata.timestamp < source->expectedTimestamp) {
-            NgIngressTransportError(&source->ingress);
+            NgFail(&diagnostic,
+                   "bladeRF RX metadata invalid: timestamp moved backwards "
+                   "(timestamp=%" PRIu64 " expected_at_least=%" PRIu64
+                   " actual_count=%u status=0x%08" PRIx32 ")",
+                   metadata.timestamp, source->expectedTimestamp, metadata.actual_count,
+                   metadata.status);
+            TransportFailure(source, diagnostic.message);
             break;
         }
         missing = metadata.timestamp - source->expectedTimestamp;
@@ -193,6 +244,9 @@ static void Receive(void *context)
         }
         source->expectedTimestamp = metadata.timestamp + metadata.actual_count;
         if (NgIngressSubmit(&source->ingress, &view) != NG_OK) {
+            if (NgAtomicGet(&source->ingress.failure) != 2) {
+                TransportFailure(source, "bladeRF ingress rejected a validated RX block");
+            }
             break;
         }
     }
@@ -234,18 +288,35 @@ static int Start(void *context, TNgError *error)
 static int Acquire(void *context, TNgIqView *view, unsigned timeoutMs, TNgError *error)
 {
     TNgBladerfSource *source = context;
+    char transportDiagnostic[sizeof(source->transportDiagnostic)];
     int result;
     int failure = NgAtomicGet(&source->ingress.failure);
     if (failure != 0) {
+        if (failure == 2) {
+            return NgFail(error, "bladeRF stopped: software ingress overflow");
+        }
+        NgMutexLock(&source->ingress.mutex);
+        (void)snprintf(transportDiagnostic, sizeof(transportDiagnostic), "%s",
+                       source->transportDiagnostic);
+        NgMutexUnlock(&source->ingress.mutex);
         return NgFail(error, "bladeRF stopped: %s",
-                      failure == 2 ? "software ingress overflow" : "transport/metadata error");
+                      transportDiagnostic[0] != '\0' ? transportDiagnostic
+                                                     : "transport error (no further detail)");
     }
     result = NgRingAcquire(source->ingress.ring, view, timeoutMs);
     /* Error-triggered close during a wait must not become successful EOF. */
     failure = NgAtomicGet(&source->ingress.failure);
     if (result != NG_OK && failure != 0) {
+        if (failure == 2) {
+            return NgFail(error, "bladeRF stopped: software ingress overflow");
+        }
+        NgMutexLock(&source->ingress.mutex);
+        (void)snprintf(transportDiagnostic, sizeof(transportDiagnostic), "%s",
+                       source->transportDiagnostic);
+        NgMutexUnlock(&source->ingress.mutex);
         return NgFail(error, "bladeRF stopped: %s",
-                      failure == 2 ? "software ingress overflow" : "transport/metadata error");
+                      transportDiagnostic[0] != '\0' ? transportDiagnostic
+                                                     : "transport error (no further detail)");
     }
     return result;
 }
