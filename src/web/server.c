@@ -662,6 +662,34 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             cJSON_AddItemToArray(results, item);
         }
     }
+    {
+        unsigned prn;
+        cJSON *acquisition = cJSON_AddObjectToObject(object, "galileo_acquisition");
+        cJSON *results = cJSON_AddArrayToObject(acquisition, "results");
+        cJSON_AddBoolToObject(acquisition, "enabled", status.galileoAcquisition.enabled);
+        cJSON_AddBoolToObject(acquisition, "searching", status.galileoAcquisition.searching);
+        Number(acquisition, "current_prn", status.galileoAcquisition.currentPrn);
+        Counter(acquisition, "searches", status.galileoAcquisition.searches);
+        Counter(acquisition, "skipped_samples", status.galileoAcquisition.skippedSamples);
+        Counter(acquisition, "gaps", status.galileoAcquisition.gaps);
+        String(acquisition, "message", status.galileoAcquisition.message);
+        for (prn = 0; prn < 32; ++prn) {
+            const TNgAcquisitionResult *found = &status.galileoAcquisition.results[prn];
+            cJSON *item;
+            if (found->prn == 0)
+                continue;
+            item = cJSON_CreateObject();
+            Number(item, "prn", found->prn);
+            cJSON_AddBoolToObject(item, "confirmed", found->confirmed);
+            Number(item, "doppler_hz", found->dopplerHz);
+            Number(item, "code_phase_chips", found->codePhaseChips);
+            Number(item, "peak_ratio", found->peakRatio);
+            Number(item, "successes", found->successes);
+            Counter(item, "epoch", found->epoch);
+            Counter(item, "first_sample", found->firstSample);
+            cJSON_AddItemToArray(results, item);
+        }
+    }
     Number(object, "hardware_frequency_hz", (double)status.hardwareFrequencyHz);
     Number(object, "signal_frequency_hz", (double)status.signalFrequencyHz);
     Number(object, "digital_if_hz", (double)status.digitalIfHz);
@@ -727,14 +755,17 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
 }
 
 /** Serialize one explicitly requested completed map; never add arrays to status broadcasts. */
-static cJSON *SearchSpaceJson(TNgControl *control, unsigned prn)
+static cJSON *SearchSpaceJson(TNgControl *control, unsigned prn, int galileo)
 {
     TNgAcquisitionSearchSpace space;
     cJSON *object = cJSON_CreateObject();
     cJSON *frequencies;
     cJSON *power;
     unsigned row;
-    NgControlAcquisitionSearchSpace(control, prn, &space);
+    if (galileo)
+        NgControlGalileoSearchSpace(control, prn, &space);
+    else
+        NgControlAcquisitionSearchSpace(control, prn, &space);
     cJSON_AddBoolToObject(object, "valid", space.valid);
     if (!space.valid)
         return object;
@@ -748,15 +779,16 @@ static cJSON *SearchSpaceJson(TNgControl *control, unsigned prn)
     Number(object, "threshold", space.threshold);
     Number(object, "fft_size", space.fftSize);
     Number(object, "code_bins", NG_ACQUISITION_CODE_BINS);
-    Number(object, "code_period_chips", 1023);
+    Number(object, "code_period_chips", space.codePeriodChips);
+    String(object, "signal", galileo ? "galileo_e1b" : "gps_l1ca");
     String(object, "units", "power / coarse threshold");
     String(object, "reduction", "maximum per code-phase cell");
     frequencies = cJSON_AddArrayToObject(object, "doppler_hz");
     power = cJSON_AddArrayToObject(object, "power");
-    for (row = 0; row < NG_ACQUISITION_DOPPLER_BINS; ++row) {
+    for (row = 0; row < space.dopplerBins; ++row) {
         unsigned column;
         cJSON *values = cJSON_CreateArray();
-        cJSON_AddItemToArray(frequencies, cJSON_CreateNumber(row == 15 ? 5000 : -5000 + row * 667.0));
+        cJSON_AddItemToArray(frequencies, cJSON_CreateNumber(galileo ? -5000 + row * 87.0 : row == 15 ? 5000 : -5000 + row * 667.0));
         for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column)
             cJSON_AddItemToArray(values, cJSON_CreateNumber(space.power[row][column]));
         cJSON_AddItemToArray(power, values);
@@ -1329,6 +1361,7 @@ static int Handle(struct mg_connection *connection, void *context)
             cJSON_AddBoolToObject(reply, "single_source", 1);
             cJSON_AddBoolToObject(reply, "periodogram", 1);
             cJSON_AddBoolToObject(reply, "gps_acquisition", 1);
+            cJSON_AddBoolToObject(reply, "galileo_acquisition", 1);
             String(reply, "fft_backend", NgFftBackend());
             return JsonReply(connection, 200, reply);
         }
@@ -1338,6 +1371,8 @@ static int Handle(struct mg_connection *connection, void *context)
         if (strcmp(path, "/api/v1/acquisition/search-space") == 0) {
             const char *query = mg_get_request_info(connection)->query_string;
             char value[8];
+            char signal[32] = "gps";
+            int galileo;
             char *end;
             unsigned long prn;
             if (query == NULL || mg_get_var(query, strlen(query), "prn", value, sizeof(value)) <= 0)
@@ -1345,7 +1380,12 @@ static int Handle(struct mg_connection *connection, void *context)
             prn = strtoul(value, &end, 10);
             if (*end != 0 || prn < 1 || prn > 32)
                 return Failure(connection, 400, "Expected GPS PRN 1..32");
-            return JsonReply(connection, 200, SearchSpaceJson(control, (unsigned)prn));
+            if (mg_get_var(query, strlen(query), "signal", signal, sizeof(signal)) < 0)
+                snprintf(signal, sizeof(signal), "gps");
+            if (strcmp(signal, "gps") != 0 && strcmp(signal, "galileo") != 0)
+                return Failure(connection, 400, "Expected signal gps or galileo");
+            galileo = strcmp(signal, "galileo") == 0;
+            return JsonReply(connection, 200, SearchSpaceJson(control, (unsigned)prn, galileo));
         }
         if (strcmp(path, "/api/v1/frontend/calibrate") == 0) {
             NgMutexLock(&server->commandMutex);

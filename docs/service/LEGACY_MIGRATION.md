@@ -44,3 +44,15 @@ FAST/PRECISE, integer FFT, acquisition, tracking, and PVT are neither blindly re
 ## FFT migration — v0.3.0
 
 `asmFolder/fft.c`, `fft.h`, and the SSE2 macros in `simd.h` were analyzed for the new `src/dsp/fft/fft.c` kernel with separate SSE2/NEON butterflies. Radix-2, bit reversal, complex signed16, and Q14 twiddles are retained; register management, ABI, headroom, and scaling position change. This is not a wrapper around the old source, nor a replacement already verified in acquisition/tracking. See the [detailed analysis](FFT_REVIEW.md) and numerical tests.
+
+## Galileo E1-B acquisition API — 2026-11-12
+
+Classic `asmFolder/prnTable.c`, `carrierTable.c`, `acquisition/{acquisition,coarseAcquisition,refinement,confirmation}.c` and `Acquisition.conf` were reviewed.
+The E1-B primary table is losslessly repacked for PRNs 1..32. The worker uses
+4-ms periods, eight powers and 3-of-4 confirmation. Floating BOC-replica PCPS and
+private frozen captures replace packed pre-wipe FFT processing and advancing
+hypotheses; see [contracts and limitations](GALILEO_ACQUISITION.md). GPS stages
+and grids are retained; only its confirmation noise probes change to wrong Doppler.
+The Galileo channel API and controller/CLI/INI/GUI integration are implemented.
+Separate result/map archives and a Signal selector mirror the GPS workflow. Full PRN
+coverage, acquisition ambiguity tests and RF validation remain pending.

@@ -52,6 +52,10 @@ static void TestConfig(void)
     CHECK(Parse("[frontend]\ntype=file\nsample_rate_hz=100000\n[buffer]\nwindow_samples=1000\n",
                 &c) == NG_OK);
     CHECK(c.sampleRateHz == 100000 && c.windowSamples == 1000);
+    CHECK(c.galileoAcquisition.enabled == 0);
+    CHECK(Parse("[galileo_acquisition]\nfirst_prn=9\nlast_prn=7\n", &c) == NG_ERROR);
+    CHECK(Parse("[galileo_acquisition]\nlast_prn=33\n", &c) == NG_ERROR);
+    CHECK(Parse("[galileo_acquisition]\nenabled=maybe\n", &c) == NG_ERROR);
     CHECK(Parse("[frontend]\nsample_rate_hz=-1\n", &c) == NG_ERROR);
     CHECK(Parse("[frontend]\nsample_rate_hz=10junk\n", &c) == NG_ERROR);
     CHECK(Parse("[frontend]\nsample_rate_hz=16000000\nsample_rate_hz=8000000\n", &c) == NG_ERROR);
@@ -87,12 +91,19 @@ static void TestConfig(void)
         c.frontend = NG_FRONTEND_HACKRF;
         c.bladeFormat = NG_FORMAT_CI8;
         c.rtlIfGainDb = 48;
+        c.galileoAcquisition.enabled = 1;
+        c.galileoAcquisition.firstPrn = 7;
+        c.galileoAcquisition.lastPrn = 8;
+        c.galileoAcquisition.xorCorrelation = 1;
         CHECK(profile != NULL && NgConfigWrite(profile, &c, &error) == NG_OK);
         rewind(profile);
         CHECK(NgConfigRead(profile, &loaded, &error) == NG_OK);
         CHECK(loaded.frontend == NG_FRONTEND_HACKRF && loaded.replayPath[0] == '\0');
         CHECK(loaded.bladeFormat == NG_FORMAT_CI8);
         CHECK(loaded.rtlIfGainDb == 48);
+        CHECK(loaded.galileoAcquisition.enabled == 1 && loaded.acquisition.enabled == 0);
+        CHECK(loaded.galileoAcquisition.firstPrn == 7 && loaded.galileoAcquisition.lastPrn == 8);
+        CHECK(loaded.galileoAcquisition.xorCorrelation == 1);
         CHECK(fclose(profile) == 0);
     }
     CHECK(Parse("[buffer]\nwindow_samples=1048576\ningress_blocks=4096\n", &c) == NG_ERROR);

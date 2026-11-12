@@ -87,6 +87,8 @@ typedef struct {
     TNgAnalysisConfig analysis;
     /** Replaceable GPS L1 C/A acquisition module settings. */
     TNgAcquisitionConfig acquisition;
+    /** Independently enabled Galileo E1-B acquisition settings. */
+    TNgAcquisitionConfig galileoAcquisition;
     /** Capture filename prefix; CLI may include a path when no directory is set. */
     char recordingPrefix[512];
     /** Optional receiver-side directory; empty preserves legacy CLI prefix paths. */

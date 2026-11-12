@@ -41,6 +41,8 @@ typedef struct {
     TNgAnalysisSnapshot analysis;
     /** Copied GPS search outcomes; not tracking locks or navigation observables. */
     TNgAcquisitionSnapshot acquisition;
+    /** Independent Galileo E1-B telemetry. */
+    TNgAcquisitionSnapshot galileoAcquisition;
     /** Cumulative written pairs including completed capture sessions. */
     uint64_t totalWrittenSamples;
     /** Baseband filter bandwidth applied by the source, in hertz. */
@@ -178,6 +180,9 @@ void NgControlSnapshot(TNgControl *control, TNgControlStatus *status);
 /** Copy an archived completed coarse map, retained after stop and reset on start. */
 void NgControlAcquisitionSearchSpace(TNgControl *control, unsigned prn,
                                     TNgAcquisitionSearchSpace *space);
+/** Copy the archived Galileo map under the controller mutex. */
+void NgControlGalileoSearchSpace(TNgControl *control, unsigned prn,
+                                 TNgAcquisitionSearchSpace *space);
 /**
  * @brief Copy the current receiver configuration and revision.
  *

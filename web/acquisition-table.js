@@ -1,10 +1,16 @@
-/* Presentation only. The model currently contains GPS L1 C/A PRNs 1..32;
+/* Presentation only. GPS L1 C/A and Galileo E1-B currently support PRNs 1..32;
  * identity determines position, independently of search order and outcomes. */
 export function createAcquisitionTable(body) {
   const rows = new Map();
+  let scope = 'gps';
   let placeholder = body.firstElementChild;
   return {
-    update(acquisition, profile = {}) {
+    update(acquisition, profile = {}, system = 'gps') {
+      if (system !== scope) {
+        for (const row of rows.values()) row.remove();
+        rows.clear(); scope = system;
+      }
+      const prefix = system === 'galileo' ? 'galileo_acquisition' : 'acquisition';
       const results = new Map((acquisition?.results || []).map(result => [Number(result.prn), result]));
       const active = acquisition?.enabled && acquisition.searching ? Number(acquisition.current_prn) : 0;
       const ids = new Set(results.keys());
@@ -12,8 +18,8 @@ export function createAcquisitionTable(body) {
       // Reserve configured slots before completion: a newly tested PRN must not
       // insert a row above the satellite the user is reading.
       if (acquisition?.enabled) {
-        const first = Number(profile['acquisition.first_prn'] || 1);
-        const last = Number(profile['acquisition.last_prn'] || 32);
+        const first = Number(profile[`${prefix}.first_prn`] || 1);
+        const last = Number(profile[`${prefix}.last_prn`] || 32);
         for (let prn = first; prn <= last; prn++) ids.add(prn);
       }
       for (const [prn, row] of rows) if (!ids.has(prn)) { row.remove(); rows.delete(prn); }
@@ -21,7 +27,7 @@ export function createAcquisitionTable(body) {
       for (const prn of [...ids].sort((a, b) => a - b)) {
         let row = rows.get(prn);
         if (!row) {
-          row = document.createElement('tr'); row.dataset.satellite = `GPS:L1CA:${prn}`;
+          row = document.createElement('tr'); row.dataset.satellite = `${system === 'galileo' ? 'Galileo:E1B' : 'GPS:L1CA'}:${prn}`;
           row.tabIndex = 0;
           for (let i = 0; i < 7; i++) row.append(document.createElement('td'));
           const next = [...body.children].find(item => Number(item.firstElementChild.textContent) > prn);

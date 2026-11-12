@@ -46,6 +46,8 @@ struct TNgControl {
     TNgAnalysis *analysis;
     /** Receiver-worker-owned acquisition; accessed only on its ordered callbacks. */
     TNgAcquisition *acquisition;
+    TNgAcquisition *galileoAcquisition; /**< Galileo run-owned worker. */
+    TNgAcquisitionSearchSpace galileoSearchSpaces[32]; /**< Archived Galileo maps. */
     TNgAcquisitionSearchSpace searchSpaces[32]; /**< Heap-owned display archive, mutex-protected. */
     /** Cumulative pairs from completed recording sessions. */
     uint64_t completedWritten;
@@ -380,6 +382,13 @@ static void ArchiveSearchSpaces(TNgControl *c)
                             result->firstSample != archived->firstSample))
             NgAcquisitionReadSearchSpace(c->acquisition, k + 1, &c->searchSpaces[k]);
     }
+    for (k = 0; k < 32; ++k) {
+        const TNgAcquisitionResult *result = &c->status.galileoAcquisition.results[k];
+        const TNgAcquisitionResult *archived = &c->galileoSearchSpaces[k].result;
+        if (result->prn && (!archived->prn || result->epoch != archived->epoch ||
+                            result->firstSample != archived->firstSample))
+            NgAcquisitionReadSearchSpace(c->galileoAcquisition, k + 1, &c->galileoSearchSpaces[k]);
+    }
 }
 
 /** Publish counters and completed display maps without waiting for GUI locks. */
@@ -389,6 +398,7 @@ static void Progress(void *context, const TNgReceiverStats *stats)
     if (NgMutexTryLock(&c->mutex) != 0) {
         c->status.receiver = *stats;
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
+        NgAcquisitionRead(c->galileoAcquisition, &c->status.galileoAcquisition);
         ArchiveSearchSpaces(c);
         NgMutexUnlock(&c->mutex);
     }
@@ -407,7 +417,8 @@ static void ReceiverWorker(void *context)
 {
     TNgControl *c = context;
     TNgFrontend source;
-    TNgChannel acquisitionChannel;
+    TNgChannel acquisitionChannels[2];
+    size_t acquisitionCount = 0;
     TNgConditioner conditioner = NgConditionerBypass();
     TNgReceiverHooks hooks = {c, 1, Started, Block, Progress, RawBlock};
     memset(&source, 0, sizeof(source));
@@ -416,6 +427,8 @@ static void ReceiverWorker(void *context)
     NgMutexLock(&c->mutex);
     memset(&c->status.acquisition, 0, sizeof(c->status.acquisition));
     memset(c->searchSpaces, 0, sizeof(c->searchSpaces));
+    memset(c->galileoSearchSpaces, 0, sizeof(c->galileoSearchSpaces));
+    memset(&c->status.galileoAcquisition, 0, sizeof(c->status.galileoAcquisition));
     NgMutexUnlock(&c->mutex);
     c->workerResult = NgFrontendOpen(&c->runConfig, &source, &c->workerError);
     if (c->workerResult == NG_OK) {
@@ -436,22 +449,36 @@ static void ReceiverWorker(void *context)
         if (c->workerResult == NG_OK && !c->runConfig.recordOnly) {
             c->workerResult =
                 NgAcquisitionCreate(&c->runConfig.acquisition, &source.info, &c->acquisition,
-                                    &acquisitionChannel, &c->workerError);
+                                    &acquisitionChannels[acquisitionCount], &c->workerError);
+            if (c->acquisition)
+                acquisitionCount++;
+        }
+        if (c->workerResult == NG_OK && !c->runConfig.recordOnly) {
+            c->workerResult = NgAcquisitionCreateGalileo(&c->runConfig.galileoAcquisition,
+                &source.info, &c->galileoAcquisition, &acquisitionChannels[acquisitionCount],
+                &c->workerError);
+            if (c->galileoAcquisition)
+                acquisitionCount++;
         }
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
             c->workerResult = NgReceiverRunEx(&c->runConfig, &source, &conditioner,
-                                              c->acquisition ? &acquisitionChannel : NULL,
-                                              c->acquisition ? 1u : 0u, StopRequested, c,
+                                              acquisitionCount ? acquisitionChannels : NULL,
+                                              acquisitionCount, StopRequested, c,
                                               &c->finalStats, &hooks, &c->workerError);
         }
         NgMutexLock(&c->mutex);
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
+        NgAcquisitionRead(c->galileoAcquisition, &c->status.galileoAcquisition);
         ArchiveSearchSpaces(c);
         c->status.acquisition.searching = 0;
         c->status.acquisition.currentPrn = 0;
+        c->status.galileoAcquisition.searching = 0;
+        c->status.galileoAcquisition.currentPrn = 0;
         NgMutexUnlock(&c->mutex);
         NgAcquisitionDestroy(c->acquisition);
         c->acquisition = NULL;
+        NgAcquisitionDestroy(c->galileoAcquisition);
+        c->galileoAcquisition = NULL;
         NgFrontendDestroy(&source);
     }
     NgAtomicSet(&c->done, 1);
@@ -844,6 +871,18 @@ void NgControlAcquisitionSearchSpace(TNgControl *control, unsigned prn,
         return;
     NgMutexLock(&control->mutex);
     *space = control->searchSpaces[prn - 1];
+    NgMutexUnlock(&control->mutex);
+}
+
+/** Copy an archived Galileo map; never access a live worker from HTTP. */
+void NgControlGalileoSearchSpace(TNgControl *control, unsigned prn,
+                                    TNgAcquisitionSearchSpace *space)
+{
+    memset(space, 0, sizeof(*space));
+    if (prn < 1 || prn > 32)
+        return;
+    NgMutexLock(&control->mutex);
+    *space = control->galileoSearchSpaces[prn - 1];
     NgMutexUnlock(&control->mutex);
 }
 

@@ -34,7 +34,14 @@ Verified locally on 2026-11-12 (Linux x86_64, Node 24.19.0, Chrome headless):
 `web_acquisition_views.cjs`, `web_acquisition_stability.cjs` and the updated
 `web_acquisition.cjs` passed. The CMake build and `gps_acquisition_contract` passed.
 
-The satellite table keeps persistent rows in GPS L1 C/A PRN order. Configured PRNs
+Settings / Acquisition includes independent GPS L1 C/A and Galileo E1-B enable,
+PRN range and replica-mode fields. Apply while stopped, then start the receiver.
+Both signals may run together. The Signal dropdown at the top of Acquisition
+switches the worker counters, results table and both search-space plots; it does
+not change acquisition scheduling. Galileo maps use 4092 chips and 116 Doppler
+rows (-5000..5005 Hz); GPS retains its 1023-chip / 16-row map.
+
+The satellite table keeps persistent rows in PRN order for the selected signal. Configured PRNs
 have slots before their first result, so search activity, completion counters, peak
 ratios and confirmation outcomes cannot insert or promote rows above the satellite
 being read. Only changed cells and status colours update; keyboard focus and unchanged

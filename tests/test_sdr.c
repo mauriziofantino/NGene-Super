@@ -329,7 +329,18 @@ static void TestDiagnostics(TNgSampleFormat format)
         NgIqStore(storage, format, index, 0, value);
         NgIqStore(storage, format, index, 1, 0);
     }
-    CHECK(NgAnalysisSubmitAt(analysis, &view, 0) == NG_OK);
+    /* Submission deliberately uses a try-lock: the newly started worker may own
+     * the mutex even before the first burst. Retry only documented contention;
+     * invalid input must fail immediately, and persistent contention is a failure. */
+    for (index = 0; index < 500; ++index) {
+        int status = NgAnalysisSubmitAt(analysis, &view, 0);
+        CHECK(status == NG_OK || status == NG_FULL);
+        if (status == NG_OK) {
+            break;
+        }
+        NgSleepMs(1);
+    }
+    CHECK(index < 500);
     for (index = 0; index < 500; ++index) {
         NgAnalysisRead(analysis, &snapshot);
         if (snapshot.histogramSequence != 0 && snapshot.psdSequence != 0) {

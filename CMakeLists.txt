@@ -51,7 +51,7 @@ add_library(ngene_core
     src/stream/ring.c
     src/frontend/frontend.c src/frontend/common.c src/frontend/file.c src/frontend/sige_decode.c src/frontend/ingress.c src/frontend/calibration.c
     src/conditioning/bypass.c src/recording/recording.c src/recording/metadata.c
-    src/analysis/analysis.c src/acquisition/acquisition.c src/acquisition/gps.c)
+    src/analysis/analysis.c src/acquisition/acquisition.c src/acquisition/gps.c src/acquisition/galileo.c)
 target_include_directories(ngene_core PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated" PRIVATE src)
 target_link_libraries(ngene_core PUBLIC ngene_platform ngene_dsp)
 add_library(NGene::Engine ALIAS ngene_core)
@@ -179,6 +179,7 @@ endif()
 if(NGENE_BUILD_TESTS)
     add_executable(ngene_acquisition_tests tests/test_acquisition.c)
     target_include_directories(ngene_acquisition_tests PRIVATE src)
+    target_compile_definitions(ngene_acquisition_tests PRIVATE NGENE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(ngene_acquisition_tests PRIVATE ngene_core)
     add_test(NAME gps_acquisition_contract COMMAND ngene_acquisition_tests)
     set_tests_properties(gps_acquisition_contract PROPERTIES TIMEOUT 90)

@@ -1,0 +1,5 @@
+Independent legacy bipolar PRN 7 record (4092 signed bytes), extracted from
+NGene Classic sampleConfigurationFiles/otherData/Galileo_E1b_codes.dat.
+Full source SHA256: 6586de97d8bb87ffba3f0c6ad47a4ad89f154811fcd0617978cb1ebda86ab603.
+Waveform sampling, subcarrier, carrier and time indexing are calculated in the test.
+This is a synthetic-code fixture, not an RF recording.

@@ -88,7 +88,11 @@ code phase is a local replica advance in [0,1023), not an unspecified delay inde
 The coarse threshold retains Classic's gamma survival equation for a sum of eight
 complex prompt powers, with per-cell Pfa=1e-9. Its noise population is measured at
 a fake Doppler of 22 kHz. Confirmation uses the same probability law in native prompt
-units, estimated using eight off-code references on each confirmation interval.
+units, estimated using eight wrong-Doppler references on each fresh confirmation interval.
+The candidate code phase/rate are preserved; only the carrier is shifted by
++20..27 kHz, outside search. This replaces the previous off-code estimator. The
+shared policy, numerical impact and statistical limits are documented in
+[Galileo acquisition and common noise policy](GALILEO_ACQUISITION.md).
 This explicitly replaces the legacy fixed FFT-to-prompt gain factor; its numerical
 threshold is therefore not bit-equivalent to Classic. Eight noncoherent sums are fixed
 for this increment; Classic's progressive multi-satellite search scheduler is not ported.

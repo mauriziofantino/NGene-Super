@@ -30,7 +30,17 @@ boundaries.
 
 The worker selects the most recent ready burst and exposes one current snapshot. The browser
 allows one outstanding status request and retains only the latest frame awaiting rendering.
-Skips, contention and invalid frames are counted. A skipped sequence never creates a
+Skips, contention and invalid frames are counted.
+
+`TestDiagnostics` in `tests/test_sdr.c` must not require an immediate successful
+submission: the worker can hold the mutex even before the first observation.
+The fixture retries only `NG_FULL` for at most 500 attempts with a 1-ms yield,
+rejects other errors immediately, and still requires successful submission and
+both real PSD/histogram publications. It does not resubmit after `NG_OK` or alter
+production backpressure. The original single-call assertion was reproduced failing
+intermittently in `native_iq_ingress_and_pipeline` on Linux x86_64 (2026-11-12).
+After the fix, the test passed 100 consecutive executions using
+`ctest --test-dir build-linux-bladerf -R '^native_iq_ingress_and_pipeline$' --repeat until-fail:100 --output-on-failure`. A skipped sequence never creates a
 synthetic waterfall row. The GUI withdraws interest when panels are unused. The server
 combines the connected browsers' requests and revokes capture when the last consumer disables
 a panel or closes its connection. A two-second lease handles clients that stop requesting

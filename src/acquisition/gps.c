@@ -6,6 +6,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include "noise_policy.h"
 #define NG_GPS_SEARCH_MS 56u
 #define NG_GPS_SUMS 8u
 #define NG_GPS_L1_HZ 1575420000.0
@@ -97,30 +98,6 @@ int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, void **out, TNgError 
     }
     *out = search;
     return NG_OK;
-}
-
-/** Integer-shape gamma survival inverse, same statistical equation as Classic FalseAlarm.
- * Returns threshold / mean single-period noise power for a SUM of periods powers. */
-static double Threshold(unsigned periods)
-{
-    double low = 0;
-    double high = 256;
-    unsigned iteration;
-    for (iteration = 0; iteration < 70; ++iteration) {
-        double x = (low + high) * 0.5;
-        double term = 1;
-        double sum = 1;
-        unsigned k;
-        for (k = 1; k < periods; ++k) {
-            term *= x / (double)k;
-            sum += term;
-        }
-        if (exp(-x) * sum > 1e-9)
-            low = x;
-        else
-            high = x;
-    }
-    return (low + high) * 0.5;
 }
 
 /** Wipe actual digital IF before integrating native pairs onto a rational uniform grid.
@@ -268,11 +245,11 @@ static double GridPower(TNgGpsSearch *search, unsigned prn, unsigned startMs, do
 /** Native-rate coherent prompt; carrier and code share exact capture-relative sample origin. */
 static double NativePower(TNgGpsSearch *search, const TNgAcquisitionCapture *capture, unsigned prn,
                           unsigned startMs, double doppler, double phase,
-                          const TNgAcquisitionConfig *config, double *noise)
+                          const TNgAcquisitionConfig *config, double *noise, double carrierOffset)
 {
     double power = 0;
     double rate = (double)capture->stream.sampleRateHz;
-    double frequency = (double)capture->stream.digitalIfHz + doppler;
+    double frequency = (double)capture->stream.digitalIfHz + doppler + carrierOffset;
     double codeRate = NG_GPS_CA_RATE_HZ * (1 + doppler / NG_GPS_L1_HZ);
     unsigned ms;
     *noise = 0;
@@ -317,7 +294,7 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     double best = 0;
     double doppler = 0;
     double phase = 0;
-    double factor = Threshold(NG_GPS_SUMS);
+    double factor = AcquisitionThreshold(NG_GPS_SUMS, config->falseAlarmProbability);
     size_t k;
     unsigned bin;
     (void)error;
@@ -333,7 +310,7 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     }
     /* Classic's fake-Doppler population estimates the complex correlation variance.
      * The sum's mean is 8 * (2*variance); the gamma threshold uses single-period power. */
-    Coarse(search, prn, 22000, config->squareCarrier);
+    Coarse(search, prn, AcquisitionCoarseNoiseDoppler(), config->squareCarrier);
     for (k = 0; k < search->size; ++k)
         noise += search->power[k];
     noise /= (double)(search->size * NG_GPS_SUMS);
@@ -362,6 +339,8 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     result->peakRatio = best / threshold;
     result->dopplerHz = doppler;
     result->codePhaseChips = fmod(phase + NG_GPS_CA_LENGTH, NG_GPS_CA_LENGTH);
+    search->space.dopplerBins = 16;
+    search->space.codePeriodChips = 1023;
     search->space.valid = 1;
     search->space.fftSize = (unsigned)search->size;
     search->space.threshold = threshold;
@@ -381,7 +360,7 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
             if (config->squareCarrier) {
                 /* Squared oscillators do not compose across IF and Doppler. Refine
                  * with the complete native-rate carrier, as used in confirmation. */
-                power = NativePower(search, capture, prn, 8, frequency, phase, config, &noise);
+                power = NativePower(search, capture, prn, 8, frequency, phase, config, &noise, 0);
             } else {
                 MixGrid(search, 8, frequency, 0);
                 power = GridPower(search, prn, 8, frequency, phase, config->xorCorrelation);
@@ -404,7 +383,7 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
             double power;
             if (cancel(cancelContext))
                 return NG_END;
-            power = NativePower(search, capture, prn, 16, doppler, test, config, &noise);
+            power = NativePower(search, capture, prn, 16, doppler, test, config, &noise, 0);
             if (power > best) {
                 best = power;
                 phase = test;
@@ -414,25 +393,27 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     result->dopplerHz = doppler;
     result->codePhaseChips =
         fmod(fmod(phase, NG_GPS_CA_LENGTH) + NG_GPS_CA_LENGTH, NG_GPS_CA_LENGTH);
-    /* Confirmation uses four disjoint 8-ms intervals. Estimate native prompt noise
-     * from off-code correlations, so compression/mixer gains cannot leak into the threshold.
-     * This replaces Classic's fixed FFT-to-prompt gain factor with measured physical units. */
+    /* Four fresh, disjoint intervals. Noise probes retain the candidate replica
+     * and code rate, but rotate at deliberately wrong carriers outside the search.
+     * Integer-kHz offsets reject coherent one-ms candidate prompts. No ADC narrowing,
+     * off-code estimator, historical threshold, or coarse-gain fallback is used. */
     for (bin = 0; bin < 4; ++bin) {
         double power;
-        double offNoise = 0;
+        double referenceNoise = 0;
         unsigned reference;
         unsigned startMs = 24 + bin * NG_GPS_SUMS;
         if (cancel(cancelContext))
             return NG_END;
-        power = NativePower(search, capture, prn, startMs, doppler, phase, config, &noise);
+        power = NativePower(search, capture, prn, startMs, doppler, phase, config, &noise, 0);
         for (reference = 0; reference < 8; ++reference) {
-            double off = phase + 73 + (double)reference * 113;
+            double offset = AcquisitionNoiseOffset(reference);
             if (cancel(cancelContext))
                 return NG_END;
-            offNoise += NativePower(search, capture, prn, startMs, doppler, off, config, &noise);
+            referenceNoise += NativePower(search, capture, prn, startMs, doppler, phase, config,
+                                    &noise, offset);
         }
-        offNoise /= (double)(8 * NG_GPS_SUMS);
-        if (offNoise > 0 && power > offNoise * factor)
+        referenceNoise /= (double)(8 * NG_GPS_SUMS);
+        if (referenceNoise > 0 && power > referenceNoise * factor)
             result->successes++;
         if (result->successes >= 3) {
             result->confirmed = 1;

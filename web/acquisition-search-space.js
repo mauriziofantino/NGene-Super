@@ -13,10 +13,12 @@ export function createAcquisitionSearchSpace(root) {
     loadedKey = '';
     for (const item of canvases) {
       item.getContext('2d').clearRect(0, 0, item.width, item.height);
-      for (const key of ['prn', 'capture', 'codeRange', 'dopplerRange', 'peak']) delete item.dataset[key];
+      for (const key of ['signal', 'prn', 'capture', 'codeRange', 'dopplerRange', 'peak']) delete item.dataset[key];
     }
     for (const empty of empties) { empty.hidden = false; empty.textContent = message; }
   }
+  const selections = new Map();
+  const signalName = () => live?.signal === 'galileo' ? 'Galileo' : 'GPS';
   let drawing = false;
   const schedule = () => {
     if (drawing) return;
@@ -35,6 +37,8 @@ export function createAcquisitionSearchSpace(root) {
     canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
     const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
     ctx.fillStyle = '#0c1a2b'; ctx.fillRect(0, 0, width, height);
+    const period = map.code_period_chips || 1023;
+    const rows = map.power.length;
     const peak = Math.max(1.2, ...map.power.map(row => Math.max(...row)));
     ctx.font = '11px system-ui'; ctx.lineWidth = 1;
     if (mode === '2d') {
@@ -49,14 +53,14 @@ export function createAcquisitionSearchSpace(root) {
       ctx.imageSmoothingEnabled = false; ctx.drawImage(image, x0, y0, w, h);
       ctx.strokeStyle = '#8ba7bb'; ctx.strokeRect(x0, y0, w, h);
       ctx.fillStyle = '#b6cddd'; ctx.textAlign = 'center';
-      for (const value of [0, 256, 512, 768, 1023]) ctx.fillText(String(value), x0 + w * value / 1023, y0 + h + 18);
+      for (const value of [0, Math.round(period / 4), Math.round(period / 2), Math.round(period * 3 / 4), period]) ctx.fillText(String(value), x0 + w * value / period, y0 + h + 18);
       ctx.fillText('Code phase (chips)', x0 + w / 2, height - 13);
       ctx.textAlign = 'right';
-      for (const row of [0, 7, map.doppler_hz.length - 1])
-        ctx.fillText(String(map.doppler_hz[row]), x0 - 8, y0 + h * (1 - (row + .5) / 16) + 4);
+      for (const row of [0, Math.floor((rows - 1) / 2), rows - 1])
+        ctx.fillText(String(map.doppler_hz[row]), x0 - 8, y0 + h * (1 - (row + .5) / rows) + 4);
       ctx.save(); ctx.translate(14, y0 + h / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText('Doppler (Hz)', 0, 0); ctx.restore();
       const row = map.doppler_hz.indexOf(map.peak_doppler_hz);
-      const px = x0 + w * map.peak_code_phase_chips / 1023, py = y0 + h * (1 - (row + .5) / 16);
+      const px = x0 + w * map.peak_code_phase_chips / period, py = y0 + h * (1 - (row + .5) / rows);
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px - 6, py); ctx.lineTo(px + 6, py); ctx.moveTo(px, py - 6); ctx.lineTo(px, py + 6); ctx.stroke();
     } else {
       // Fixed orthographic camera. Draw far rows first; height is linear power / threshold.
@@ -66,17 +70,17 @@ export function createAcquisitionSearchSpace(root) {
         ctx.strokeStyle = colourValue; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
       };
       const reduced = map.power.map(row => Array.from({length: 256}, (_, col) => Math.max(...row.slice(col * 4, col * 4 + 4))));
-      for (let row = 14; row >= 0; row--) for (let col = 0; col < 255; col++) {
+      for (let row = rows - 2; row >= 0; row--) for (let col = 0; col < 255; col++) {
         const values = [reduced[row][col], reduced[row][col + 1], reduced[row + 1][col + 1], reduced[row + 1][col]];
-        const points = [project(col / 255, row / 15, values[0]), project((col + 1) / 255, row / 15, values[1]),
-          project((col + 1) / 255, (row + 1) / 15, values[2]), project(col / 255, (row + 1) / 15, values[3])];
+        const points = [project(col / 255, row / (rows - 1), values[0]), project((col + 1) / 255, row / (rows - 1), values[1]),
+          project((col + 1) / 255, (row + 1) / (rows - 1), values[2]), project(col / 255, (row + 1) / (rows - 1), values[3])];
         ctx.fillStyle = colour(Math.max(...values), peak); ctx.beginPath(); ctx.moveTo(...points[0]);
         for (const point of points.slice(1)) ctx.lineTo(...point);
         ctx.closePath(); ctx.fill();
       }
       line(project(0, 0, 0), project(1, 0, 0)); line(project(1, 0, 0), project(1, 1, 0)); line(project(0, 0, 0), project(0, 0, peak));
       ctx.fillStyle = '#b6cddd'; ctx.textAlign = 'center';
-      for (const value of [0, 512, 1023]) { const [x, y] = project(value / 1023, 0, 0); ctx.fillText(String(value), x, y + 17); }
+      for (const value of [0, Math.round(period / 2), period]) { const [x, y] = project(value / period, 0, 0); ctx.fillText(String(value), x, y + 17); }
       ctx.fillText('Code phase (chips)', width * .44, height - 13);
       for (const [y, label] of [[0, String(map.doppler_hz[0])], [1, String(map.doppler_hz.at(-1)) + ' Hz']]) {
         const point = project(1, y, 0); ctx.textAlign = y ? 'right' : 'left';
@@ -91,7 +95,7 @@ export function createAcquisitionSearchSpace(root) {
       for (const [a, b] of [[[0, 0], [1, 0]], [[1, 0], [1, 1]], [[1, 1], [0, 1]], [[0, 1], [0, 0]]]) line(project(...a, 1), project(...b, 1), '#f3ba64');
       ctx.setLineDash([]);
       const peakRow = map.doppler_hz.indexOf(map.peak_doppler_hz);
-      const [px, py] = project(map.peak_code_phase_chips / 1023, peakRow / (map.doppler_hz.length - 1), map.peak_ratio);
+      const [px, py] = project(map.peak_code_phase_chips / period, peakRow / (map.doppler_hz.length - 1), map.peak_ratio);
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath();
       ctx.moveTo(px - 6, py); ctx.lineTo(px + 6, py); ctx.moveTo(px, py - 6); ctx.lineTo(px, py + 6); ctx.stroke();
     }
@@ -105,7 +109,8 @@ export function createAcquisitionSearchSpace(root) {
     ctx.fillStyle = '#dceaf4'; ctx.textAlign = 'right'; ctx.fillText('1', keyX - 5, thresholdY + 4);
     canvas.dataset.prn = map.prn;
     canvas.dataset.capture = `${map.epoch}:${map.first_sample}`;
-    canvas.dataset.codeRange = '0:1023';
+    canvas.dataset.codeRange = `0:${period}`;
+    canvas.dataset.signal = live?.signal || 'gps';
     canvas.dataset.dopplerRange = `${map.doppler_hz[0]}:${map.doppler_hz.at(-1)}`;
     canvas.dataset.peak = `${map.peak_code_phase_chips}:${map.peak_doppler_hz}:${map.peak_ratio}`;
   }
@@ -113,12 +118,12 @@ export function createAcquisitionSearchSpace(root) {
     if (!visible || !live) return;
     const found = live.acquisition?.results?.find(result => String(result.prn) === picker.value);
     if (!found) return;
-    const key = `${live.run_id}:${found.prn}:${found.epoch}:${found.first_sample}`;
+    const key = `${live.signal || 'gps'}:${live.run_id}:${found.prn}:${found.epoch}:${found.first_sample}`;
     if (key === loadedKey || key === requestKey) return;
     request?.abort(); const controller = new AbortController(); request = controller; requestKey = key;
     if (!map || String(map.prn) !== picker.value) { map = null; emptyState('Loading completed search…'); }
     try {
-      const response = await fetch(`/api/v1/acquisition/search-space?prn=${found.prn}`, {signal: controller.signal, cache: 'no-store'});
+      const response = await fetch(`/api/v1/acquisition/search-space?prn=${found.prn}${live.signal === 'galileo' ? '&signal=galileo' : ''}`, {signal: controller.signal, cache: 'no-store'});
       if (!response.ok) throw Error(`HTTP ${response.status}`);
       const next = await response.json();
       if (request !== controller) return;
@@ -126,19 +131,19 @@ export function createAcquisitionSearchSpace(root) {
         map = null; details.textContent = ''; emptyState('No completed coarse grid available for this search.'); return;
       }
       map = next; loadedKey = key; for (const empty of empties) empty.hidden = true;
-      details.textContent = `GPS ${map.prn} · ${map.confirmed ? 'Confirmed' : map.peak_ratio > 1 ? 'Coarse candidate, not confirmed' : 'Below coarse threshold'} · Peak / threshold ${map.peak_ratio.toFixed(2)} · Coarse peak ${map.peak_doppler_hz.toFixed(0)} Hz, ${map.peak_code_phase_chips.toFixed(3)} chips · Capture ${map.epoch} / ${map.first_sample} · ${map.fft_size} original code bins × 16 Doppler bins.`;
+      details.textContent = `${signalName()} ${map.prn} · ${map.confirmed ? 'Confirmed' : map.peak_ratio > 1 ? 'Coarse candidate, not confirmed' : 'Below coarse threshold'} · Peak / threshold ${map.peak_ratio.toFixed(2)} · Coarse peak ${map.peak_doppler_hz.toFixed(0)} Hz, ${map.peak_code_phase_chips.toFixed(3)} chips · Capture ${map.epoch} / ${map.first_sample} · ${map.fft_size} original code bins × ${map.power.length} Doppler bins.`;
       schedule();
     } catch (error) {
       if (error.name !== 'AbortError' && request === controller) { map = null; details.textContent = ''; emptyState('Search space unavailable. Retrying with the next status update.'); }
     } finally { if (request === controller) { requestKey = ''; request = null; } }
   }
-  picker.addEventListener('change', () => { cursor.textContent = ''; details.textContent = ''; refresh(); });
+  picker.addEventListener('change', () => { selections.set(live?.signal || 'gps', picker.value); cursor.textContent = ''; details.textContent = ''; refresh(); });
   canvas.addEventListener('mousemove', event => {
     if (!map) return;
     const rect = canvas.getBoundingClientRect(), x = (event.clientX - rect.left - 66) / (rect.width - 94), y = (event.clientY - rect.top - 25) / (rect.height - 83);
     if (x < 0 || x >= 1 || y < 0 || y >= 1) { cursor.textContent = ''; return; }
-    const column = Math.floor(x * map.code_bins), row = 15 - Math.floor(y * 16);
-    cursor.textContent = `${(column * 1023 / map.code_bins).toFixed(2)} chips · ${map.doppler_hz[row]} Hz · Power / threshold ${map.power[row][column].toFixed(3)}`;
+    const column = Math.floor(x * map.code_bins), row = map.power.length - 1 - Math.floor(y * map.power.length);
+    cursor.textContent = `${(column * (map.code_period_chips || 1023) / map.code_bins).toFixed(2)} chips · ${map.doppler_hz[row]} Hz · Power / threshold ${map.power[row][column].toFixed(3)}`;
   });
   canvas.addEventListener('mouseleave', () => { cursor.textContent = ''; });
   const observer = new ResizeObserver(schedule);
@@ -146,13 +151,13 @@ export function createAcquisitionSearchSpace(root) {
   return {
     setVisible(value) { visible = value; if (visible) { refresh(); schedule(); } else { request?.abort(); request = null; requestKey = ''; } },
     update(status) {
-      if (!status || live?.run_id !== status.run_id) {
+      if (!status || live?.run_id !== status.run_id || live?.signal !== status.signal) {
         request?.abort(); request = null; requestKey = ''; loadedKey = ''; map = null; details.textContent = ''; cursor.textContent = '';
         emptyState(status ? 'Waiting for a completed satellite search.' : 'Connect to inspect completed searches.');
       }
+      const previous = selections.get(status?.signal || 'gps') || ((live?.signal === status?.signal) ? picker.value : '');
       live = status;
       const results = [...(live?.acquisition?.results || [])].sort((a, b) => Number(a.prn) - Number(b.prn));
-      const previous = picker.value;
       const ids = new Set(results.map(result => String(result.prn)));
       for (const option of [...picker.options]) if (!ids.has(option.value)) option.remove();
       for (const result of results) {
@@ -161,7 +166,7 @@ export function createAcquisitionSearchSpace(root) {
           option = document.createElement('option'); option.value = result.prn;
           picker.insertBefore(option, [...picker.options].find(item => Number(item.value) > Number(result.prn)) || null);
         }
-        const label = `GPS ${result.prn} · ${result.confirmed ? 'confirmed' : result.peak_ratio > 1 ? 'not confirmed' : 'below threshold'}`;
+        const label = `${signalName()} ${result.prn} · ${result.confirmed ? 'confirmed' : result.peak_ratio > 1 ? 'not confirmed' : 'below threshold'}`;
         if (option.textContent !== label) option.textContent = label;
       }
       picker.disabled = !results.length;

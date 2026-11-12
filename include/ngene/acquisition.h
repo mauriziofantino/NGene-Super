@@ -6,6 +6,7 @@
 
 /** Acquisition-only options; no tracking or navigation decisions are implied. */
 typedef struct {
+    double falseAlarmProbability; /**< Per-cell Pfa, default 1e-9; shared noise policy. */
     int enabled;        /**< Zero disables channel registration. */
     unsigned firstPrn;  /**< First GPS C/A PRN, 1..32. */
     unsigned lastPrn;   /**< Last PRN, firstPrn..32. */
@@ -30,18 +31,22 @@ typedef struct {
  * Display reduction never feeds acquisition decisions. */
 #define NG_ACQUISITION_CODE_BINS 1024u
 #define NG_ACQUISITION_DOPPLER_BINS 16u
+#define NG_ACQUISITION_MAX_DOPPLER_BINS 116u
 typedef struct {
     int valid;
     TNgAcquisitionResult result;
+    unsigned dopplerBins; /**< Actual grid rows: GPS 16, Galileo 116. */
+    unsigned codePeriodChips; /**< Primary-code period: GPS 1023, Galileo 4092. */
     unsigned fftSize;
     double threshold;
     double peakDopplerHz;
     double peakCodePhaseChips;
-    float power[NG_ACQUISITION_DOPPLER_BINS][NG_ACQUISITION_CODE_BINS];
+    float power[NG_ACQUISITION_MAX_DOPPLER_BINS][NG_ACQUISITION_CODE_BINS];
 } TNgAcquisitionSearchSpace;
 
 /** Copied bounded worker telemetry. Results belong to the most recent tested capture per PRN. */
 typedef struct {
+    double falseAlarmProbability; /**< Per-cell Pfa, default 1e-9; shared noise policy. */
     int enabled;             /**< Registration enabled for this run. */
     int searching;           /**< Worker is processing an owned capture. */
     unsigned currentPrn;     /**< PRN being searched, zero while waiting. */
@@ -83,6 +88,11 @@ int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error);
  * channel receives a borrowed registration, valid until runner destruction. */
 int NgAcquisitionCreate(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                         TNgAcquisition **out, TNgChannel *channel, TNgError *error);
+/** Register Galileo E1-B PRNs 1..32 with an independent 224-ms capture worker.
+ * Same native precision/ownership/cancellation and completed-map contract as GPS.
+ * Both registrations may share an engine; callers may override instance identities. */
+int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
+                               TNgAcquisition **out, TNgChannel *channel, TNgError *error);
 /** Create a runner using caller-owned strategy/context. Same ring and cancellation contract. */
 int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                                     const TNgAcquisitionStrategy *strategy, void *context,

@@ -60,6 +60,8 @@ void NgConfigDefaults(TNgConfig *config)
     NgAcquisitionDefaults(&config->acquisition);
     /* Generic capture profiles remain capture-only unless explicitly enabled. */
     config->acquisition.enabled = 0;
+    NgAcquisitionDefaults(&config->galileoAcquisition);
+    config->galileoAcquisition.enabled = 0;
     config->rtlAutoGain = 1;
     config->rtlIfGainDb = -1;
     config->bladeGainDb = 30;
@@ -227,11 +229,18 @@ static int CopyText(char *out, size_t capacity, const char *text)
 static int Apply(TNgConfig *c, const char *key, const char *value)
 {
     uint64_t n;
+    REAL_KEY("acquisition.pfa", acquisition.falseAlarmProbability)
     BOOL_KEY("acquisition.enabled", acquisition.enabled)
     UINT_KEY("acquisition.first_prn", acquisition.firstPrn)
     UINT_KEY("acquisition.last_prn", acquisition.lastPrn)
     BOOL_KEY("acquisition.square_carrier", acquisition.squareCarrier)
     BOOL_KEY("acquisition.xor_correlation", acquisition.xorCorrelation)
+    REAL_KEY("galileo_acquisition.pfa", galileoAcquisition.falseAlarmProbability)
+    BOOL_KEY("galileo_acquisition.enabled", galileoAcquisition.enabled)
+    UINT_KEY("galileo_acquisition.first_prn", galileoAcquisition.firstPrn)
+    UINT_KEY("galileo_acquisition.last_prn", galileoAcquisition.lastPrn)
+    BOOL_KEY("galileo_acquisition.square_carrier", galileoAcquisition.squareCarrier)
+    BOOL_KEY("galileo_acquisition.xor_correlation", galileoAcquisition.xorCorrelation)
     if (strcmp(key, "frontend.type") == 0) {
         if (strcmp(value, "hackrf") == 0) {
             c->frontend = NG_FRONTEND_HACKRF;
@@ -490,7 +499,7 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
                  strcmp(section, "receiver") != 0 && strcmp(section, "recording") != 0 &&
                  strcmp(section, "replay") != 0 && strcmp(section, "analysis") != 0 &&
                  strcmp(section, "rtlsdr") != 0 && strcmp(section, "bladerf") != 0 &&
-                 strcmp(section, "acquisition") != 0)) {
+                 strcmp(section, "acquisition") != 0 && strcmp(section, "galileo_acquisition") != 0)) {
                 return NgFail(error, "Unknown section at line %zu", number);
             }
             continue;
@@ -555,11 +564,13 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (NgAnalysisValidate(&config->analysis, error) != NG_OK) {
         return NG_ERROR;
     }
+    if (NgAcquisitionValidate(&config->galileoAcquisition, error) != NG_OK)
+        return NG_ERROR;
     if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK)
         return NG_ERROR;
-    if (config->acquisition.enabled && !config->recordOnly &&
+    if ((config->acquisition.enabled || config->galileoAcquisition.enabled) && !config->recordOnly &&
         (config->sampleRateHz < 2048000u || config->sampleRateHz > 20000000u))
-        return NgFail(error, "GPS acquisition requires 2.048..20 Msps");
+        return NgFail(error, "Acquisition requires 2.048..20 Msps");
     if (config->dcRemoval != 0 ||
         (config->streamFormat != 0 && config->streamFormat != NG_FORMAT_CI8 &&
          config->streamFormat != NG_FORMAT_CI16))
@@ -750,10 +761,18 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             config->idleTimeoutMs);
     fprintf(output,
             "\n[acquisition]\nenabled=%s\nfirst_prn=%u\nlast_prn=%u\n"
-            "square_carrier=%s\nxor_correlation=%s\n",
+            "square_carrier=%s\nxor_correlation=%s\npfa=%.17g\n",
             config->acquisition.enabled ? "true" : "false", config->acquisition.firstPrn,
             config->acquisition.lastPrn, config->acquisition.squareCarrier ? "true" : "false",
-            config->acquisition.xorCorrelation ? "true" : "false");
+            config->acquisition.xorCorrelation ? "true" : "false",
+            config->acquisition.falseAlarmProbability);
+    fprintf(output,
+            "\n[galileo_acquisition]\nenabled=%s\nfirst_prn=%u\nlast_prn=%u\n"
+            "square_carrier=%s\nxor_correlation=%s\npfa=%.17g\n",
+            config->galileoAcquisition.enabled ? "true" : "false", config->galileoAcquisition.firstPrn,
+            config->galileoAcquisition.lastPrn, config->galileoAcquisition.squareCarrier ? "true" : "false",
+            config->galileoAcquisition.xorCorrelation ? "true" : "false",
+            config->galileoAcquisition.falseAlarmProbability);
     fprintf(output,
             "\n[recording]\nenabled=%s\nprefix=%s\nqueue_blocks=%zu\nsegment_samples=%" PRIu64 "\n",
             (config->recordingEnabled) != 0 ? "true" : "false", config->recordingPrefix,

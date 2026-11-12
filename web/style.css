@@ -377,3 +377,6 @@ td a{color:#80dce4}
 /* Status changes must not alter satellite row height or the scroll anchor. */
 [data-acquisition-results] td{white-space:nowrap}
 .workspace-table tr[data-satellite]:focus{outline:2px solid #8ba7bb;outline-offset:-2px}
+
+.caf-signal-picker{justify-content:flex-start;color:#a6bfd1;font-size:12px}
+.caf-signal-picker select{min-width:180px;padding:7px 10px;border:1px solid #35546a;border-radius:6px;background:#10263a;color:#d2e4ee}

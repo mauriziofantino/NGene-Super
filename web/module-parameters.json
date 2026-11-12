@@ -1,20 +1,189 @@
 {
   "version": 1,
-  "modules": [{
+  "modules": [
+  {
     "id": "gps-l1-ca-classic",
-    "groups": [{
-      "title": "GPS acquisition", "topic": "acquisition",
-      "note": "GPS L1 C/A: coarse ±5 kHz / 667 Hz, eight 1-ms periods, Doppler refinement 10 Hz, native-sample code refinement, confirmation 3 of 4. Tracking is not integrated.",
-      "fields": [
-        {"key":"acquisition.enabled","label":"GPS L1 C/A acquisition","type":"select","default":"false","options":[{"value":"true","label":"On"},{"value":"false","label":"Off"}]},
-        {"key":"acquisition.first_prn","label":"First GPS PRN","type":"number","default":1,"integer":true,"min":1,"max":32},
-        {"key":"acquisition.last_prn","label":"Last GPS PRN","type":"number","default":32,"integer":true,"min":1,"max":32},
-        {"key":"acquisition.square_carrier","label":"Local carrier","type":"select","default":"false","options":[{"value":"false","label":"Sinusoidal"},{"value":"true","label":"Squared sin/cos"}]},
-        {"key":"acquisition.xor_correlation","label":"Code correlation","type":"select","default":"false","options":[{"value":"false","label":"SIMD products"},{"value":"true","label":"SIMD sign XOR"}],"hint":"XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."}
-      ]
-    }],
-    "rules": [{"kind":"lessEqual","keys":["acquisition.first_prn","acquisition.last_prn"],"left":"acquisition.first_prn","right":"acquisition.last_prn","message":"First GPS PRN must not exceed last GPS PRN."}]
-  }],
+    "groups": [
+      {
+        "title": "GPS acquisition",
+        "topic": "acquisition",
+        "note": "GPS L1 C/A: coarse \u00b15 kHz / 667 Hz, eight 1-ms periods, Doppler refinement 10 Hz, native-sample code refinement, confirmation 3 of 4. Tracking is not integrated.",
+        "fields": [
+          {
+            "key": "acquisition.enabled",
+            "label": "GPS L1 C/A acquisition",
+            "type": "select",
+            "default": "false",
+            "options": [
+              {
+                "value": "true",
+                "label": "On"
+              },
+              {
+                "value": "false",
+                "label": "Off"
+              }
+            ]
+          },
+          {
+            "key": "acquisition.first_prn",
+            "label": "First GPS PRN",
+            "type": "number",
+            "default": 1,
+            "integer": true,
+            "min": 1,
+            "max": 32
+          },
+          {
+            "key": "acquisition.last_prn",
+            "label": "Last GPS PRN",
+            "type": "number",
+            "default": 32,
+            "integer": true,
+            "min": 1,
+            "max": 32
+          },
+          {
+            "key": "acquisition.square_carrier",
+            "label": "Local carrier",
+            "type": "select",
+            "default": "false",
+            "options": [
+              {
+                "value": "false",
+                "label": "Sinusoidal"
+              },
+              {
+                "value": "true",
+                "label": "Squared sin/cos"
+              }
+            ]
+          },
+          {
+            "key": "acquisition.xor_correlation",
+            "label": "Code correlation",
+            "type": "select",
+            "default": "false",
+            "options": [
+              {
+                "value": "false",
+                "label": "SIMD products"
+              },
+              {
+                "value": "true",
+                "label": "SIMD sign XOR"
+              }
+            ],
+            "hint": "XOR reverses the sign for \u00b11 code chips and preserves ADC amplitudes."
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "kind": "lessEqual",
+        "keys": [
+          "acquisition.first_prn",
+          "acquisition.last_prn"
+        ],
+        "left": "acquisition.first_prn",
+        "right": "acquisition.last_prn",
+        "message": "First GPS PRN must not exceed last GPS PRN."
+      }
+    ]
+  },
+  {
+    "id": "galileo-e1b-classic",
+    "groups": [
+      {
+        "title": "Galileo acquisition",
+        "topic": "acquisition",
+        "note": "Galileo E1-B: coarse 87 Hz, eight 4-ms periods, Doppler/code refinement, confirmation 3 of 4. BOC(1,1) replica; tracking is not integrated.",
+        "fields": [
+          {
+            "key": "galileo_acquisition.enabled",
+            "label": "Galileo E1-B acquisition",
+            "type": "select",
+            "default": "false",
+            "options": [
+              {
+                "value": "true",
+                "label": "On"
+              },
+              {
+                "value": "false",
+                "label": "Off"
+              }
+            ]
+          },
+          {
+            "key": "galileo_acquisition.first_prn",
+            "label": "First Galileo PRN",
+            "type": "number",
+            "default": 1,
+            "integer": true,
+            "min": 1,
+            "max": 32
+          },
+          {
+            "key": "galileo_acquisition.last_prn",
+            "label": "Last Galileo PRN",
+            "type": "number",
+            "default": 32,
+            "integer": true,
+            "min": 1,
+            "max": 32
+          },
+          {
+            "key": "galileo_acquisition.square_carrier",
+            "label": "Local carrier",
+            "type": "select",
+            "default": "false",
+            "options": [
+              {
+                "value": "false",
+                "label": "Sinusoidal"
+              },
+              {
+                "value": "true",
+                "label": "Squared sin/cos"
+              }
+            ]
+          },
+          {
+            "key": "galileo_acquisition.xor_correlation",
+            "label": "Code correlation",
+            "type": "select",
+            "default": "false",
+            "options": [
+              {
+                "value": "false",
+                "label": "SIMD products"
+              },
+              {
+                "value": "true",
+                "label": "SIMD sign XOR"
+              }
+            ],
+            "hint": "XOR reverses the sign for \u00b11 code chips and preserves ADC amplitudes."
+          }
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "kind": "lessEqual",
+        "keys": [
+          "galileo_acquisition.first_prn",
+          "galileo_acquisition.last_prn"
+        ],
+        "left": "galileo_acquisition.first_prn",
+        "right": "galileo_acquisition.last_prn",
+        "message": "First Galileo PRN must not exceed last Galileo PRN."
+      }
+    ]
+  }
+],
   "references": {
     "receiver": [
       {
@@ -37,7 +206,7 @@
             "options": null
           }
         ],
-        "note": "GPS acquisition uses the operational channel and PRN settings below. Galileo and EGNOS modules are not integrated."
+        "note": "GPS and Galileo acquisition use the operational signal and PRN settings. These historical channel-allocation values are reference-only; EGNOS is not integrated."
       },
       {
         "title": "Signal selection & receiver clock",

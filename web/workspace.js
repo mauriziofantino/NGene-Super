@@ -43,16 +43,17 @@ function journeyMarkup() {
     `<nav class="workspace-pipeline" aria-label="Receiver stages">${STAGES.map(([view, title, description], index) => `<button type="button" class="workspace-step" data-go="${view}"><span class="workspace-step-number">${String(index + 1).padStart(2, '0')}</span><h3>${title}</h3><p>${description}</p><span class="workspace-step-state" data-workspace-field="stage-${view}">${['setup', 'rf', 'record'].includes(view) ? 'Waiting for receiver' : 'Module unavailable'}</span></button>`).join('')}</nav>` +
     `<div class="workspace-kpis">${kpi('INPUT SOURCE', field('sourceName'), field('formatDetail'))}${kpi('PROCESSED I/Q PAIRS', field('processed'), field('windowsDetail'))}${kpi('RECEIVER SERVICE', field('receiverState'), field('connectionDetail'))}${kpi('NATIVE I/Q CAPTURE', field('recordingState'), field('capturePoint'))}</div>` +
     `<div class="workspace-grid workspace-grid-wide">${card('Your next step', 'Operate the real signal path before inspecting GNSS stages.',
-      `<div class="workspace-status-strip">${badge('I/Q pipeline available')}${badge('GPS acquisition available')}</div><ol class="workspace-next-steps"><li><strong>Prepare the source.</strong> Select a live SDR or a recorded I/Q file, then apply the profile.</li><li><strong>Start reception.</strong> Use Start receiver, then check continuity and native signal statistics in RF observation.</li><li><strong>Inspect the chain.</strong> Enable GPS L1 C/A acquisition to search satellites. Tracking, navigation decoding and PVT await their modules.</li></ol><div class="workspace-actions">${button('setup', 'Review setup')}${button('health', 'Check system health')}</div>`)}${card('Session at a glance', 'Configured input and the current receiver connection.', rows([
+      `<div class="workspace-status-strip">${badge('I/Q pipeline available')}${badge('GPS / Galileo acquisition available')}</div><ol class="workspace-next-steps"><li><strong>Prepare the source.</strong> Select a live SDR or a recorded I/Q file, then apply the profile.</li><li><strong>Start reception.</strong> Use Start receiver, then check continuity and native signal statistics in RF observation.</li><li><strong>Inspect the chain.</strong> Enable GPS L1 C/A acquisition to search satellites. Tracking, navigation decoding and PVT await their modules.</li></ol><div class="workspace-actions">${button('setup', 'Review setup')}${button('health', 'Check system health')}</div>`)}${card('Session at a glance', 'Configured input and the current receiver connection.', rows([
       ['Connection', field('connection')], ['Profile', field('profileState')], ['Native sample format', field('format')], ['Sample rate', field('sampleRate')], ['Signal centre', field('signalFrequency')], ['Position solution', 'Unavailable — PVT module not integrated']
     ]))}</div>`;
 }
 
 function acquisitionMarkup() {
-  return heading('GNSS / GPS L1 C/A', 'Acquisition', 'Coarse search, Doppler and code refinement, then independent 3-of-4 confirmation.', settingsButton('acquisition', 'Acquisition settings')) +
+  return heading('GNSS / GPS & GALILEO', 'Acquisition', 'Coarse search, Doppler and code refinement, then independent 3-of-4 confirmation.', settingsButton('acquisition', 'Acquisition settings')) +
+    '<label class="caf-controls caf-signal-picker">Signal <select aria-label="Acquisition signal" data-acquisition-signal><option value="gps">GPS L1 C/A</option><option value="galileo">Galileo E1-B</option></select></label>' +
     card('Satellite searches', 'Confirmed results are referenced to the captured sample epoch. Tracking and navigation are not integrated.',
       rows([['Search worker',field('acquisitionState','Disabled')],['Satellite searches',field('acquisitionSearches','0')],['Capture gaps',field('acquisitionGaps','0')],['Samples outside capture',field('acquisitionSkipped','0')]]) +
-      '<p class="muted" data-acquisition-message></p><div class="table-wrap workspace-table"><table><thead><tr><th>GPS PRN</th><th>Result</th><th>Doppler (Hz)</th><th>Code phase (chips)</th><th>Peak / threshold</th><th>Confirmation</th><th>Capture epoch / sample</th></tr></thead><tbody data-acquisition-results><tr><td colspan="7">Enable acquisition in settings, apply the profile and start reception.</td></tr></tbody></table></div>') +
+      '<p class="muted" data-acquisition-message></p><div class="table-wrap workspace-table"><table><thead><tr><th>PRN</th><th>Result</th><th>Doppler (Hz)</th><th>Code phase (chips)</th><th>Peak / threshold</th><th>Confirmation</th><th>Capture epoch / sample</th></tr></thead><tbody data-acquisition-results><tr><td colspan="7">Enable acquisition in settings, apply the profile and start reception.</td></tr></tbody></table></div>') +
     card('Completed search space', 'Inspect the last completed coarse round for each satellite, including searches below threshold.',
       '<div data-search-space></div>') + route('rf', 'tracking');
 }
@@ -198,6 +199,9 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   const tourCounter = tour.querySelector('[data-tour-counter]'), tourTitle = tour.querySelector('[data-tour-title]'), tourDescription = tour.querySelector('[data-tour-description]');
   const previous = tour.querySelector('[data-tour="previous"]'), next = tour.querySelector('[data-tour="next"]');
   let selected = 'rf', guided = false, tourIndex = 0;
+  let acquisitionSnapshot = {};
+  const signalPicker = document.querySelector('[data-acquisition-signal]');
+  signalPicker.addEventListener('change', () => update(acquisitionSnapshot));
   const acquisitionTable = createAcquisitionTable(document.querySelector('[data-acquisition-results]'));
   const searchSpace = createAcquisitionSearchSpace(document.querySelector('[data-search-space]'));
   const text = (key, value) => {
@@ -264,15 +268,18 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   window.addEventListener('popstate', fromHash);
 
   function update(snapshot = {}) {
+    acquisitionSnapshot = snapshot;
     const {status, capabilities, profile = {}, draft = {}, revision, dirty = false, connected = false} = snapshot;
     const live = connected && status ? status : null;
-    const acquisition = live?.acquisition;
-    searchSpace.update(live);
-    text('acquisitionState', acquisition?.enabled ? (acquisition.searching ? `Searching GPS ${acquisition.current_prn || ''}` : 'Waiting for capture') : 'Disabled');
+    const system = signalPicker.value;
+    const signalName = system === 'galileo' ? 'Galileo' : 'GPS';
+    const acquisition = system === 'galileo' ? live?.galileo_acquisition : live?.acquisition;
+    searchSpace.update(live ? {...live, acquisition, signal:system} : null);
+    text('acquisitionState', acquisition?.enabled ? (acquisition.searching ? `Searching ${signalName} ${acquisition.current_prn || ''}` : 'Waiting for capture') : 'Disabled');
     text('acquisitionSearches', acquisition?.searches || '0');
     text('acquisitionGaps', acquisition?.gaps || '0');
     text('acquisitionSkipped', acquisition?.skipped_samples || '0');
-    acquisitionTable.update(acquisition, profile);
+    acquisitionTable.update(acquisition, profile, system);
     const acquisitionMessage = document.querySelector('[data-acquisition-message]');
     if (acquisitionMessage) acquisitionMessage.textContent = acquisition?.message || '';
     const configuredSource = profile['frontend.type'];
@@ -309,7 +316,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       'module-gnss': 'Not integrated',
       'stage-setup': dirty ? 'Unsaved changes' : revision ? `Profile r${revision}` : 'Waiting for profile',
       'stage-rf': state,
-      'stage-acquisition': acquisition?.enabled ? (acquisition.searching ? 'Searching GPS' : 'GPS enabled') : 'GPS available / disabled',
+      'stage-acquisition': acquisition?.enabled ? (acquisition.searching ? `Searching ${signalName}` : `${signalName} enabled`) : `${signalName} available / disabled`,
       'stage-record': record
     };
     for (const [key, value] of Object.entries(values)) text(key, value);

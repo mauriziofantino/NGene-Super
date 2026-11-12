@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "acquisition/noise_policy.h"
 #define CHECK(condition)                                                                           \
     do {                                                                                           \
         if (!(condition)) {                                                                        \
@@ -122,6 +123,109 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
     }
     NgAcquisitionDestroy(acquisition);
     free(samples);
+    return 0;
+}
+
+static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, int signal,
+                    int truncated, int wide)
+{
+    TNgAcquisition *acquisition = NULL;
+    TNgAcquisitionConfig config;
+    TNgAcquisitionSnapshot snapshot;
+    TNgChannel channel;
+    TNgStreamInfo stream = {0};
+    TNgError error = {{0}};
+    TNgIqView window = {0};
+    TNgChannelState next;
+    int8_t chips[4092];
+    FILE *codeFile;
+    size_t count = (size_t)(((uint64_t)rate * 224u + 999u) / 1000u);
+    TNgIq8 *samples = calloc(count, sizeof(*samples));
+    int16_t *wideSamples = wide ? calloc(2 * count, sizeof(*wideSamples)) : NULL;
+    uint32_t random = 521u;
+    double doppler = 1234;
+    double phase = 123.42;
+    size_t k;
+    unsigned tries;
+    CHECK(samples != NULL);
+    codeFile = fopen(NGENE_TEST_SOURCE_DIR "/tests/data/galileo-e1b-prn7.bin", "rb");
+    CHECK(codeFile != NULL);
+    CHECK(fread(chips, 1, sizeof(chips), codeFile) == sizeof(chips));
+    fclose(codeFile);
+    for (k = 0; k < count; ++k) {
+        double time = (double)k / rate;
+        double codePhase = fmod(phase + time * 1023000.0 * (1 + doppler / 1575420000.0), 4092);
+        double carrier = 6.283185307179586 * ((double)digitalIf + doppler) * time + 0.71;
+        if (rate == 8183800)
+            carrier = -carrier;
+        double amplitude =
+            signal && (!truncated || time < 0.096) ? 5 * chips[(size_t)codePhase] * ((codePhase - floor(codePhase)) < 0.5 ? 1 : -1) : 0;
+        samples[k].i = (int8_t)lround(amplitude * cos(carrier) + 28 * Noise(&random) + 2.3);
+        samples[k].q = (int8_t)lround(amplitude * sin(carrier) + 28 * Noise(&random) - 1.7);
+    }
+    if (wide) {
+        CHECK(wideSamples != NULL);
+        for (k = 0; k < count; ++k) {
+            wideSamples[2 * k] = (int16_t)(samples[k].i * 101);
+            wideSamples[2 * k + 1] = (int16_t)(samples[k].q * 101);
+        }
+    }
+    stream.sampleRateHz = rate;
+    stream.digitalIfHz = digitalIf;
+    stream.format = wide ? NG_FORMAT_CI16 : NG_FORMAT_CI8;
+    stream.spectrumInverted = rate == 8183800;
+    NgAcquisitionDefaults(&config);
+    config.firstPrn = 7;
+    config.lastPrn = 7;
+    config.squareCarrier = square;
+    config.xorCorrelation = xorSigns;
+    CHECK(NgAcquisitionCreateGalileo(&config, &stream, &acquisition, &channel, &error) == NG_OK);
+    window.samples = wide ? (const TNgIq8 *)wideSamples : samples;
+    window.format = stream.format;
+    window.meta.count = count;
+    window.meta.epoch = 3;
+    window.meta.firstSample = 1000000;
+    CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &window, &next,
+                               &error) == NG_OK);
+    CHECK(next == NG_CHANNEL_ACQUISITION);
+    for (tries = 0; tries < 3000; ++tries) {
+        NgAcquisitionRead(acquisition, &snapshot);
+        if (snapshot.searches != 0)
+            break;
+        NgSleepMs(10);
+    }
+    printf("rate=%u IF=%lld square=%d xor=%d signal=%d truncated=%d searches=%llu "
+           "confirmed=%d doppler=%.1f phase=%.4f ratio=%.2f successes=%u %s\n",
+           rate, (long long)digitalIf, square, xorSigns, signal, truncated,
+           (unsigned long long)snapshot.searches, snapshot.results[6].confirmed,
+           snapshot.results[6].dopplerHz, snapshot.results[6].codePhaseChips,
+           snapshot.results[6].peakRatio, snapshot.results[6].successes, snapshot.message);
+    CHECK(snapshot.searches == 1);
+    CHECK(snapshot.results[6].confirmed == (signal && !truncated));
+    {
+        TNgAcquisitionSearchSpace space;
+        double maximum = 0;
+        unsigned row;
+        unsigned column;
+        NgAcquisitionReadSearchSpace(acquisition, 7, &space);
+        CHECK(space.valid && space.dopplerBins == 116 && space.codePeriodChips == 4092);
+        CHECK(space.result.confirmed == snapshot.results[6].confirmed);
+        for (row = 0; row < space.dopplerBins; ++row)
+            for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column)
+                if (space.power[row][column] > maximum)
+                    maximum = space.power[row][column];
+        CHECK(fabs(maximum - snapshot.results[6].peakRatio) < 1e-5 * (1 + maximum));
+    }
+    if (signal && !truncated) {
+        CHECK(fabs(snapshot.results[6].dopplerHz - doppler) < 25);
+        CHECK(fabs(snapshot.results[6].codePhaseChips - phase) < 0.6);
+        CHECK(snapshot.results[6].successes == 3);
+        CHECK(snapshot.results[6].firstSample == 1000000);
+        CHECK(snapshot.results[6].epoch == 3);
+    }
+    NgAcquisitionDestroy(acquisition);
+    free(samples);
+    free(wideSamples);
     return 0;
 }
 
@@ -260,10 +364,61 @@ static int Ownership(void)
     return 0;
 }
 
+/** Check the common noise law, configurable Pfa and measured integration scaling. */
+static int NoisePolicy(void)
+{
+    TNgComplex values[8000];
+    TNgComplex carrier[8000];
+    float replica[8000];
+    uint32_t random = 3451;
+    double measured[2] = {0};
+    unsigned duration;
+    CHECK(AcquisitionCoarseNoiseDoppler() > 5005);
+    CHECK(fabs(AcquisitionThreshold(1, 1e-9) + log(1e-9)) < 1e-10);
+    CHECK(fabs(AcquisitionThreshold(1, 1e-100) + log(1e-100)) < 1e-9);
+    CHECK(AcquisitionThreshold(8, 1e-9) > AcquisitionThreshold(8, 1e-6));
+    for (duration = 0; duration < 2; ++duration) {
+        size_t count = duration ? 8000 : 2000;
+        unsigned trial;
+        double signalI;
+        double signalQ;
+        size_t k;
+        NgSearchCarrier(carrier, count, 2000000, AcquisitionNoiseOffset(0), 0, 0);
+        for (k = 0; k < count; ++k) {
+            replica[k] = 1;
+            values[k].i = 1;
+            values[k].q = 0;
+        }
+        NgSearchMix(values, carrier, count);
+        NgSearchCorrelate(values, replica, count, 0, &signalI, &signalQ);
+        CHECK(hypot(signalI, signalQ) < 0.001); /* wrong Doppler cancels coherent signal */
+        for (trial = 0; trial < 512; ++trial) {
+            double i;
+            double q;
+            for (k = 0; k < count; ++k) {
+                values[k].i = (float)Noise(&random);
+                values[k].q = (float)Noise(&random);
+            }
+            NgSearchMix(values, carrier, count);
+            NgSearchCorrelate(values, replica, count, 0, &i, &q);
+            measured[duration] += (i * i + q * q) / 512;
+        }
+    }
+    CHECK(measured[1] / measured[0] > 3.3 && measured[1] / measured[0] < 4.7);
+    return 0;
+}
+
 /** Run RF formats/rates, sinusoidal/square mixing, noise and independent confirmation cases. */
 int main(void)
 {
     CHECK(Kernels() == 0);
+    CHECK(NoisePolicy() == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 1, 1, 0, 1) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0) == 0);
+    CHECK(GalileoScenario(2400000, 0, 0, 1, 1, 0, 0) == 0);
+    CHECK(GalileoScenario(8183800, 38500, 0, 1, 1, 0, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 0, 0, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 1, 0) == 0);
     CHECK(Ownership() == 0);
     CHECK(Scenario(2400000, 0, 0, 0, 1, 0) == 0);
     CHECK(Scenario(16000000, 0, 0, 1, 1, 0) == 0);

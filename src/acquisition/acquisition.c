@@ -3,6 +3,7 @@
 #include "platform/platform.h"
 #include <stdlib.h>
 #include <limits.h>
+#include <math.h>
 #include <string.h>
 /** Default strategy workspace implemented separately from scheduling/ownership. */
 int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error);
@@ -12,6 +13,15 @@ void NgAcquisitionGpsFree(void *context);
 extern const TNgAcquisitionStrategy ngGpsAcquisitionStrategy;
 /** Copy default-strategy display data on its owning worker only. */
 void NgAcquisitionGpsSearchSpace(void *context, TNgAcquisitionSearchSpace *space);
+
+/** Galileo E1-B strategy resources (PRNs 1..32 in this increment). */
+int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error);
+/** Free Galileo private DSP resources. */
+void NgAcquisitionGalileoFree(void *context);
+/** Copy completed Galileo display data on its worker. */
+void NgAcquisitionGalileoSearchSpace(void *context, TNgAcquisitionSearchSpace *space);
+/** Galileo E1-B operations. */
+extern const TNgAcquisitionStrategy ngGalileoAcquisitionStrategy;
 
 /** Owned capture handoff; slot is published only through release/acquire atomics. */
 struct TNgAcquisition {
@@ -44,6 +54,7 @@ void NgAcquisitionDefaults(TNgAcquisitionConfig *config)
 {
     memset(config, 0, sizeof(*config));
     config->enabled = 1;
+    config->falseAlarmProbability = 1e-9;
     config->firstPrn = 1;
     config->lastPrn = 32;
 }
@@ -51,7 +62,8 @@ void NgAcquisitionDefaults(TNgAcquisitionConfig *config)
 /** Reject malformed module options before worker creation. */
 int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error)
 {
-    if (config->firstPrn < 1 || config->lastPrn > 32 || config->lastPrn < config->firstPrn ||
+    if (!isfinite(config->falseAlarmProbability) || config->falseAlarmProbability <= 0 ||
+        config->falseAlarmProbability >= 1 || config->firstPrn < 1 || config->lastPrn > 32 || config->lastPrn < config->firstPrn ||
         (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1))
@@ -97,9 +109,13 @@ static void SearchWorker(void *context)
             if (!Cancelled(acquisition)) {
                 acquisition->snapshot.results[prn - 1] = result;
                 acquisition->snapshot.searches++;
-                if (status == NG_OK && acquisition->strategy == &ngGpsAcquisitionStrategy) {
+                if (status == NG_OK && (acquisition->strategy == &ngGpsAcquisitionStrategy ||
+                                        acquisition->strategy == &ngGalileoAcquisitionStrategy)) {
                     TNgAcquisitionSearchSpace *space = &acquisition->spaces[prn - 1];
-                    NgAcquisitionGpsSearchSpace(acquisition->context, space);
+                    if (acquisition->strategy == &ngGalileoAcquisitionStrategy)
+                        NgAcquisitionGalileoSearchSpace(acquisition->context, space);
+                    else
+                        NgAcquisitionGpsSearchSpace(acquisition->context, space);
                     space->result = result;
                 }
                 if (status == NG_ERROR)
@@ -175,9 +191,9 @@ static const TNgChannelOps acquisitionOps = {
     Process, (1u << NG_FORMAT_CI8) | (1u << NG_FORMAT_CI16) | (1u << NG_FORMAT_SC16_Q11), NULL};
 
 /** Construct a strategy-independent worker and channel registration. */
-int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
+static int CreateWithDuration(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                                     const TNgAcquisitionStrategy *strategy, void *context,
-                                    TNgAcquisition **out, TNgChannel *channel, TNgError *error)
+                                    TNgAcquisition **out, TNgChannel *channel, TNgError *error, unsigned durationMs)
 {
     TNgAcquisition *acquisition;
     *out = NULL;
@@ -192,7 +208,7 @@ int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TN
     acquisition = calloc(1, sizeof(*acquisition));
     if (acquisition == NULL)
         return NgFail(error, "Acquisition allocation failed");
-    acquisition->capacity = (size_t)(((uint64_t)stream->sampleRateHz * 56u + 999u) / 1000u);
+    acquisition->capacity = (size_t)(((uint64_t)stream->sampleRateHz * durationMs + 999u) / 1000u);
     acquisition->storage = calloc(acquisition->capacity, sizeof(*acquisition->storage));
     if (acquisition->storage == NULL || NgMutexInit(&acquisition->mutex) != 0) {
         free(acquisition->storage);
@@ -218,6 +234,37 @@ int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TN
     channel->id.signal = 1;
     *out = acquisition;
     return NG_OK;
+}
+
+/** Default bounded 56-ms registration, preserving custom/GPS strategy contract. */
+int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
+                                    const TNgAcquisitionStrategy *strategy, void *context,
+                                    TNgAcquisition **out, TNgChannel *channel, TNgError *error)
+{
+    return CreateWithDuration(config, stream, strategy, context, out, channel, error, 56);
+}
+
+/** Register an independent Galileo E1-B worker on the same common-ring window. */
+int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
+                               TNgAcquisition **out, TNgChannel *channel, TNgError *error)
+{
+    void *workspace = NULL;
+    int status;
+    *out = NULL;
+    if (NgAcquisitionValidate(config, error) != NG_OK)
+        return NG_ERROR;
+    if (config->enabled && NgAcquisitionGalileoWorkspace(stream, &workspace, error) != NG_OK)
+        return NG_ERROR;
+    status = CreateWithDuration(config, stream, &ngGalileoAcquisitionStrategy, workspace,
+                                out, channel, error, 224);
+    if (status != NG_OK || *out == NULL)
+        NgAcquisitionGalileoFree(workspace);
+    else {
+        (*out)->ownsContext = 1;
+        channel->id.instanceId = 1;
+        channel->id.constellation = 2;
+    }
+    return status;
 }
 
 /** Install the default GPS strategy while keeping its workspace private. */
@@ -270,8 +317,12 @@ void NgAcquisitionDestroy(TNgAcquisition *acquisition)
         return;
     NgAtomicSet(&acquisition->stop, 1);
     NgThreadJoin(acquisition->worker);
-    if (acquisition->ownsContext)
-        NgAcquisitionGpsFree(acquisition->context);
+    if (acquisition->ownsContext) {
+        if (acquisition->strategy == &ngGalileoAcquisitionStrategy)
+            NgAcquisitionGalileoFree(acquisition->context);
+        else
+            NgAcquisitionGpsFree(acquisition->context);
+    }
     NgMutexDestroy(&acquisition->mutex);
     free(acquisition->storage);
     free(acquisition);

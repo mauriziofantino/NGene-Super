@@ -19,8 +19,14 @@ The numerical and I/Q adaptations, limits, and validation are documented in
 [GPS_ACQUISITION.md](GPS_ACQUISITION.md). Acquisition results are not tracking locks
 or navigation fixes.
 
+Galileo E1-B acquisition for PRNs 1..32 is integrated in the controller, CLI, INI
+and browser alongside GPS, with independent enable/PRN settings and a Signal
+selector for results and synchronized search-space views. Synthetic service/browser
+validation and the shared wrong-Doppler noise policy are established; no recorded
+RF replay/live result is established. See [the API scope and limits](GALILEO_ACQUISITION.md).
+
 This is **not yet an end-to-end GNSS receiver**: tracking, navigation-message decoding,
-observables, and PVT/PNT are not integrated. Galileo/SBAS acquisition and multibit
+observables, and PVT/PNT are not integrated. SBAS acquisition and multibit
 correlation kernels are also not established as implemented capabilities. In
 particular, native SC16 Q11 transport preserves its ADC precision, but does not mean
 all downstream GNSS channel kernels support that format. See
