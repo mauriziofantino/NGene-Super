@@ -280,13 +280,16 @@ int CALL_CONV bladerf_sync_rx(struct bladerf *device, void *samples, unsigned co
     }
     metadata->timestamp = device->calls == 0 ? 1000u : scenario == 8 ? 1032u : 1037u;
     if (scenario == 4 && device->calls != 0) {
+        metadata->timestamp = 1030u;
+    }
+    if (scenario == 10 && device->calls != 0) {
         metadata->timestamp = 1031u;
     }
     if (scenario == 5) {
         metadata->timestamp = UINT64_MAX - 3u;
     }
     metadata->status =
-        device->calls == 0 && scenario != 7 ? (uint32_t)BLADERF_META_STATUS_OVERRUN : 0u;
+        device->calls == 0 && scenario != 7 && scenario != 10 ? (uint32_t)BLADERF_META_STATUS_OVERRUN : 0u;
     metadata->actual_count = scenario == 2        ? count + 1u
                              : scenario == 3      ? 0u
                              : device->calls == 0 ? 32u
@@ -329,28 +332,31 @@ static void CheckStream(TNgConfig *config, unsigned testCase)
           source.info.format == config->bladeFormat);
     CHECK(source.ops->start(source.context, &error) == NG_OK);
     CHECK(source.ops->start(source.context, &error) == NG_ERROR);
-    valid = scenario == 0 || (scenario >= 6 && scenario <= 8);
+    valid = scenario == 0 || (scenario >= 6 && scenario <= 8) || scenario == 10;
     if (valid) {
         for (index = 0; index < 10; ++index) {
             size_t sample;
+            size_t sampleOffset = scenario == 10 && index >= 8 ? 1u : 0u;
             static const int ci8[4] = {-128, -127, 0, 127};
             static const int sc16[4] = {-2048, -1901, 1235, 2047};
             const int *levels = config->bladeFormat == NG_FORMAT_CI8 ? ci8 : sc16;
             CHECK(source.ops->acquire(source.context, &view, 1000, &error) == NG_OK);
-            CHECK(view.format == config->bladeFormat && view.meta.count == 4);
+            CHECK(view.format == config->bladeFormat &&
+                  view.meta.count == (scenario == 10 && index == 9 ? 3u : 4u));
             for (sample = 0; sample < view.meta.count; ++sample) {
-                CHECK(NgIqComponent(&view, sample, 0) == levels[sample % 4u]);
-                CHECK(NgIqComponent(&view, sample, 1) == levels[3u - sample % 4u]);
+                CHECK(NgIqComponent(&view, sample, 0) == levels[(sample + sampleOffset) % 4u]);
+                CHECK(NgIqComponent(&view, sample, 1) ==
+                      levels[3u - (sample + sampleOffset) % 4u]);
             }
             CHECK((view.meta.flags & NG_BLOCK_HARDWARE_TIME) != 0);
             CHECK(view.meta.hardwareTimestamp == 1000u + view.meta.firstSample);
             CHECK(view.meta.firstSample == (index < 8       ? index * 4u
-                                            : scenario == 8 ? index * 4u
+                                            : (scenario == 8 || scenario == 10) ? index * 4u
                                                             : index * 4u + 5u));
             if (index == 8) {
                 CHECK((view.meta.flags & NG_BLOCK_GAP) != 0);
-                CHECK(view.meta.missingKnown == (scenario != 8));
-                CHECK(view.meta.missingBefore == (scenario == 8 ? 0u : 5u));
+                CHECK(view.meta.missingKnown == (scenario != 8 && scenario != 10));
+                CHECK(view.meta.missingBefore == ((scenario == 8 || scenario == 10) ? 0u : 5u));
             } else {
                 CHECK((view.meta.flags & NG_BLOCK_GAP) == 0);
             }
@@ -383,8 +389,8 @@ static void CheckStream(TNgConfig *config, unsigned testCase)
     CHECK(source.ops->stop(source.context, &error) == NG_OK);
     source.ops->stats(source.context, &stats);
     if (valid) {
-        CHECK(stats.receivedSamples == 40 && stats.deviceGapEvents == 1 &&
-              stats.deviceMissingSamples == (scenario == 8 ? 0u : 5u) &&
+        CHECK(stats.receivedSamples == (scenario == 10 ? 39u : 40u) && stats.deviceGapEvents == 1 &&
+              stats.deviceMissingSamples == ((scenario == 8 || scenario == 10) ? 0u : 5u) &&
               stats.droppedSamples == 0 && stats.transportErrors == 0);
         CHECK(stats.ingress.capacityBlocks == config->ingressBlocks &&
               stats.ingress.blockSamples == config->windowSamples);
@@ -496,7 +502,7 @@ int main(void)
         CHECK(NgBladerfOpen(&config, &source, &error) == NG_ERROR);
         CHECK(configuration_calls == attempts + 2 && opened == closed);
         configuration_result = 0;
-        for (testCase = 0; testCase < 10; ++testCase) {
+        for (testCase = 0; testCase < 11; ++testCase) {
             CheckStream(&config, testCase);
         }
         CheckRequestGeometry(&config, 16000, 16000u);

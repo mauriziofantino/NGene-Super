@@ -154,6 +154,7 @@ static void Receive(void *context)
         struct bladerf_metadata metadata;
         TNgIqView view = {0};
         uint64_t missing = 0;
+        unsigned overlap = 0;
         TNgError diagnostic = {{0}};
         int result;
         memset(&metadata, 0, sizeof(metadata));
@@ -209,6 +210,20 @@ static void Receive(void *context)
             source->expectedTimestamp = metadata.timestamp;
             source->haveTimestamp = 1;
         }
+        /* Some device/library combinations return a one-tick overlap. Keep
+         * the hardware clock intact and omit that pair rather than delivering
+         * duplicate time to the DSP. Larger regressions remain terminal. */
+        if (metadata.timestamp < source->expectedTimestamp &&
+            source->expectedTimestamp - metadata.timestamp == 1 &&
+            metadata.actual_count > 1) {
+            overlap = 1;
+            ++metadata.timestamp;
+            --metadata.actual_count;
+            if (source->pendingOverrun == 0) {
+                NgIngressDeviceGap(&source->ingress, 0);
+            }
+            source->pendingOverrun = 1;
+        }
         if (metadata.timestamp < source->expectedTimestamp) {
             NgFail(&diagnostic,
                    "bladeRF RX metadata invalid: timestamp moved backwards "
@@ -220,7 +235,9 @@ static void Receive(void *context)
             break;
         }
         missing = metadata.timestamp - source->expectedTimestamp;
-        view.samples = (const TNgIq8 *)(const void *)source->buffer;
+        view.samples = (const TNgIq8 *)(const void *)
+            ((const unsigned char *)source->buffer +
+             (size_t)overlap * NgSampleBytes(source->ingress.format));
         view.format = source->ingress.format;
         view.meta.count = metadata.actual_count;
         view.meta.firstSample = metadata.timestamp - source->origin;
