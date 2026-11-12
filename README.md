@@ -155,7 +155,8 @@ and alternatives considered.
 - [Configuration reference](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Configuration-Reference): keys, units, defaults and limits.
 - [Troubleshooting](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Troubleshooting).
 - [Engineering and service documentation](docs/service/README.md): architecture, numerical
-  contracts, provenance and historical verification records.
+  contracts, provenance and historical verification records; see the [current project
+  status and implementation principles](docs/service/PROJECT_STATUS.md) for contributor handoff.
 - [Wiki maintenance](docs/WIKI-PUBLISHING.md): update the operator manual in its separate
   GitHub Wiki repository.
 

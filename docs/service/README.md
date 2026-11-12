@@ -7,6 +7,7 @@ they do not establish the current feature set or platform acceptance status.
 
 ## Technical reference
 
+- [Current project status and implementation principles](PROJECT_STATUS.md).
 - [Architecture and module boundaries](ARCHITECTURE.md).
 - [Coding conventions](CODING_STANDARD.md).
 - [FFT arithmetic, precision and implementation review](FFT_REVIEW.md).

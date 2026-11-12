@@ -16,7 +16,8 @@ The engine is the sole logical consumer of the GNSS ring: all channels receive t
   and replay use separate processes. Deterministic input generation is confined to tests
   and optional documentation capture tooling.
 - Dedicated common-source worker, exact SIMD conversion to signed CI8/CI16, aligned SPSC rings, window assembly and common dispatch.
-- Channel state contract and validation; optional dispatcher with a fixed pool and dynamic jobs per window. GNSS algorithms still need integration.
+- Channel state contract and validation; optional dispatcher with a fixed pool and dynamic jobs per window. GNSS processing beyond acquisition still needs integration.
+- Optional GPS L1 C/A acquisition for PRNs 1..32, retaining coarse search, Doppler/code refinement, and independent 3-of-4 confirmation; numerical adaptations and validation limits are recorded in [GPS acquisition](GPS_ACQUISITION.md). This is not tracking or a navigation fix.
 - Recorder, segments, metadata, and overflow/EOF/stop handling.
 - Controller, dark GUI with separate configuration/observation, common-stream recording with ADC/transport provenance, and file transfers.
 - Separate DSP library for FFT, statistics, and power; common APIs with SSE2/NEON backends selected for the target. Spectrum/waterfall, histograms, and runtime configuration.
@@ -30,15 +31,15 @@ The engine is the sole logical consumer of the GNSS ring: all channels receive t
 The [frontend stream decision record](FRONTEND_STREAM_DECISIONS.md) records completed
 Windows SiGe USB checks and current stream/display contracts. The [DSP options study](DSP_OPTIONS_PLAN.md)
 defines the next kernel work; its approximate arithmetic candidates remain experiments.
-Acquisition, tracking and PVT are not integrated. The increments below retain their
-platform and RF validation requirements even where adapter or replay support exists.
+Tracking, navigation decoding, observables and PVT/PNT are not integrated. The increments
+below retain their platform and RF validation requirements even where adapter or replay
+support exists.
 
-1. **Real HackRF test:** verify selection, gains, stream stability, recordings, and timing on Windows/Linux/macOS with the user's hardware. Select replay datasets.
-2. **File input and inspection tools:** read captures with metadata/gaps; make RF tests repeatable. No GNSS algorithm before obtaining a verifiable sample reference.
-3. **DSP contracts and kernels:** port useful NCO, replicas, and correlations from the archive; verify insertion of the already-adapted integer FFT into GNSS chains. Define scaling/ranges, then C reference and x86/ARM SIMD. Compare safe historical XOR, candidate SAD, possible improvements, and products; no presumed winner.
-4. **Acquisition and tracking:** adapt NGene algorithms behind the APIs, with private scratch and explicit integrations. Implement HOLDOVER and fast reacquisition. Revisit the channel contract with the first real algorithms.
-5. **Navigation and assistance:** demodulation during tracking, message cache, signal/network updates, almanac, previous position, and visibility-guided search.
-6. **Observables and PVT/PNT:** common epochs, pseudoranges, satellite positions, and integration of the recoverable solver.
-7. **Additional frontends and conditioning:** new I/Q formats, filters/resampling with delay and time-grid contracts; explicitly selected recording before/after conditioning.
+1. **GNSS DSP contracts and kernels:** port useful NCO, replicas, and correlations from the archive; define scaling/ranges and a C reference before x86/ARM SIMD. Compare safe historical XOR, candidate SAD, and products against the acquisition/channel requirements; do not presume a winner. Approximate arithmetic remains experimental.
+2. **Tracking:** adapt NGene algorithms behind the APIs, with private scratch and explicit integration. Implement tracking, HOLDOVER and fast reacquisition; revisit the channel contract as real algorithms are connected.
+3. **Navigation and assistance:** demodulation during tracking, message cache, signal/network updates, almanac, previous position, and visibility-guided search.
+4. **Observables and PVT/PNT:** common epochs, pseudoranges, satellite positions, and integration of the recoverable solver.
+5. **Additional frontends and conditioning:** new I/Q formats, filters/resampling with delay and time-grid contracts; explicitly selected recording before/after conditioning.
+6. **Physical-device validation:** verify frontend selection, gains, stream stability, recordings, and timing on Windows/Linux/macOS with the user's hardware. Keep platform-specific evidence separate; select replay datasets for repeatable comparisons.
 
 The interfaces allow compile-time replacements without changing coordination. A stable dynamic plugin ABI is not promised, nor is compatibility of future GNSS algorithms with arbitrary rates without validation.
