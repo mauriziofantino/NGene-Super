@@ -1289,6 +1289,11 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngWaterfallReliefJs, ngWaterfallReliefJsLength);
             return 200;
         }
+        if (strcmp(path, "/acquisition-table.js") == 0) {
+            Headers(connection, 200, "text/javascript; charset=utf-8", ngAcquisitionTableJsLength);
+            mg_write(connection, ngAcquisitionTableJs, ngAcquisitionTableJsLength);
+            return 200;
+        }
         if (strcmp(path, "/acquisition-search-space.js") == 0) {
             Headers(connection, 200, "text/javascript; charset=utf-8", ngAcquisitionSearchSpaceJsLength);
             mg_write(connection, ngAcquisitionSearchSpaceJs, ngAcquisitionSearchSpaceJsLength);

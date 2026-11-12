@@ -1,0 +1,59 @@
+<!doctype html><meta charset="utf-8"><title>Simultaneous acquisition views</title>
+<link rel="stylesheet" href="../web/style.css">
+<div id="space"></div><pre id="outcome">Running…</pre>
+<script type="module">
+import {createAcquisitionSearchSpace} from '../web/acquisition-search-space.js';
+try {
+  const assert = (value,message) => { if (!value) throw Error(message); };
+  const root = document.querySelector('#space'), view = createAcquisitionSearchSpace(root);
+  const picker = root.querySelector('select'), canvases = [...root.querySelectorAll('canvas')];
+  const calls = [];
+  let pending = [];
+  window.fetch = (url,options) => new Promise(resolve => { calls.push(url); pending.push({resolve,signal:options.signal}); });
+  const map = (prn,sample) => ({valid:true,prn,epoch:'2',first_sample:sample,confirmed:prn === 7,
+    code_bins:1024,fft_size:4096,peak_ratio:prn === 7 ? 8 : 0.5,peak_code_phase_chips:511.5,
+    peak_doppler_hz:336,doppler_hz:Array.from({length:16},(_,i) => i === 15 ? 5000 : -5000 + i * 667),
+    power:Array.from({length:16},(_,r) => Array.from({length:1024},(_,c) => r === 8 && c === 512 ? (prn === 7 ? 8 : 0.5) : 0.1))});
+  const status = sample => ({run_id:'1',acquisition:{results:[{prn:7,epoch:'2',first_sample:sample},{prn:8,epoch:'2',first_sample:sample}]}});
+  const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const reply = async (request,data) => { request.resolve({ok:true,json:async () => data}); await frame(); };
+  const sync = (prn,sample) => {
+    assert(canvases.every(canvas => canvas.dataset.prn === String(prn)), 'Views show different satellites');
+    for (const field of ['capture','peak','codeRange','dopplerRange'])
+      assert(canvases[0].dataset[field] === canvases[1].dataset[field], `Different ${field}`);
+    assert(canvases[0].dataset.capture === `2:${sample}`, 'Wrong acquisition capture');
+    assert(canvases[0].dataset.codeRange === '0:1023' && canvases[0].dataset.dopplerRange === '-5000:5000', 'Wrong axes');
+    assert(canvases[0].dataset.peak === `511.5:336:${prn === 7 ? 8 : 0.5}`, 'Wrong highlighted peak');
+    assert([...root.querySelectorAll('.caf-empty')].every(item => item.hidden), 'View still empty');
+    assert(canvases.every(canvas => canvas.width > 200 && canvas.height >= 250), 'Canvas too small');
+  };
+  assert(canvases.length === 2 && !root.querySelector('button[data-mode]'), 'Need both views without a toggle');
+  view.update(status('100')); view.setVisible(true);
+  assert(calls.length === 1, 'Two views must share one request');
+  await reply(pending.shift(),map(7,'100')); sync(7,'100');
+  const [a,b] = canvases.map(canvas => canvas.getBoundingClientRect());
+  if (innerWidth > 1100) assert(Math.abs(a.top-b.top) < 1 && b.left >= a.right, 'Wide layout must have two columns');
+  else assert(b.top >= a.bottom && Math.abs(a.left-b.left) < 1, 'Narrow layout must stack views');
+  assert(document.documentElement.scrollWidth <= innerWidth, 'Page overflows horizontally');
+  // A selection change clears both old plots, then publishes one shared response.
+  picker.value = '8'; picker.dispatchEvent(new Event('change'));
+  assert(canvases.every(canvas => !canvas.dataset.prn), 'Old satellite remains in one view');
+  await reply(pending.shift(),map(8,'100')); sync(8,'100');
+  view.update(status('200')); assert(calls.length === 3, 'Capture update fetched separately for each view');
+  await reply(pending.shift(),map(8,'200')); sync(8,'200');
+  // Late responses from a previous selection must never overwrite either plot.
+  picker.value = '7'; picker.dispatchEvent(new Event('change')); const stale = pending.shift();
+  picker.value = '8'; picker.dispatchEvent(new Event('change')); const current = pending.shift();
+  assert(stale.signal.aborted, 'Previous request not cancelled');
+  await reply(current,map(8,'200')); await reply(stale,map(7,'200')); sync(8,'200');
+  picker.value = '7'; picker.dispatchEvent(new Event('change'));
+  await reply(pending.shift(),{valid:false});
+  assert(canvases.every(canvas => !canvas.dataset.prn), 'Unavailable grid leaves a stale plot');
+  assert([...root.querySelectorAll('.caf-empty')].every(item => !item.hidden), 'Unavailable state missing');
+  view.update(null);
+  assert(picker.disabled && canvases.every(canvas => !canvas.dataset.prn), 'Reset not synchronized');
+  // Leave a rendered pair for screenshot QA.
+  view.update(status('300')); await reply(pending.shift(),map(7,'300')); sync(7,'300');
+  document.querySelector('#outcome').textContent = 'PASS: simultaneous 2D/3D, responsive columns, shared request/PRN/capture/axes/peak, live updates, stale responses and reset.';
+} catch(error) { document.querySelector('#outcome').textContent = 'FAIL: ' + error.stack; }
+</script>

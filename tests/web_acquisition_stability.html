@@ -1,0 +1,61 @@
+<!doctype html><meta charset="utf-8"><title>Acquisition stability regression</title>
+<link rel="stylesheet" href="../web/style.css">
+<style>#scroll {height:180px;overflow:auto}</style>
+<div id="scroll" class="workspace-table"><table><tbody id="results" data-acquisition-results><tr><td>Waiting</td></tr></tbody></table></div>
+<div id="space"></div><pre id="outcome">Running…</pre>
+<script type="module">
+import {createAcquisitionTable} from '../web/acquisition-table.js';
+import {createAcquisitionSearchSpace} from '../web/acquisition-search-space.js';
+try {
+  const assert = (value, message) => { if (!value) throw Error(message); };
+  const requested = [];
+  // Deterministic completed-map responses; test the real selector/refresh logic.
+  window.fetch = async url => { requested.push(url); return {ok:true, json:async () => ({valid:false})}; };
+  const body = document.querySelector('#results'), scroll = document.querySelector('#scroll');
+  const table = createAcquisitionTable(body), space = createAcquisitionSearchSpace(document.querySelector('#space'));
+  const profile = {'acquisition.first_prn':'1', 'acquisition.last_prn':'32'};
+  const result = (prn, confirmed = false, peak_ratio = 0.5) => ({prn, confirmed, peak_ratio, successes:confirmed ? 3 : 0, doppler_hz:100, code_phase_chips:12, epoch:'1', first_sample:'2400'});
+  const snapshot = (current_prn, results, searches = 0) => ({enabled:true, searching:true, current_prn, results, searches});
+  const update = async acquisition => {
+    table.update(acquisition, profile); space.update({run_id:'1', acquisition});
+    await new Promise(resolve => requestAnimationFrame(resolve));
+  };
+  await update(snapshot(20, []));
+  assert(body.children.length === 32, 'Reserve configured PRNs before any result');
+  const row = body.children[19], identity = row.dataset.satellite;
+  row.focus(); scroll.scrollTop = 470;
+  const top = scroll.scrollTop, offset = row.getBoundingClientRect().top;
+  const selection = getSelection(), range = document.createRange();
+  range.selectNodeContents(row.firstElementChild); selection.removeAllRanges(); selection.addRange(range);
+  await update(snapshot(20, [result(20),result(7),result(1)]));
+  const picker = document.querySelector('#space select'); picker.value = '7'; picker.dispatchEvent(new Event('change'));
+  const option = [...picker.options].find(item => item.value === '7');
+  space.setVisible(true);
+  for (let step = 0; step < 40; step++) {
+    await update(snapshot(step % 32 + 1, [result(32,true,9),result(20,step % 2 === 0,2),result(7,false,step % 2 ? 0.5 : 2),result(1)],step));
+    assert([...body.children].every((item,index) => Number(item.firstElementChild.textContent) === index + 1), 'Rows reordered by activity, result or progress');
+    assert(body.children[19] === row && row.dataset.satellite === identity, 'Satellite row replaced or moved');
+    assert(document.activeElement === row, 'Focused satellite changed');
+    assert(selection.toString() === '20', 'Satellite text selection lost');
+    assert(scroll.scrollTop === top && row.getBoundingClientRect().top === offset, 'Scroll moved away from satellite');
+    assert(picker.value === '7' && [...picker.options].find(item => item.value === '7') === option, 'Followed satellite or option replaced');
+    assert([...picker.options].map(item => item.value).join() === '1,7,20,32', 'Picker not in identity order');
+    assert(requested.at(-1) === '/api/v1/acquisition/search-space?prn=7', 'Search-space refresh followed a different satellite');
+  }
+  table.update({enabled:true,searching:false,results:[result(1),result(7,false,2),result(20,true,9)]},profile);
+  assert(body.children[0].children[1].textContent === 'Below threshold', 'Coarse rejection label');
+  assert(body.children[6].children[1].textContent === 'Rejected in confirmation', 'Confirmation rejection label');
+  assert(row.children[1].textContent === 'Confirmed' && row.classList.contains('acquisition-acquired'), 'Confirmed state');
+  table.update(snapshot(20,[result(20,true,9)]),profile);
+  assert(row.children[1].textContent === 'Acquiring' && row.classList.contains('acquisition-searching'), 'Active search state');
+  assert(row.children[4].textContent === '—', 'Previous metrics presented as the active search');
+  table.update({enabled:true,searching:false,results:[]},profile);
+  assert(row.children[1].textContent === 'Waiting for search', 'Waiting state');
+  // Session resets and configuration changes may remove identities; no stale rows.
+  table.update(null,profile); space.update(null);
+  assert(body.children.length === 1 && !body.firstElementChild.dataset.satellite && picker.disabled, 'Disconnect reset');
+  table.update(snapshot(7,[]),{'acquisition.first_prn':'7','acquisition.last_prn':'8'});
+  assert([...body.children].map(item => item.firstElementChild.textContent).join() === '7,8', 'Configured subset');
+  document.querySelector('#outcome').textContent = 'PASS: stable PRN order, persistent rows/options, focus, text selection, scroll, followed satellite and model states (40 live updates).';
+} catch(error) { document.querySelector('#outcome').textContent = 'FAIL: ' + error.stack; }
+</script>

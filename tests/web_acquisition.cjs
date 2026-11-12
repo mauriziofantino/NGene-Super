@@ -85,14 +85,25 @@ async function until(fn, label) {
     await page.screenshot({path: path.join(root, 'acquisition-no-detection.png'), fullPage: true});
     await page.locator('[data-search-space] select').selectOption('7');
     await until(async () => (await page.locator('.caf-details').first().textContent()).includes('GPS 7'), 'signal map selected');
-    await page.locator('[data-mode="3d"]').click();
-    await page.locator('[data-search-space] canvas[data-mode="3d"]').waitFor();
+    const assertViews = async stacked => {
+      const plots = page.locator('[data-search-space] canvas');
+      assert.equal(await plots.count(), 2);
+      await until(async () => (await plots.evaluateAll(nodes => nodes.every(node => node.dataset.prn === '7'))), 'both GPS 7 views');
+      const datasets = await plots.evaluateAll(nodes => nodes.map(node => ({...node.dataset})));
+      for (const field of ['prn','capture','codeRange','dopplerRange','peak'])
+        assert.equal(datasets[0][field], datasets[1][field], 'Shared ' + field);
+      const a = await plots.nth(0).boundingBox(), b = await plots.nth(1).boundingBox();
+      assert(a.width > 200 && b.width > 200);
+      assert(stacked ? b.y >= a.y + a.height : Math.abs(a.y - b.y) < 1 && b.x >= a.x + a.width);
+    };
+    await assertViews(false);
     await page.screenshot({path: path.join(root, 'acquisition-3d.png'), fullPage: true});
     await page.setViewportSize({width: 390, height: 844});
+    await assertViews(true);
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await page.screenshot({path: path.join(root, 'acquisition-mobile.png'), fullPage: true});
     await page.setViewportSize({width: 1440, height: 1000});
-    await page.locator('[data-mode="2d"]').click();
+    await assertViews(false);
     await page.screenshot({path: path.join(root, 'acquisition.png'), fullPage: true});
     await post('receiver/stop', {revision: config.revision});
     await until(async () => (await get('status')).state === 'stopped', 'stop');

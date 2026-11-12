@@ -8,13 +8,73 @@ The English GUI is included in the same project and C executable as the kernel. 
 
 The Acquisition view colours the active satellite search amber and completed confirmed
 acquisitions green. Its Completed search space panel selects the latest completed round
-per GPS PRN, including below-threshold results, in a top-down 2D heatmap or a fixed-camera
-3D surface. Values are coarse correlation power divided by the original coarse threshold
+per GPS PRN, including below-threshold results, in a simultaneous top-down 2D heatmap
+and fixed-camera 3D surface. Values are coarse correlation power divided by the original coarse threshold
 (1); the independent confirmation result is shown separately. Code phase spans 0..1023
 chips and the 16 original Doppler trials span -5000..5000 Hz. Display cells retain maxima
 from the original 2048/4096-bin grid, including when resized; detection uses the original
 unreduced double-precision values. Colour is logarithmic and 3D height is linear, with a
 marked threshold plane and an automatic height scale.
+
+Both compact plots share one satellite selector, one fetched map and one capture origin.
+They appear in two columns above 1100 px and stack below that width. Each plot is
+280 px high (260 px on phones). Both mark the same coarse peak with a white cross,
+use the same Doppler/code intervals and colour scale, and update together when the
+selected satellite or its completed capture changes. The old exclusive view buttons
+are removed. Loading, missing-grid, error and reset states clear both views together;
+late responses from a previous selection cannot replace the selected map.
+
+`node tests/web_acquisition_views.cjs` tests the production module/CSS at 1440 and
+390 px with deterministic maps: simultaneous views, layout, shared requests,
+PRN/capture/axes/peak, updates, stale responses, unavailable maps and disconnects.
+`tests/web_acquisition.cjs` also checks both plots and their layout against the
+embedded service with synthetic GPS input. These are UI/synthetic checks, not RF
+hardware evidence.
+Verified locally on 2026-11-12 (Linux x86_64, Node 24.19.0, Chrome headless):
+`web_acquisition_views.cjs`, `web_acquisition_stability.cjs` and the updated
+`web_acquisition.cjs` passed. The CMake build and `gps_acquisition_contract` passed.
+
+The satellite table keeps persistent rows in GPS L1 C/A PRN order. Configured PRNs
+have slots before their first result, so search activity, completion counters, peak
+ratios and confirmation outcomes cannot insert or promote rows above the satellite
+being read. Only changed cells and status colours update; keyboard focus and unchanged
+text selections survive live updates. Cells stay on one line to preserve row height
+and the user's scroll position, including on narrow screens.
+
+The Classic reference is `utility/ncursesApi.c`: its channel table uses
+`rowFirstChannelData + chIdx` and updates state/identity cells in place. EVO's current
+acquisition model represents satellites rather than assigned tracking channels, so
+GPS L1 C/A PRN is the stable identity here. No Classic scheduling priorities are
+transferred into display order.
+
+States use existing telemetry: `searching/current_prn` means Acquiring, `confirmed`
+means Confirmed, and a nonconfirmed result is Rejected in confirmation when
+`peak_ratio > 1`, otherwise Below threshold. Configured PRNs without a result are
+Waiting for search. Active searches show no previous-round numeric values; there is
+no per-stage progress telemetry to infer. Confirmed never means tracking lock.
+Completed-search options also retain their DOM identity and ascending PRN order;
+updates keep the user's selected PRN while it remains available. Disconnects, new
+runs and configuration changes may reset/remove unavailable identities.
+
+Deterministic browser regression (Node >=18 and Playwright on the test host):
+
+```sh
+node tests/web_acquisition_stability.cjs
+# Optional host settings: PLAYWRIGHT_MODULE, BROWSER_EXECUTABLE
+```
+
+The fixture uses production table/selector modules and CSS with synthetic status
+updates and stubbed search-map responses. It checks desktop (1440 px) and mobile
+(390 px): ordering, persistent rows/options, focus, text selection, scroll position,
+selected satellite requests, state labels and resets over 40 updates each. This is
+UI evidence, not physical RF validation. `tests/web_acquisition.cjs` separately checks
+the embedded GUI against the real receiver and synthetic GPS input.
+
+Verified locally on 2026-11-12 with Linux x86_64, Node 24.19.0 and Chrome headless:
+`web_acquisition_stability.cjs` passed both viewports; `web_acquisition.cjs` passed
+with `NGENE_EXECUTABLE=build-linux-bladerf/ngene`. The CMake build and CTest
+`gps_acquisition_contract`, `core_contracts`, and `controller_lifecycle` also passed.
+No physical RF hardware was used for these checks.
 
 `GET /api/v1/acquisition/search-space?prn=1..32` returns one copied completed map and
 capture epoch/sample provenance, or `valid: false` before a map is available. Maps stay

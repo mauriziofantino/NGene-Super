@@ -1,5 +1,6 @@
 /* Receiver workspace: navigation and presentation of controller snapshots only. */
 import {createAcquisitionSearchSpace} from './acquisition-search-space.js';
+import {createAcquisitionTable} from './acquisition-table.js';
 const ROUTES = {
   journey: {label: 'Overview', id: 'journeyView'},
   setup: {label: 'Receiver configuration', id: 'configurationView'},
@@ -197,6 +198,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   const tourCounter = tour.querySelector('[data-tour-counter]'), tourTitle = tour.querySelector('[data-tour-title]'), tourDescription = tour.querySelector('[data-tour-description]');
   const previous = tour.querySelector('[data-tour="previous"]'), next = tour.querySelector('[data-tour="next"]');
   let selected = 'rf', guided = false, tourIndex = 0;
+  const acquisitionTable = createAcquisitionTable(document.querySelector('[data-acquisition-results]'));
   const searchSpace = createAcquisitionSearchSpace(document.querySelector('[data-search-space]'));
   const text = (key, value) => {
     const string = String(value ?? UNAVAILABLE);
@@ -270,32 +272,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     text('acquisitionSearches', acquisition?.searches || '0');
     text('acquisitionGaps', acquisition?.gaps || '0');
     text('acquisitionSkipped', acquisition?.skipped_samples || '0');
-    const acquisitionBody = document.querySelector('[data-acquisition-results]');
-    const searchingPrn = acquisition?.enabled && acquisition.searching && acquisition.current_prn > 0 ? Number(acquisition.current_prn) : null;
-    if (acquisitionBody && (acquisition?.results?.length || searchingPrn !== null)) {
-      const results = (acquisition.results || []).filter(result => Number(result.prn) !== searchingPrn);
-      const resultRows = results.map(result => {
-        const row = document.createElement('tr');
-        if (result.confirmed) row.className = 'acquisition-acquired';
-        const values = [result.prn, result.confirmed ? 'Confirmed' : result.peak_ratio > 1 ? 'Rejected in confirmation' : 'Below threshold',
-          Number(result.doppler_hz).toFixed(1), Number(result.code_phase_chips).toFixed(4), Number(result.peak_ratio).toFixed(2), `${result.successes}/4`, `${result.epoch} / ${result.first_sample}`];
-        for (const value of values) { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); }
-        return row;
-      });
-      if (searchingPrn !== null) {
-        const row = document.createElement('tr');
-        row.className = 'acquisition-searching';
-        for (const value of [searchingPrn, 'Acquiring', '—', '—', '—', '—', '—']) {
-          const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
-        }
-        resultRows.unshift(row);
-      }
-      acquisitionBody.replaceChildren(...resultRows);
-    } else if (acquisitionBody) {
-      const row = document.createElement('tr'), cell = document.createElement('td');
-      cell.colSpan = 7; cell.textContent = acquisition?.enabled ? 'Waiting for completed satellite searches.' : 'Enable acquisition in settings, apply the profile and start reception.';
-      row.append(cell); acquisitionBody.replaceChildren(row);
-    }
+    acquisitionTable.update(acquisition, profile);
     const acquisitionMessage = document.querySelector('[data-acquisition-message]');
     if (acquisitionMessage) acquisitionMessage.textContent = acquisition?.message || '';
     const configuredSource = profile['frontend.type'];
