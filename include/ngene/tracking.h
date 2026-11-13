@@ -1,0 +1,54 @@
+/** @file tracking.h @brief Replaceable tracking strategies on shared native I/Q windows. */
+#ifndef NGENE_TRACKING_H
+#define NGENE_TRACKING_H
+#include "ngene/acquisition.h"
+#define NG_TRACKING_MAX_TAPS 33u
+
+/** Frozen per-run numerical and correlator configuration; no automatic precision changes. */
+typedef struct {
+    int enabled;         /**< Track confirmed acquisition results when nonzero. */
+    int squareCarrier;   /**< Explicit approximate square carrier; precise is default. */
+    int xorCorrelation;  /**< Exact sign XOR, independent of carrier mode. */
+    unsigned tapCount;   /**< Odd count 3..33, equally spaced around prompt. */
+    double spacingChips; /**< Adjacent tap spacing; E/L are adjacent to prompt. */
+} TNgTrackingConfig;
+
+/** Completed coherent integration, in native ADC units per sample. */
+typedef struct {
+    unsigned prn;           /**< Zero while unassigned. */
+    unsigned constellation; /**< 1 GPS, 2 Galileo E1-B. */
+    int active;             /**< NCO and loop state valid in current epoch. */
+    int pll;              /**< FLL convergence passed; does not establish navigation eligibility. */
+    uint64_t epoch;       /**< Continuity generation. */
+    uint64_t firstSample; /**< Integration start. */
+    uint64_t endSample;   /**< Exclusive integration end. */
+    uint64_t integrations;               /**< Completed integrations since seed. */
+    double dopplerHz;                    /**< Physical Doppler excluding IF. */
+    double codeRateHz;                   /**< Estimated chips per second. */
+    double dllError;                     /**< Classic normalized power discriminator. */
+    double carrierError;                 /**< Classic Costas discriminator in cycles. */
+    unsigned tapCount;                   /**< Valid entries of offset/i/q. */
+    double offset[NG_TRACKING_MAX_TAPS]; /**< Replica delay in chips. */
+    double i[NG_TRACKING_MAX_TAPS];      /**< Mean coherent I. */
+    double q[NG_TRACKING_MAX_TAPS];      /**< Mean coherent Q. */
+} TNgTrackingSnapshot;
+/** Opaque private tracking state; no shared mutable DSP buffers. */
+typedef struct TNgTracking TNgTracking;
+/** Initialize precise carrier/products and three taps at -0.5,0,+0.5 chips. */
+void NgTrackingDefaults(TNgTrackingConfig *config);
+/** Reject unsupported modes, count and spacing; NG_OK or NG_ERROR. */
+int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error);
+/** Allocate independent channel resources before reception. constellation is 1 or 2.
+ * No sample memory is retained; caller serializes process/seed/read/destroy. */
+int NgTrackingCreate(const TNgTrackingConfig *config, const TNgStreamInfo *stream,
+                     unsigned constellation, TNgTracking **out, TNgError *error);
+/** Seed from a confirmed result. Propagate code phase from capture origin to next window.
+ * Stale epochs and discontinuities are rejected by Process, requiring a new acquisition. */
+int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TNgError *error);
+/** Consume an immutable common-ring window synchronously with no allocation or I/O. */
+int NgTrackingProcess(TNgTracking *tracking, const TNgIqView *window, TNgError *error);
+/** Copy the latest complete integration; single owner only. */
+void NgTrackingRead(const TNgTracking *tracking, TNgTrackingSnapshot *snapshot);
+/** Release private state; accepts NULL. */
+void NgTrackingDestroy(TNgTracking *tracking);
+#endif

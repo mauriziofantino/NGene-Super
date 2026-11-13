@@ -1,6 +1,6 @@
 # Project status and implementation principles
 
-Last reviewed: 2026-11-12  
+Last reviewed: 2026-11-13
 Repository baseline: `dev` at `e59627f` (`BladeRF bug is fixed`)
 
 This is the concise, current project handoff for contributors. The roadmap contains
@@ -25,7 +25,9 @@ selector for results and synchronized search-space views. Synthetic service/brow
 validation and the shared wrong-Doppler noise policy are established; no recorded
 RF replay/live result is established. See [the API scope and limits](GALILEO_ACQUISITION.md).
 
-This is **not yet an end-to-end GNSS receiver**: tracking, navigation-message decoding,
+A first GPS/Galileo tracking loop integration now follows confirmed acquisition in CLI and service, with a replaceable tracking library, configurable multi-tap correlation and browser delay/time plots. See [tracking scope and validation](TRACKING.md); complete Classic lock supervision, HOLDOVER and fast reacquisition remain pending.
+
+This is **not yet an end-to-end GNSS receiver**: navigation-message decoding,
 observables, and PVT/PNT are not integrated. SBAS acquisition and multibit
 correlation kernels are also not established as implemented capabilities. In
 particular, native SC16 Q11 transport preserves its ADC precision, but does not mean

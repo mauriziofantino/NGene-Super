@@ -93,3 +93,21 @@ function Assert-VsWarningPolicy {
         }
     }
 }
+
+# Fail before dependency installation when the native VS generator cannot use an instance.
+function Assert-VisualStudioReady {
+# CMake requires an instance registered as complete by Visual Studio Installer.
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
+    $readyInstances = @(& $vswhere -products '*' -property installationPath)
+    if ($LASTEXITCODE -ne 0 -or $readyInstances.Count -eq 0) {
+        $knownInstances = @(& $vswhere -all -products '*' -property installationPath)
+        if ($knownInstances.Count -ne 0) {
+            throw ('Visual Studio Installer reports no complete, launchable Visual Studio instance. ' +
+                   'Repair or complete the installation at ' + ($knownInstances -join ', ') +
+                   ', then rerun this script.')
+        }
+        throw 'Visual Studio Installer reports no installed Visual Studio instance. Install Visual Studio with C++ build tools, then rerun this script.'
+    }
+}
+}

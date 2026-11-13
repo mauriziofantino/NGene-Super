@@ -56,3 +56,11 @@ and grids are retained; only its confirmation noise probes change to wrong Doppl
 The Galileo channel API and controller/CLI/INI/GUI integration are implemented.
 Separate result/map archives and a Signal selector mirror the GPS workflow. Full PRN
 coverage, acquisition ambiguity tests and RF validation remain pending.
+
+## Tracking loops and multi-correlators  -  2026-11-13
+
+Classic DLL/FLL/PLL recurrences and coefficients are adapted behind the independent
+NGene::Tracking library. Ring/controller composition, native I/Q arithmetic, code
+epochs, sign conventions, extra taps and remaining supervisor migration are
+documented in [TRACKING.md](TRACKING.md). This is not a complete Classic tracking
+supervisor or RF-qualified receiver.

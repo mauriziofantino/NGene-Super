@@ -171,6 +171,7 @@ export function createAcquisitionSearchSpace(root) {
       }
       picker.disabled = !results.length;
       if (ids.has(previous)) picker.value = previous;
+      if (results.length) selections.set(status?.signal || 'gps', picker.value);
       refresh();
     }
   };

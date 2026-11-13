@@ -38,6 +38,8 @@ $null = New-Item -Path $scripts -ItemType Directory -Force
 Copy-Item -LiteralPath $entry -Destination (Join-Path $scripts 'build-windows.ps1')
 Copy-Item -LiteralPath (Join-Path $Source 'scripts/windows-tools.ps1') -Destination (Join-Path $scripts 'windows-tools.ps1')
 $mock = @'
+# Orchestration fixture supplies tools; no real Visual Studio installation is exercised.
+function Assert-VisualStudioReady {}
 function Resolve-CMakeTools {
     return [pscustomobject]@{
         cmake = (Join-Path $PSScriptRoot 'cmake.ps1')

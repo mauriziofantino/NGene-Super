@@ -190,7 +190,7 @@ const settingsTopics = {
   source: ['Front end', 'Choose the live SDR or recorded input, sample format, tuning and gains.', 'Before start'],
   receiver: ['Receiver & signals', 'Configure execution and common stream buffers. GNSS processing modules are unavailable.', 'Before start'],
   acquisition: ['Acquisition', 'GPS L1 C/A search, refinement and independent 3-of-4 confirmation.', 'Before start'],
-  tracking: ['Tracking', 'Configure coherent integration, code and carrier loops, lock criteria and correlators.', 'Module unavailable'],
+  tracking: ['Tracking', 'Configure independent carrier/product modes and multi-correlator geometry.', 'Before start'],
   navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
   recording: ['Capture to disk', 'Choose a name, receiver-side folder and pre/post capture point.', 'Before start'],
   analysis: ['Diagnostic processing', 'NGene computes PSD and histograms. Apply these settings during reception.', 'Runtime'],

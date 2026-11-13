@@ -59,6 +59,7 @@ if ($Action -eq 'Test') {
 }
 $tools = Resolve-CMakeTools
 Write-Host "Using CMake $($tools.version): $($tools.cmake)"
+Assert-VisualStudioReady
 $logs = Join-Path $build 'logs'
 $null = New-Item -ItemType Directory -Path $logs -Force
 # Presets choose the installed Visual Studio automatically. Do not inherit a

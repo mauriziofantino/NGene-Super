@@ -165,7 +165,7 @@ histogram_update_hz=20
     };
     const configurationTopics = ['source', 'receiver', 'acquisition', 'tracking', 'navigation', 'recording', 'analysis', 'display', 'profile'];
     const referenceTopics = ['receiver', 'acquisition', 'tracking', 'navigation'];
-    const referenceOnlyTopics = ['tracking', 'navigation'];
+    const referenceOnlyTopics = ['navigation'];
     const referencesDisabled = async () => {
       assert(await page.locator('[data-reference-param]').count() > 30, 'Original receiver configuration exposes meaningful GNSS parameters');
       assert.deepEqual(await page.locator('[data-reference-param]').evaluateAll(controls => controls
@@ -180,7 +180,7 @@ histogram_update_hz=20
         assert.equal(await page.locator(`[data-receiver-settings="${reference}"]`).isVisible(), reference === topic,
           `Only the selected GNSS configuration section is displayed (${topic}/${reference})`);
       }
-      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'recording'].includes(topic),
+      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'tracking', 'recording'].includes(topic),
         'Only topics with real receiver parameters expose the operational form');
       await referencesDisabled();
     };
@@ -230,7 +230,8 @@ histogram_update_hz=20
     for (const key of ['acquisition', 'tracking', 'navigation', 'pvt']) {
       await select(key);
       const text = await page.locator(`#${views[key]}`).innerText();
-      assert.match(text, /not integrated|not attached|unavailable|not available/i, `${key} must explain unavailable processing`);
+      if (key === 'tracking') assert.match(text, /No completed tracking integrations/);
+      else assert.match(text, /not integrated|not attached|unavailable|not available/i, `${key} must explain unavailable processing`);
       assert.doesNotMatch(text, /(?:GPS|GAL|SBAS)\s*(?:PRN\s*)?\d{2}\b|\b(?:latitude|longitude)\s*[:=]\s*-?\d/i,
         `${key} must not present invented tracked satellites or a synthetic fix`);
       const disabled = page.locator(`#${views[key]} button:disabled`);
@@ -297,7 +298,7 @@ histogram_update_hz=20
     const referenceNames = await page.locator('[data-reference-param]').evaluateAll(controls => controls.map(control => control.dataset.referenceParam));
     for (const name of referenceNames) assert(!applied.ini.includes(`${name}=`), `Reference parameter ${name} must never enter the INI`);
     assert.match(applied.ini, /^\[acquisition\]/m, 'Integrated acquisition parameters remain in the saved profile');
-    assert.doesNotMatch(applied.ini, /^\[(?:tracking|navigation|pvt)\]/m, 'Unimplemented modules do not enter the saved operational profile');
+    assert.doesNotMatch(applied.ini, /^\[(?:navigation|pvt)\]/m, 'Unimplemented modules do not enter the saved operational profile');
     assert.equal(await page.locator('#configForm [aria-invalid="true"]').count(), 0, 'Disabled GNSS references must not introduce hidden form validation errors');
 
     // Real file replay drives RF, while no GNSS processing result is manufactured.

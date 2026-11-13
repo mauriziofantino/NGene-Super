@@ -2,6 +2,7 @@
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const {spawn} = require('node:child_process');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const testTracking = process.env.NGENE_TEST_TRACKING === '1';
 const testGalileo = process.env.NGENE_TEST_GALILEO === '1';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn, label) {
@@ -36,6 +37,7 @@ async function until(fn, label) {
   const configPath = path.join(root, 'gps.ini');
   fs.writeFileSync(configPath, `[frontend]\ntype=file\nsample_rate_hz=2400000\ncenter_frequency_hz=1575420000\nsignal_frequency_hz=1575420000\n[receiver]\nrun_seconds=0\n[replay]\npath=${input}\nrealtime=true\nloop=true\n[acquisition]\nenabled=true\nfirst_prn=7\nlast_prn=8\nsquare_carrier=false\nxor_correlation=true\n`);
   if (testGalileo) fs.appendFileSync(configPath, '[galileo_acquisition]\nenabled=false\nfirst_prn=7\nlast_prn=8\nsquare_carrier=false\nxor_correlation=true\n');
+  if (testTracking) fs.appendFileSync(configPath, '[tracking]\nenabled=true\ntap_count=9\nspacing_chips=0.25\nsquare_carrier=false\nxor_correlation=true\n');
   const port = Number(process.env.NGENE_TEST_PORT || 19528), base = `http://127.0.0.1:${port}`;
   const child = spawn(path.resolve(process.env.NGENE_EXECUTABLE || 'build/ngene'),
     ['--web', '--port', String(port), '--config', configPath, '--output-dir', path.join(root, 'profile')],
@@ -82,7 +84,10 @@ async function until(fn, label) {
       const status = await get('status'); return status.acquisition?.results.find(result => result.confirmed);
     }, 'GPS confirmation').catch(async error => { throw Error(error.message + JSON.stringify(await get('status'))); });
     assert.equal(found.prn, 7); assert(Math.abs(found.doppler_hz - 1234) < 35);
-    assert(Math.abs(found.code_phase_chips - 231.3) < 0.6); assert.equal(found.successes, 3);
+    const expectedPhase = (231.3 + Number(found.first_sample) / 2400000 * 1023000 * (1 + 1234 / 1575420000)) % 1023;
+    const phaseError = Math.abs(found.code_phase_chips - expectedPhase);
+    assert(Math.min(phaseError,1023-phaseError) < 0.6, JSON.stringify({found,expectedPhase}));
+    assert.equal(found.successes, 3);
     await page.locator('.workspace-nav-item[data-view="acquisition"]').click();
     await until(async () => (await page.locator('[data-acquisition-results]').textContent()).includes('Confirmed'), 'result table');
     await until(async () => (await page.locator('.caf-details').first().textContent()).includes('GPS 7'), 'completed search space');
@@ -143,7 +148,22 @@ async function until(fn, label) {
       assert.equal(await page.getByLabel('Search space satellite',{exact:true}).inputValue(),'8');
       await page.getByLabel('Search space satellite',{exact:true}).selectOption('7');
     }
-    await post('receiver/stop', {revision: config.revision});
+    if (testTracking) {
+      const tracked = await until(async () => (await get('status')).tracking?.find(t => t.prn === 7 && t.active && Number(t.integrations) > 2), 'tracking integrations');
+      assert.equal(tracked.taps.length,9);
+      assert(Math.hypot(tracked.taps[4].i,tracked.taps[4].q)>0);
+      await page.locator('.workspace-nav-item[data-view="tracking"]').click();
+      await until(async () => await page.locator('[data-tracking-shape] circle').count()===9,'nine measured tap points');
+      await until(async () => await page.locator('[data-tracking-history] circle').count()>=9,'signal time history');
+      assert.match(await page.locator('[data-tracking-detail]').textContent(), /Doppler/);
+      await page.locator('[data-tracking-component]').selectOption('q');
+      await until(async () => await page.locator('[data-tracking-shape] circle').count()===9,'Q tap points after replay discontinuity');
+      await page.screenshot({path:path.join(root,'tracking.png'),fullPage:true});
+      await page.setViewportSize({width:390,height:844});
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2));
+      await page.setViewportSize({width:1440,height:1000});
+      await page.locator('.workspace-nav-item[data-view="acquisition"]').click();
+    }    await post('receiver/stop', {revision: config.revision});
     await until(async () => (await get('status')).state === 'stopped', 'stop');
     const stoppedSpace = await get('acquisition/search-space?prn=7');
     assert.equal(stoppedSpace.valid, true, 'Completed maps survive receiver stop');
@@ -161,13 +181,15 @@ async function until(fn, label) {
       await until(async () => (await get('config')).revision !== config.revision, 'Galileo-only profile');
       config = await get('config');
       assert.match(config.ini, /\[acquisition\]\s+enabled=false/);
+      const previousRun = (await get('status')).run_id;
       await post('receiver/start',{revision:config.revision});
-      await until(async () => (await get('status')).galileo_acquisition.results.some(result => result.confirmed), 'Galileo-only confirmation');
+      await until(async () => { const status=await get('status'); return status.state==='running' && status.run_id!==previousRun && status.acquisition.enabled===false; }, 'new Galileo-only run initialized');
+      await until(async () => (await get('status')).galileo_acquisition.results.some(result => result.confirmed), 'Galileo-only confirmation').catch(async error => { throw Error(error.message+JSON.stringify(await get('status'))); });
       assert.equal((await get('status')).acquisition.enabled,false);
       assert.deepEqual((await get('status')).acquisition.results,[]);
       await page.locator('.workspace-nav-item[data-view="acquisition"]').click();
       await page.getByLabel('Acquisition signal',{exact:true}).selectOption('galileo');
-      await until(async () => page.locator('[data-search-space] canvas').evaluateAll(nodes => nodes.every(node => node.dataset.signal === 'galileo')), 'Galileo-only plots');
+      await until(async () => page.locator('[data-search-space] canvas').evaluateAll(nodes => nodes.every(node => node.dataset.signal === 'galileo')), 'Galileo-only plots').catch(async error => { throw Error(error.message + JSON.stringify({errors,details:await page.locator('.caf-details').first().textContent(),picker:await page.getByLabel('Search space satellite',{exact:true}).inputValue(),canvases:await page.locator('[data-search-space] canvas').evaluateAll(nodes=>nodes.map(n=>({...n.dataset})))})); });
       await post('receiver/stop',{revision:config.revision});
       await until(async () => (await get('status')).state === 'stopped','Galileo-only stop');
 

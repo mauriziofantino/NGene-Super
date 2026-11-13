@@ -632,6 +632,39 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     TNgAnalysisSnapshot telemetry;
     NgControlSnapshot(control, &status);
     /* Deliberate deep copy before telemetry. Snapshot arrays are values, not borrowed pointers. */
+    {
+        unsigned channelIndex;
+        cJSON *channels = cJSON_AddArrayToObject(object, "tracking");
+        for (channelIndex = 0; channelIndex < 64; ++channelIndex) {
+            unsigned tap;
+            const TNgTrackingSnapshot *t = &status.tracking[channelIndex];
+            cJSON *row, *taps;
+            if (!t->prn) continue;
+            row = cJSON_CreateObject();
+            cJSON_AddItemToArray(channels, row);
+            Number(row, "prn", t->prn);
+            Number(row, "constellation", t->constellation);
+            cJSON_AddBoolToObject(row, "active", t->active);
+            cJSON_AddBoolToObject(row, "pll", t->pll);
+            Counter(row, "epoch", t->epoch);
+            Counter(row, "first_sample", t->firstSample);
+            Counter(row, "end_sample", t->endSample);
+            Counter(row, "integrations", t->integrations);
+            Number(row, "doppler_hz", t->dopplerHz);
+            Number(row, "code_rate_hz", t->codeRateHz);
+            Number(row, "dll_error", t->dllError);
+            Number(row, "carrier_error", t->carrierError);
+            Number(row, "sample_rate_hz", status.actualSampleRateHz);
+            taps = cJSON_AddArrayToObject(row, "taps");
+            for (tap = 0; tap < t->tapCount; ++tap) {
+                cJSON *point = cJSON_CreateObject();
+                Number(point, "offset_chips", t->offset[tap]);
+                Number(point, "i", t->i[tap]);
+                Number(point, "q", t->q[tap]);
+                cJSON_AddItemToArray(taps, point);
+            }
+        }
+    }
     telemetry = status.analysis;
     cJSON_AddItemToObject(object, "analysis", AnalysisJson(&telemetry, mask));
     {
@@ -1360,6 +1393,7 @@ static int Handle(struct mg_connection *connection, void *context)
             cJSON_AddBoolToObject(reply, "sige", NgFrontendAvailable(NG_FRONTEND_SIGE));
             cJSON_AddBoolToObject(reply, "single_source", 1);
             cJSON_AddBoolToObject(reply, "periodogram", 1);
+            cJSON_AddBoolToObject(reply, "tracking", 1);
             cJSON_AddBoolToObject(reply, "gps_acquisition", 1);
             cJSON_AddBoolToObject(reply, "galileo_acquisition", 1);
             String(reply, "fft_backend", NgFftBackend());

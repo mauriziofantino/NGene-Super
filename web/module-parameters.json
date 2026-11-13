@@ -1,13 +1,20 @@
 {
   "version": 1,
   "modules": [
+  {"id":"classic-tracking","rules":[],"groups":[{"title":"Tracking correlators","topic":"tracking","note":"GPS 1 ms / Galileo E1-B BOC(1,1) 4 ms. Extra taps observe the shape; DLL uses the adjacent E/L pair. Square carrier is approximate and introduces harmonic images.","fields":[
+    {"key":"tracking.enabled","label":"Track confirmed acquisitions","type":"select","default":"true","options":[{"value":"true","label":"On"},{"value":"false","label":"Off"}]},
+    {"key":"tracking.square_carrier","label":"Carrier rotation","type":"select","default":"false","options":[{"value":"false","label":"Precise sinusoidal"},{"value":"true","label":"Fast square (experimental)"}]},
+    {"key":"tracking.xor_correlation","label":"Correlation product","type":"select","default":"false","options":[{"value":"false","label":"Precise SIMD products"},{"value":"true","label":"Fast exact sign XOR"}]},
+    {"key":"tracking.tap_count","label":"Tap count (odd)","type":"number","default":3,"integer":true,"min":3,"max":33,"step":2},
+    {"key":"tracking.spacing_chips","label":"Adjacent tap spacing (chips)","type":"number","default":0.5,"min":0.001,"max":1,"step":0.01}
+  ]}]},
   {
     "id": "gps-l1-ca-classic",
     "groups": [
       {
         "title": "GPS acquisition",
         "topic": "acquisition",
-        "note": "GPS L1 C/A: coarse \u00b15 kHz / 667 Hz, eight 1-ms periods, Doppler refinement 10 Hz, native-sample code refinement, confirmation 3 of 4. Tracking is not integrated.",
+        "note": "GPS L1 C/A: coarse \u00b15 kHz / 667 Hz, eight 1-ms periods, Doppler refinement 10 Hz, native-sample code refinement, confirmation 3 of 4. Tracking has separate operational settings.",
         "fields": [
           {
             "key": "acquisition.enabled",

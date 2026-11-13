@@ -58,6 +58,7 @@ void NgConfigDefaults(TNgConfig *config)
     config->frontend = NG_FRONTEND_FILE;
     NgAnalysisDefaults(&config->analysis);
     NgAcquisitionDefaults(&config->acquisition);
+    NgTrackingDefaults(&config->tracking);
     /* Generic capture profiles remain capture-only unless explicitly enabled. */
     config->acquisition.enabled = 0;
     NgAcquisitionDefaults(&config->galileoAcquisition);
@@ -229,6 +230,11 @@ static int CopyText(char *out, size_t capacity, const char *text)
 static int Apply(TNgConfig *c, const char *key, const char *value)
 {
     uint64_t n;
+    BOOL_KEY("tracking.enabled", tracking.enabled)
+    BOOL_KEY("tracking.square_carrier", tracking.squareCarrier)
+    BOOL_KEY("tracking.xor_correlation", tracking.xorCorrelation)
+    UINT_KEY("tracking.tap_count", tracking.tapCount)
+    REAL_KEY("tracking.spacing_chips", tracking.spacingChips)
     REAL_KEY("acquisition.pfa", acquisition.falseAlarmProbability)
     BOOL_KEY("acquisition.enabled", acquisition.enabled)
     UINT_KEY("acquisition.first_prn", acquisition.firstPrn)
@@ -499,7 +505,7 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
                  strcmp(section, "receiver") != 0 && strcmp(section, "recording") != 0 &&
                  strcmp(section, "replay") != 0 && strcmp(section, "analysis") != 0 &&
                  strcmp(section, "rtlsdr") != 0 && strcmp(section, "bladerf") != 0 &&
-                 strcmp(section, "acquisition") != 0 && strcmp(section, "galileo_acquisition") != 0)) {
+                 strcmp(section, "tracking") != 0 && strcmp(section, "acquisition") != 0 && strcmp(section, "galileo_acquisition") != 0)) {
                 return NgFail(error, "Unknown section at line %zu", number);
             }
             continue;
@@ -566,6 +572,7 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     }
     if (NgAcquisitionValidate(&config->galileoAcquisition, error) != NG_OK)
         return NG_ERROR;
+    if (NgTrackingValidate(&config->tracking, error) != NG_OK) return NG_ERROR;
     if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK)
         return NG_ERROR;
     if ((config->acquisition.enabled || config->galileoAcquisition.enabled) && !config->recordOnly &&
@@ -759,6 +766,9 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     fprintf(output, "\n[receiver]\nmode=%s\nrun_seconds=%.17g\nidle_timeout_ms=%u\n",
             (config->recordOnly) != 0 ? "record" : "capture", config->runSeconds,
             config->idleTimeoutMs);
+    fprintf(output, "\n[tracking]\nenabled=%s\nsquare_carrier=%s\nxor_correlation=%s\ntap_count=%u\nspacing_chips=%.17g\n",
+        config->tracking.enabled ? "true" : "false", config->tracking.squareCarrier ? "true" : "false",
+        config->tracking.xorCorrelation ? "true" : "false", config->tracking.tapCount, config->tracking.spacingChips);
     fprintf(output,
             "\n[acquisition]\nenabled=%s\nfirst_prn=%u\nlast_prn=%u\n"
             "square_carrier=%s\nxor_correlation=%s\npfa=%.17g\n",

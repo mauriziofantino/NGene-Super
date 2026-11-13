@@ -32,7 +32,7 @@ The engine is the sole logical consumer of the GNSS ring: all channels receive t
 The [frontend stream decision record](FRONTEND_STREAM_DECISIONS.md) records completed
 Windows SiGe USB checks and current stream/display contracts. The [DSP options study](DSP_OPTIONS_PLAN.md)
 defines the next kernel work; its approximate arithmetic candidates remain experiments.
-Tracking, navigation decoding, observables and PVT/PNT are not integrated. The increments
+GPS/Galileo DLL/FLL/PLL and multi-correlator tracking are integrated with the limits in [TRACKING.md](TRACKING.md). Complete tracking supervision, navigation decoding, observables and PVT/PNT remain pending. The increments
 below retain their platform and RF validation requirements even where adapter or replay
 support exists.
 

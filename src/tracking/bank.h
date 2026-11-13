@@ -1,0 +1,15 @@
+/** @file bank.h @brief Ordered shared-stream acquisition and tracking composition. */
+#ifndef NG_TRACKING_BANK_H
+#define NG_TRACKING_BANK_H
+#include "ngene/tracking.h"
+/** Receiver-owned composite registration. */
+typedef struct TNgTrackingBank TNgTrackingBank;
+/** Prepare private workspaces and wrap the borrowed acquisition registration. */
+int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *stream,
+                         TNgAcquisition *acquisition, TNgChannel *channel, TNgTrackingBank **out,
+                         TNgError *error);
+/** Copy latest telemetry on the receiver thread only. */
+void NgTrackingBankRead(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[32]);
+/** Release tracking before destroying acquisition; accepts NULL. */
+void NgTrackingBankDestroy(TNgTrackingBank *bank);
+#endif

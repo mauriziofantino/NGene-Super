@@ -59,19 +59,10 @@ function acquisitionMarkup() {
 }
 
 function trackingMarkup() {
-  return heading('STAGE 04 / TRACKING', 'Inspect channels, correlators and loops',
-    'Follow each signal from pull-in to carrier and code lock. Channel lock, navigation readiness and use in PVT are separate states.',
-    `${badge()}${settingsButton('tracking', 'Tracking settings')}${button('acquisition', 'Back to acquisition')}${button('navigation', 'Navigation data →')}`) +
-    `<div class="workspace-kpis">${kpi('TRACKING CHANNELS', '—', 'No channel telemetry')}${kpi('CARRIER / CODE LOCK', '—', 'No lock estimates')}${kpi('VALID OBSERVABLES', '—', 'No measurement epochs')}${kpi('USED IN PVT', '—', 'No solution available')}</div>` +
-    `<div class="workspace-grid workspace-grid-wide">${card('Receiver channels', 'Select a channel to inspect its signal and measurement state.',
-      table(['Satellite / signal', 'Stage', 'C/N₀ (dB-Hz)', 'Doppler (Hz)', 'Navigation', 'In PVT'], 'No tracking channels available. No tracking module is integrated.'), badge())}${card('Selected channel', 'Channel details will follow the selected signal.',
-      empty('No channel selected', 'Select an active tracking channel when channel telemetry is available.'), badge())}</div>` +
-    `<div class="workspace-grid">${card('Early / prompt / late correlators', 'In-phase and quadrature values for one coherent integration epoch.',
-      empty('No correlator samples', 'Correlator plots require valid channel samples; empty space does not indicate zero signal.'))}${card('Loop and synchronization state', 'Measured estimates and flags from the selected channel.', rows([
-        ['Carrier loop / code loop', UNAVAILABLE], ['Carrier lock / code lock', UNAVAILABLE], ['Bit / frame synchronization', UNAVAILABLE], ['C/N₀ estimate and validity', UNAVAILABLE], ['Integration epoch', UNAVAILABLE], ['Measurement eligibility', UNAVAILABLE]
-      ]))}</div>` + route('acquisition', 'navigation');
+  return heading('GNSS / CHANNELS', 'Tracking', 'Carrier and code loops with coherent multi-correlator observations.', settingsButton('tracking', 'Tracking settings')) +
+    '<section class="card tracking-panel"><div class="caf-controls"><label>Channel <select data-tracking-channel aria-label="Tracking channel"></select></label><label>Component <select data-tracking-component aria-label="Correlator component"><option value="magnitude">Magnitude</option><option value="i">I</option><option value="q">Q</option></select></label></div><p data-tracking-detail>No completed tracking integrations.</p><div data-tracking-table></div></section>' +
+    '<div class="workspace-grid"><section class="card tracking-panel"><h2>Correlation versus code delay</h2><p>Measured tap points; dashed GPS triangle is an ideal reference. Galileo BOC has multiple lobes.</p><svg data-tracking-shape viewBox="0 0 640 260" role="img" aria-label="Correlation versus code delay"></svg></section><section class="card tracking-panel"><h2>Correlators versus signal time</h2><p>Bounded history of received telemetry; lines break across discontinuities.</p><svg data-tracking-history viewBox="0 0 640 260" role="img" aria-label="Correlation history in signal seconds"></svg></section></div>' + route('acquisition', 'navigation');
 }
-
 function navigationMarkup() {
   return heading('STAGE 05 / NAVIGATION', 'Decode time and navigation data',
     'Keep message synchronization, satellite health, ephemerides and observables visible before a position is computed.',
@@ -271,6 +262,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     acquisitionSnapshot = snapshot;
     const {status, capabilities, profile = {}, draft = {}, revision, dirty = false, connected = false} = snapshot;
     const live = connected && status ? status : null;
+    updateTracking(live?.tracking || [], live?.run_id);
     const system = signalPicker.value;
     const signalName = system === 'galileo' ? 'Galileo' : 'GPS';
     const acquisition = system === 'galileo' ? live?.galileo_acquisition : live?.acquisition;
@@ -317,6 +309,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       'stage-setup': dirty ? 'Unsaved changes' : revision ? `Profile r${revision}` : 'Waiting for profile',
       'stage-rf': state,
       'stage-acquisition': acquisition?.enabled ? (acquisition.searching ? `Searching ${signalName}` : `${signalName} enabled`) : `${signalName} available / disabled`,
+      'stage-tracking': live?.tracking?.some(t => t.active) ? 'Tracking observations' : 'Waiting for confirmed acquisitions',
       'stage-record': record
     };
     for (const [key, value] of Object.entries(values)) text(key, value);
@@ -330,4 +323,93 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   update();
   fromHash();
   return {setView: show, update, get view() { return selected; }};
+}
+
+const trackingHistory = new Map();
+let trackingRun;
+function updateTracking(channels, run) {
+  const picker = document.querySelector('[data-tracking-channel]');
+  if (!picker) return;
+  if (trackingRun !== run) { trackingHistory.clear(); trackingRun = run; }
+  const key = t => `${t.constellation}:${t.prn}`;
+  const table = document.querySelector('[data-tracking-table]');
+  table.replaceChildren();
+  for (const t of channels) {
+    const row = document.createElement('p');
+    row.textContent = `${t.constellation === 1 ? 'GPS' : 'Galileo'} ${t.prn}  -  ${!t.active ? 'Invalidated' : t.pll ? 'PLL / DLL running' : 'FLL / DLL pull-in'}  -  ${t.doppler_hz.toFixed(2)} Hz`;
+    table.append(row);
+  }
+  const selected = picker.value;
+  picker.replaceChildren(...channels.map(t => {
+    const option = document.createElement('option'); option.value = key(t);
+    option.textContent = `${t.constellation === 1 ? 'GPS' : 'Galileo'} ${t.prn}`; return option;
+  }));
+  if (channels.some(t => key(t) === selected)) picker.value = selected;
+  for (const t of channels) {
+    if (!t.active || !(Number(t.integrations) > 0)) continue;
+    const history = trackingHistory.get(key(t)) || [];
+    const previous = history.at(-1);
+    if (!previous || previous.epoch !== t.epoch || previous.end_sample !== t.end_sample) {
+      history.push(t); if (history.length > 240) history.shift();
+    }
+    trackingHistory.set(key(t), history);
+  }
+  const render = () => renderTracking(channels.find(t => key(t) === picker.value), trackingHistory.get(picker.value) || []);
+  picker.onchange = render;
+  document.querySelector('[data-tracking-component]').onchange = render;
+  render();
+}
+function renderTracking(t, history) {
+  const shape = document.querySelector('[data-tracking-shape]');
+  const time = document.querySelector('[data-tracking-history]');
+  const detail = document.querySelector('[data-tracking-detail]');
+  shape.replaceChildren(); time.replaceChildren();
+  if (!t || !t.active || !(Number(t.integrations) > 0)) {
+    detail.textContent = t ? (t.active ? 'Awaiting first complete tracking integration.' : 'Tracking invalidated; waiting for a fresh acquisition.') : 'No completed tracking integrations.'; return;
+  }
+  detail.textContent = `${t.pll ? 'PLL' : 'FLL pull-in'} / DLL  -  Doppler ${t.doppler_hz.toFixed(2)} Hz  -  code ${t.code_rate_hz.toFixed(3)} chip/s  -  epoch ${t.epoch}  -  samples ${t.first_sample} - ${t.end_sample}. Navigation eligibility is not established.`;
+  const component = document.querySelector('[data-tracking-component]').value;
+  const value = p => component === 'magnitude' ? Math.hypot(p.i,p.q) : p[component];
+  const colors = ['#60a5fa','#34d399','#fb923c','#c084fc','#f472b6'];
+  const element = (svg, tag, attrs, text) => {
+    const e = document.createElementNS('http://www.w3.org/2000/svg',tag);
+    for (const [k,v] of Object.entries(attrs)) e.setAttribute(k,String(v));
+    if (text) e.textContent=text; svg.append(e); return e;
+  };
+  const axes = (svg,label) => {
+    element(svg,'path',{d:'M45 15V225H625',stroke:'#64748b',fill:'none'});
+    element(svg,'text',{x:240,y:252,fill:'currentColor','font-size':12},label);
+  };
+  axes(shape,'Replica delay (chips)'); axes(time,'Signal time (seconds within epoch)');
+  const taps=t.taps || [], extent=Math.max(1,...taps.map(p=>Math.abs(p.offset_chips)));
+  const scale=Math.max(1e-9,...taps.map(p=>Math.abs(value(p))));
+  element(shape,'text',{x:48,y:12,fill:'currentColor','font-size':11},component + ' (ADC units/sample)');
+  element(time,'text',{x:48,y:12,fill:'currentColor','font-size':11},component + ' (ADC units/sample)');
+  const x=d=>45+(d+extent)/(2*extent)*580;
+  const y=v=>component==='magnitude' ? 225-200*v/scale : 125-100*v/scale;
+  if (t.constellation===1 && component==='magnitude') element(shape,'polyline',{points:`${x(-1)},225 ${x(0)},25 ${x(1)},225`,fill:'none',stroke:'#64748b','stroke-dasharray':'5 5'});
+  for (let n=0;n<taps.length;n++) {
+    const p=taps[n], name=n===(taps.length>>1)?'P':n===(taps.length>>1)-1?'E':n===(taps.length>>1)+1?'L':String(n);
+    const dot=element(shape,'circle',{cx:x(p.offset_chips),cy:y(value(p)),r:4,fill:colors[n%colors.length]});
+    element(dot,'title',{},`${name}: ${p.offset_chips} chip, I=${p.i}, Q=${p.q}`);
+    element(shape,'text',{x:x(p.offset_chips),y:y(value(p))-7,fill:colors[n%colors.length],'font-size':11},name);
+  }
+  for (const d of [-extent,0,extent]) element(shape,'text',{x:x(d),y:240,fill:'currentColor','font-size':11},String(d));
+  const recent=history.filter(h=>h.epoch===t.epoch && h.taps.length===taps.length);
+  if (!recent.length || !t.sample_rate_hz) return;
+  const first=Number(recent[0].first_sample)/t.sample_rate_hz;
+  const last=Number(t.end_sample)/t.sample_rate_hz;
+  const max=Math.max(1e-9,...recent.flatMap(h=>h.taps.map(p=>Math.abs(value(p)))));
+  for (let n=0;n<taps.length;n++) {
+    let path='', prev;
+    for (const h of recent) {
+      const px=45+580*(Number(h.end_sample)/t.sample_rate_hz-first)/Math.max(last-first,1e-6);
+      const py=component==='magnitude'?225-200*value(h.taps[n])/max:125-100*value(h.taps[n])/max;
+      element(time,'circle',{cx:px,cy:py,r:2,fill:colors[n%colors.length]});
+      path+=`${!prev || prev.end_sample!==h.first_sample?'M':'L'}${px} ${py} `; prev=h;
+    }
+    element(time,'path',{d:path,fill:'none',stroke:colors[n%colors.length],'stroke-width':1.5});
+  }
+  element(time,'text',{x:45,y:240,fill:'currentColor','font-size':11},first.toFixed(3));
+  element(time,'text',{x:570,y:240,fill:'currentColor','font-size':11},last.toFixed(3));
 }

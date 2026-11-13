@@ -380,3 +380,5 @@ td a{color:#80dce4}
 
 .caf-signal-picker{justify-content:flex-start;color:#a6bfd1;font-size:12px}
 .caf-signal-picker select{min-width:180px;padding:7px 10px;border:1px solid #35546a;border-radius:6px;background:#10263a;color:#d2e4ee}
+
+.tracking-panel{padding:18px 20px}.tracking-panel h2{margin:0 0 8px}.tracking-panel p{font-size:12px;color:var(--muted)}.tracking-panel svg{display:block;width:100%;height:auto}.tracking-panel .caf-controls{justify-content:flex-start;gap:20px}

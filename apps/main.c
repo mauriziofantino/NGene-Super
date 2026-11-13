@@ -1,3 +1,4 @@
+#include "tracking/bank.h"
 /** @file main.c
  * @brief NGene command-line and embedded console entry point.
  */
@@ -69,6 +70,7 @@ int main(int argc, char **argv)
     TNgFrontend frontend;
     TNgReceiverStats stats;
     TNgAcquisition *acquisition = NULL;
+    TNgTrackingBank *trackingBanks[2] = {NULL, NULL};
     TNgAcquisition *galileoAcquisition = NULL;
     TNgChannel acquisitionChannels[2];
     size_t acquisitionCount = 0;
@@ -240,7 +242,24 @@ int main(int argc, char **argv)
     }
     if (galileoAcquisition)
         acquisitionCount++;
-    result =
+    {
+        size_t trackingIndex = 0;
+        TNgAcquisition *workers[2] = {acquisition, galileoAcquisition};
+        unsigned system;
+        for (system = 0; system < 2; ++system) {
+            if (!workers[system]) continue;
+            if (NgTrackingBankCreate(&config.tracking, &frontend.info, workers[system],
+                &acquisitionChannels[trackingIndex++], &trackingBanks[system], &error) != NG_OK) {
+                fprintf(stderr, "%s\n", error.message);
+                NgTrackingBankDestroy(trackingBanks[0]);
+                NgTrackingBankDestroy(trackingBanks[1]);
+                NgAcquisitionDestroy(acquisition);
+                NgAcquisitionDestroy(galileoAcquisition);
+                NgFrontendDestroy(&frontend);
+                return 1;
+            }
+        }
+    }    result =
         NgReceiverRun(&config, &frontend, &conditioner, acquisitionCount ? acquisitionChannels : NULL,
                       acquisitionCount, ShouldStop, NULL, &stats, &error);
     printf("windows=%" PRIu64 " processed_pairs=%" PRIu64 " written_pairs=%" PRIu64 " gaps=%" PRIu64
@@ -280,6 +299,8 @@ int main(int argc, char **argv)
                        found->epoch, found->firstSample);
         }
     }
+    NgTrackingBankDestroy(trackingBanks[0]);
+    NgTrackingBankDestroy(trackingBanks[1]);
     NgAcquisitionDestroy(acquisition);
     NgAcquisitionDestroy(galileoAcquisition);
     NgFrontendDestroy(&frontend);

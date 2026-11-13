@@ -43,6 +43,7 @@ typedef struct {
     TNgAcquisitionSnapshot acquisition;
     /** Independent Galileo E1-B telemetry. */
     TNgAcquisitionSnapshot galileoAcquisition;
+    TNgTrackingSnapshot tracking[64]; /**< Copied completed integrations. */
     /** Cumulative written pairs including completed capture sessions. */
     uint64_t totalWrittenSamples;
     /** Baseband filter bandwidth applied by the source, in hertz. */

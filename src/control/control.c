@@ -1,3 +1,4 @@
+#include "tracking/bank.h"
 /** @file control.c @brief Serialize lifecycle work away from the sample path. */
 #include "ngene/control.h"
 #include "platform/platform.h"
@@ -46,6 +47,7 @@ struct TNgControl {
     TNgAnalysis *analysis;
     /** Receiver-worker-owned acquisition; accessed only on its ordered callbacks. */
     TNgAcquisition *acquisition;
+    TNgTrackingBank *trackingBanks[2]; /**< Run-owned composite registrations. */
     TNgAcquisition *galileoAcquisition; /**< Galileo run-owned worker. */
     TNgAcquisitionSearchSpace galileoSearchSpaces[32]; /**< Archived Galileo maps. */
     TNgAcquisitionSearchSpace searchSpaces[32]; /**< Heap-owned display archive, mutex-protected. */
@@ -399,6 +401,8 @@ static void Progress(void *context, const TNgReceiverStats *stats)
         c->status.receiver = *stats;
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
         NgAcquisitionRead(c->galileoAcquisition, &c->status.galileoAcquisition);
+        NgTrackingBankRead(c->trackingBanks[0], c->status.tracking);
+        NgTrackingBankRead(c->trackingBanks[1], c->status.tracking + 32);
         ArchiveSearchSpaces(c);
         NgMutexUnlock(&c->mutex);
     }
@@ -425,6 +429,7 @@ static void ReceiverWorker(void *context)
     memset(&c->finalStats, 0, sizeof(c->finalStats));
     memset(&c->workerError, 0, sizeof(c->workerError));
     NgMutexLock(&c->mutex);
+    memset(c->status.tracking, 0, sizeof(c->status.tracking));
     memset(&c->status.acquisition, 0, sizeof(c->status.acquisition));
     memset(c->searchSpaces, 0, sizeof(c->searchSpaces));
     memset(c->galileoSearchSpaces, 0, sizeof(c->galileoSearchSpaces));
@@ -450,6 +455,10 @@ static void ReceiverWorker(void *context)
             c->workerResult =
                 NgAcquisitionCreate(&c->runConfig.acquisition, &source.info, &c->acquisition,
                                     &acquisitionChannels[acquisitionCount], &c->workerError);
+            if (c->workerResult == NG_OK && c->acquisition)
+                c->workerResult = NgTrackingBankCreate(&c->runConfig.tracking, &source.info,
+                    c->acquisition, &acquisitionChannels[acquisitionCount],
+                    &c->trackingBanks[0], &c->workerError);
             if (c->acquisition)
                 acquisitionCount++;
         }
@@ -457,6 +466,10 @@ static void ReceiverWorker(void *context)
             c->workerResult = NgAcquisitionCreateGalileo(&c->runConfig.galileoAcquisition,
                 &source.info, &c->galileoAcquisition, &acquisitionChannels[acquisitionCount],
                 &c->workerError);
+            if (c->workerResult == NG_OK && c->galileoAcquisition)
+                c->workerResult = NgTrackingBankCreate(&c->runConfig.tracking, &source.info,
+                    c->galileoAcquisition, &acquisitionChannels[acquisitionCount],
+                    &c->trackingBanks[1], &c->workerError);
             if (c->galileoAcquisition)
                 acquisitionCount++;
         }
@@ -469,12 +482,17 @@ static void ReceiverWorker(void *context)
         NgMutexLock(&c->mutex);
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
         NgAcquisitionRead(c->galileoAcquisition, &c->status.galileoAcquisition);
+        NgTrackingBankRead(c->trackingBanks[0], c->status.tracking);
+        NgTrackingBankRead(c->trackingBanks[1], c->status.tracking + 32);
         ArchiveSearchSpaces(c);
         c->status.acquisition.searching = 0;
         c->status.acquisition.currentPrn = 0;
         c->status.galileoAcquisition.searching = 0;
         c->status.galileoAcquisition.currentPrn = 0;
         NgMutexUnlock(&c->mutex);
+        NgTrackingBankDestroy(c->trackingBanks[0]);
+        NgTrackingBankDestroy(c->trackingBanks[1]);
+        c->trackingBanks[0] = c->trackingBanks[1] = NULL;
         NgAcquisitionDestroy(c->acquisition);
         c->acquisition = NULL;
         NgAcquisitionDestroy(c->galileoAcquisition);

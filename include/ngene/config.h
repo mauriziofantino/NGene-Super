@@ -4,6 +4,7 @@
 #include "ngene/types.h"
 #include "ngene/analysis.h"
 #include "ngene/acquisition.h"
+#include "ngene/tracking.h"
 #include <stdio.h>
 
 /** @brief Implemented independent stream source kinds. */
@@ -87,6 +88,7 @@ typedef struct {
     TNgAnalysisConfig analysis;
     /** Replaceable GPS L1 C/A acquisition module settings. */
     TNgAcquisitionConfig acquisition;
+    TNgTrackingConfig tracking; /**< Frozen per-run tracking module settings. */
     /** Independently enabled Galileo E1-B acquisition settings. */
     TNgAcquisitionConfig galileoAcquisition;
     /** Capture filename prefix; CLI may include a path when no directory is set. */
