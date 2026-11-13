@@ -2,6 +2,9 @@
   "version": 1,
   "modules": [
   {"id":"classic-tracking","rules":[],"groups":[{"title":"Tracking correlators","topic":"tracking","note":"GPS 1 ms / Galileo E1-B BOC(1,1) 4 ms. Extra taps observe the shape; DLL uses the adjacent E/L pair. Square carrier is approximate and introduces harmonic images.","fields":[
+    {"key":"tracking.gps_channels","label":"GPS channel slots","type":"number","default":8,"integer":true,"min":0,"max":32},
+    {"key":"tracking.galileo_channels","label":"Galileo channel slots","type":"number","default":8,"integer":true,"min":0,"max":32},
+    {"key":"tracking.workers","label":"Total tracking worker pool","type":"number","default":4,"integer":true,"min":1,"max":16},
     {"key":"tracking.enabled","label":"Track confirmed acquisitions","type":"select","default":"true","options":[{"value":"true","label":"On"},{"value":"false","label":"Off"}]},
     {"key":"tracking.square_carrier","label":"Carrier rotation","type":"select","default":"false","options":[{"value":"false","label":"Precise sinusoidal"},{"value":"true","label":"Fast square (experimental)"}]},
     {"key":"tracking.xor_correlation","label":"Correlation product","type":"select","default":"false","options":[{"value":"false","label":"Precise SIMD products"},{"value":"true","label":"Fast exact sign XOR"}]},

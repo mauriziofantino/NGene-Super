@@ -639,9 +639,11 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             unsigned tap;
             const TNgTrackingSnapshot *t = &status.tracking[channelIndex];
             cJSON *row, *taps;
-            if (!t->prn) continue;
+            if (!t->channelId) continue;
             row = cJSON_CreateObject();
             cJSON_AddItemToArray(channels, row);
+            Number(row, "channel_id", t->channelId);
+            Number(row, "state", t->state);
             Number(row, "prn", t->prn);
             Number(row, "constellation", t->constellation);
             cJSON_AddBoolToObject(row, "active", t->active);

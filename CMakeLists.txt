@@ -30,18 +30,18 @@ find_package(Threads REQUIRED)
 if(APPLE)
     add_compile_definitions(_DARWIN_C_SOURCE)
 endif()
-add_library(ngene_base STATIC src/core/error.c src/stream/format.c src/stream/convert.c)
+add_library(ngene_base STATIC src/core/error.c src/core/channel.c src/stream/format.c src/stream/convert.c)
 target_include_directories(ngene_base PUBLIC include PRIVATE src)
 add_library(NGene::Base ALIAS ngene_base)
 
-add_library(ngene_platform STATIC src/platform/platform.c src/platform/files.c)
+add_library(ngene_platform STATIC src/platform/platform.c src/platform/files.c src/core/channel_dispatch.c)
 target_include_directories(ngene_platform PRIVATE src)
 target_link_libraries(ngene_platform PUBLIC ngene_base Threads::Threads)
 add_library(NGene::Platform ALIAS ngene_platform)
 
 add_library(ngene_dsp STATIC src/dsp/fft/fft.c src/dsp/sample_backend.c
     src/dsp/statistics/moments.c src/dsp/statistics/dc_block.c src/dsp/power/power.c
-    src/dsp/gps_ca.c src/dsp/nco.c src/dsp/search.c)
+    src/dsp/gps_ca.c src/dsp/nco.c src/dsp/search.c src/dsp/tracking_replica.c)
 target_include_directories(ngene_dsp PUBLIC include PRIVATE src)
 target_link_libraries(ngene_dsp PUBLIC ngene_base)
 add_library(NGene::Dsp ALIAS ngene_dsp)
@@ -53,7 +53,7 @@ target_include_directories(ngene_tracking PUBLIC include PRIVATE src)
 target_link_libraries(ngene_tracking PUBLIC ngene_dsp)
 add_library(NGene::Tracking ALIAS ngene_tracking)
 add_library(ngene_core
-    src/core/receiver.c src/core/channel_dispatch.c src/core/stream_info.c src/config/config.c
+    src/core/receiver.c src/core/stream_info.c src/config/config.c
     src/stream/ring.c
     src/frontend/frontend.c src/frontend/common.c src/frontend/file.c src/frontend/sige_decode.c src/frontend/ingress.c src/frontend/calibration.c
     src/conditioning/bypass.c src/recording/recording.c src/recording/metadata.c
@@ -184,6 +184,10 @@ if(NGENE_WITH_WEB)
     target_link_libraries(ngene PRIVATE ngene_control ngene_http)
 endif()
 if(NGENE_BUILD_TESTS)
+    add_executable(ngene_channel_slot_tests tests/test_channel_slots.c)
+    target_include_directories(ngene_channel_slot_tests PRIVATE src)
+    target_link_libraries(ngene_channel_slot_tests PRIVATE ngene_core)
+    add_test(NAME channel_slot_lifecycle COMMAND ngene_channel_slot_tests)
     add_executable(ngene_tracking_tests tests/test_tracking.c)
     target_compile_definitions(ngene_tracking_tests PRIVATE NGENE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(ngene_tracking_tests PRIVATE ngene_tracking)
@@ -349,7 +353,7 @@ if(NGENE_BUILD_TESTS)
     endif()
 endif()
 # Keep upstream dependencies outside first-party warning policy.
-foreach(target ngene_tracking ngene_tracking_tests ngene_acquisition_tests ngene_gain_probe ngene_web_calibration_fixture ngene_sige_tests ngene_frontend_stream_tests ngene_calibration_tests ngene_base ngene_platform ngene_dsp ngene_core ngene_rtlsdr_tests ngene_bladerf_tests ngene_sdr_tests ngene ngene_hackrf_tests ngene_replay_tests ngene_control ngene_tests ngene_sample_tests ngene_analysis_tests ngene_fft_tests ngene_fft_fallback_tests ngene_engine_scheduler_tests ngene_control_tests)
+foreach(target ngene_channel_slot_tests ngene_tracking ngene_tracking_tests ngene_acquisition_tests ngene_gain_probe ngene_web_calibration_fixture ngene_sige_tests ngene_frontend_stream_tests ngene_calibration_tests ngene_base ngene_platform ngene_dsp ngene_core ngene_rtlsdr_tests ngene_bladerf_tests ngene_sdr_tests ngene ngene_hackrf_tests ngene_replay_tests ngene_control ngene_tests ngene_sample_tests ngene_analysis_tests ngene_fft_tests ngene_fft_fallback_tests ngene_engine_scheduler_tests ngene_control_tests)
     if(TARGET ${target})
         if(MSVC)
             target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -409,6 +413,12 @@ include(CPack)
 install(DIRECTORY config/ DESTINATION share/ngene/config)
 message(STATUS "NGene target ${CMAKE_SYSTEM_NAME}/${NGENE_ARCH}; native HackRF=${NGENE_WITH_HACKRF}")
 
+option(NGENE_TRACKING_BENCHMARK "Build isolated tracking throughput probe" OFF)
+if(NGENE_TRACKING_BENCHMARK)
+    add_executable(ngene_tracking_throughput benchmarks/tracking/throughput.c)
+    target_include_directories(ngene_tracking_throughput PRIVATE src)
+    target_link_libraries(ngene_tracking_throughput PRIVATE ngene_tracking ngene_platform)
+endif()
 option(NGENE_WITH_DOCUMENTATION "Build Doxygen reference (optional development tool)" OFF)
 if(NGENE_WITH_DOCUMENTATION)
     find_package(Doxygen REQUIRED)

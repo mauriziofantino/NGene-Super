@@ -12,4 +12,6 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
 void NgTrackingBankRead(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[32]);
 /** Release tracking before destroying acquisition; accepts NULL. */
 void NgTrackingBankDestroy(TNgTrackingBank *bank);
+/** Link constellation admission counters on the receiver thread before starting RX. */
+int NgTrackingBankLink(TNgTrackingBank *gps, TNgTrackingBank *galileo, TNgError *error);
 #endif

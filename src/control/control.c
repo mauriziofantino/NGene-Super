@@ -473,6 +473,8 @@ static void ReceiverWorker(void *context)
             if (c->galileoAcquisition)
                 acquisitionCount++;
         }
+        if (c->workerResult == NG_OK)
+            c->workerResult = NgTrackingBankLink(c->trackingBanks[0], c->trackingBanks[1], &c->workerError);
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
             c->workerResult = NgReceiverRunEx(&c->runConfig, &source, &conditioner,
                                               acquisitionCount ? acquisitionChannels : NULL,

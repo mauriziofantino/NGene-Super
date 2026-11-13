@@ -12,7 +12,7 @@ async function until(fn, label) {
 (async () => {
   const root = path.resolve('build/web-acquisition-' + Date.now());
   fs.mkdirSync(root, {recursive: true}); fs.mkdirSync(path.join(root, 'profile'));
-  const chips = [], iq = Buffer.alloc(2 * 2400000);
+  const chips = [], iq = Buffer.alloc(2 * 2400000 * (testGalileo ? 4 : 1));
   const galileoCode = fs.readFileSync(path.resolve('tests/data/galileo-e1b-prn7.bin'));
   let g1 = 1023, g2 = 1023, random = 177;
   for (let k = 0; k < 1023; k++) {
@@ -151,9 +151,26 @@ async function until(fn, label) {
     if (testTracking) {
       const tracked = await until(async () => (await get('status')).tracking?.find(t => t.prn === 7 && t.active && Number(t.integrations) > 2), 'tracking integrations');
       assert.equal(tracked.taps.length,9);
+      const channelSlots=(await get('status')).tracking;
+      assert.equal(channelSlots.filter(t=>t.constellation===1).length,8);
+      assert.equal(new Set(channelSlots.map(t=>t.channel_id)).size,channelSlots.length);
+      assert(channelSlots.some(t=>t.state===0 || t.state===1),'Slots waiting/acquiring coexist with tracking');
+      const trackedIds=channelSlots.filter(t=>t.active).map(t=>`${t.constellation}:${t.prn}`);
+      assert.equal(new Set(trackedIds).size,trackedIds.length,'No duplicated tracking PRN');
       assert(Math.hypot(tracked.taps[4].i,tracked.taps[4].q)>0);
       await page.locator('.workspace-nav-item[data-view="tracking"]').click();
+      await until(async () => await page.locator('[data-channel-state="2"]').count()>0,'channel status buttons');
+      await page.locator(`[data-channel-id="${tracked.channel_id}"]`).click();
       await until(async () => await page.locator('[data-tracking-shape] circle').count()===9,'nine measured tap points');
+      assert.equal(await page.locator('[data-tracking-channel]').inputValue(),String(tracked.channel_id));
+      const waiting=page.locator('[data-channel-state="0"]');
+      if(await waiting.count()) {
+        await waiting.first().click();
+        assert.match(await page.locator('[data-tracking-detail]').textContent(),/Waiting/);
+        assert.equal(await page.locator('[data-tracking-shape] circle').count(),0);
+        await page.locator(`[data-channel-id="${tracked.channel_id}"]`).click();
+        await until(async () => await page.locator('[data-tracking-shape] circle').count()===9,'selected tracking channel restored');
+      }
       await until(async () => await page.locator('[data-tracking-history] circle').count()>=9,'signal time history');
       assert.match(await page.locator('[data-tracking-detail]').textContent(), /Doppler/);
       await page.locator('[data-tracking-component]').selectOption('q');
@@ -169,7 +186,7 @@ async function until(fn, label) {
     assert.equal(stoppedSpace.valid, true, 'Completed maps survive receiver stop');
     assert.equal(stoppedSpace.prn, 7);
     await until(async () => await page.locator('.acquisition-acquired').count(), 'green confirmed satellite');
-    const acquiredColour = await page.locator('.acquisition-acquired').evaluate(node => getComputedStyle(node).backgroundColor);
+    const acquiredColour = await page.locator('[data-satellite="GPS:L1CA:7"].acquisition-acquired').evaluate(node => getComputedStyle(node).backgroundColor);
     assert.equal(acquiredColour, 'rgb(18, 53, 47)');
     if (testGalileo) {
       assert.equal((await get('acquisition/search-space?signal=galileo&prn=7')).valid,true,'Galileo map survives stop');

@@ -6,7 +6,7 @@ const ROUTES = {
   setup: {label: 'Receiver configuration', id: 'configurationView'},
   rf: {label: 'RF observation', id: 'observationView'},
   acquisition: {label: 'Acquisition', id: 'acquisitionView'},
-  tracking: {label: 'Tracking', id: 'trackingView'},
+  tracking: {label: 'Channels', id: 'trackingView'},
   navigation: {label: 'Navigation data', id: 'navigationView'},
   pvt: {label: 'PVT solution', id: 'pvtView'},
   record: {label: 'Recording & replay', id: 'recordingView'},
@@ -59,7 +59,7 @@ function acquisitionMarkup() {
 }
 
 function trackingMarkup() {
-  return heading('GNSS / CHANNELS', 'Tracking', 'Carrier and code loops with coherent multi-correlator observations.', settingsButton('tracking', 'Tracking settings')) +
+  return heading('GNSS / CHANNELS', 'Channel status', 'Carrier and code loops with coherent multi-correlator observations.', settingsButton('tracking', 'Tracking settings')) +
     '<section class="card tracking-panel"><div class="caf-controls"><label>Channel <select data-tracking-channel aria-label="Tracking channel"></select></label><label>Component <select data-tracking-component aria-label="Correlator component"><option value="magnitude">Magnitude</option><option value="i">I</option><option value="q">Q</option></select></label></div><p data-tracking-detail>No completed tracking integrations.</p><div data-tracking-table></div></section>' +
     '<div class="workspace-grid"><section class="card tracking-panel"><h2>Correlation versus code delay</h2><p>Measured tap points; dashed GPS triangle is an ideal reference. Galileo BOC has multiple lobes.</p><svg data-tracking-shape viewBox="0 0 640 260" role="img" aria-label="Correlation versus code delay"></svg></section><section class="card tracking-panel"><h2>Correlators versus signal time</h2><p>Bounded history of received telemetry; lines break across discontinuities.</p><svg data-tracking-history viewBox="0 0 640 260" role="img" aria-label="Correlation history in signal seconds"></svg></section></div>' + route('acquisition', 'navigation');
 }
@@ -331,23 +331,19 @@ function updateTracking(channels, run) {
   const picker = document.querySelector('[data-tracking-channel]');
   if (!picker) return;
   if (trackingRun !== run) { trackingHistory.clear(); trackingRun = run; }
-  const key = t => `${t.constellation}:${t.prn}`;
+  const key = t => String(t.channel_id);
   const table = document.querySelector('[data-tracking-table]');
-  table.replaceChildren();
-  for (const t of channels) {
-    const row = document.createElement('p');
-    row.textContent = `${t.constellation === 1 ? 'GPS' : 'Galileo'} ${t.prn}  -  ${!t.active ? 'Invalidated' : t.pll ? 'PLL / DLL running' : 'FLL / DLL pull-in'}  -  ${t.doppler_hz.toFixed(2)} Hz`;
-    table.append(row);
-  }
   const selected = picker.value;
   picker.replaceChildren(...channels.map(t => {
     const option = document.createElement('option'); option.value = key(t);
-    option.textContent = `${t.constellation === 1 ? 'GPS' : 'Galileo'} ${t.prn}`; return option;
+    option.textContent = `CH ${t.channel_id} | ${t.constellation === 1 ? 'GPS' : 'Galileo'} ${t.prn || '-'} | ${['Waiting','Acquisition','Tracking'][t.state]}`; return option;
   }));
   if (channels.some(t => key(t) === selected)) picker.value = selected;
+  if (!selected && channels.some(t => t.active)) picker.value = key(channels.find(t => t.active));
   for (const t of channels) {
     if (!t.active || !(Number(t.integrations) > 0)) continue;
-    const history = trackingHistory.get(key(t)) || [];
+    let history = trackingHistory.get(key(t)) || [];
+    if (history.length && history.at(-1).prn !== t.prn) history = [];
     const previous = history.at(-1);
     if (!previous || previous.epoch !== t.epoch || previous.end_sample !== t.end_sample) {
       history.push(t); if (history.length > 240) history.shift();
@@ -355,6 +351,20 @@ function updateTracking(channels, run) {
     trackingHistory.set(key(t), history);
   }
   const render = () => renderTracking(channels.find(t => key(t) === picker.value), trackingHistory.get(picker.value) || []);
+  table.replaceChildren();
+  const counts = document.createElement('p');
+  counts.textContent = `${channels.length} configured slots | ${channels.filter(t=>t.state===2).length} tracking | ${channels.filter(t=>t.state===1).length} acquiring | ${channels.filter(t=>t.state===0).length} waiting`;
+  table.append(counts);
+  const grid = document.createElement('div'); grid.className = 'channel-status-grid';
+  for (const t of channels) {
+    const row = document.createElement('button'); row.type='button';
+    row.dataset.channelId=String(t.channel_id); row.dataset.channelState=String(t.state);
+    row.setAttribute('aria-pressed',String(key(t)===picker.value));
+    row.textContent = `CH ${t.channel_id} | ${t.constellation===1?'GPS':'Galileo'} ${t.prn||'-'} | ${['Waiting','Acquisition','Tracking'][t.state]}${t.state===2?` | ${t.doppler_hz.toFixed(1)} Hz`:''}`;
+    row.onclick=()=>{picker.value=key(t);for(const other of grid.children)other.setAttribute('aria-pressed',String(other===row));render();};
+    grid.append(row);
+  }
+  table.append(grid);
   picker.onchange = render;
   document.querySelector('[data-tracking-component]').onchange = render;
   render();
@@ -365,7 +375,7 @@ function renderTracking(t, history) {
   const detail = document.querySelector('[data-tracking-detail]');
   shape.replaceChildren(); time.replaceChildren();
   if (!t || !t.active || !(Number(t.integrations) > 0)) {
-    detail.textContent = t ? (t.active ? 'Awaiting first complete tracking integration.' : 'Tracking invalidated; waiting for a fresh acquisition.') : 'No completed tracking integrations.'; return;
+    detail.textContent = t ? `CH ${t.channel_id} | ${t.constellation===1?'GPS':'Galileo'} ${t.prn||'-'} | ${t.state===1?'Acquisition in progress; correlators will appear after confirmation.':t.state===0?'Waiting for an available search assignment.':'Awaiting first complete tracking integration.'}` : 'No configured channels for enabled signals.'; return;
   }
   detail.textContent = `${t.pll ? 'PLL' : 'FLL pull-in'} / DLL  -  Doppler ${t.doppler_hz.toFixed(2)} Hz  -  code ${t.code_rate_hz.toFixed(3)} chip/s  -  epoch ${t.epoch}  -  samples ${t.first_sample} - ${t.end_sample}. Navigation eligibility is not established.`;
   const component = document.querySelector('[data-tracking-component]').value;

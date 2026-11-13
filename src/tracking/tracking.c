@@ -4,6 +4,7 @@
  */
 #include "ngene/tracking.h"
 #include "ngene/dsp/gps_ca.h"
+#include "ngene/dsp/tracking_replica.h"
 #include "acquisition/galileo_codes.h"
 #include <math.h>
 #include <stdlib.h>
@@ -33,8 +34,9 @@ struct TNgTracking {
     double oldI, oldQ;                                             /**< Previous prompt for FLL. */
     double meanFrequency, oldMean;                                 /**< FLL transition smoothing. */
     double sumI[NG_TRACKING_MAX_TAPS], sumQ[NG_TRACKING_MAX_TAPS]; /**< Coherent sums. */
-    int8_t chips[4092];                                            /**< Primary code. */
+    int8_t chips[8184];                                            /**< Primary code. */
     TNgComplex values[NG_TRACKING_CHUNK], carrier[NG_TRACKING_CHUNK]; /**< Block scratch. */
+    double phases[NG_TRACKING_CHUNK]; /**< Shared exact code phase geometry for all taps. */
     float replica[NG_TRACKING_CHUNK]; /**< One tap, reused sequentially. */
 };
 
@@ -42,6 +44,9 @@ struct TNgTracking {
 void NgTrackingDefaults(TNgTrackingConfig *config)
 {
     memset(config, 0, sizeof(*config));
+    config->gpsChannels = 8;
+    config->galileoChannels = 8;
+    config->workers = 4;
     config->enabled = 1;
     config->tapCount = 3;
     config->spacingChips = 0.5;
@@ -50,7 +55,8 @@ void NgTrackingDefaults(TNgTrackingConfig *config)
 /** Validate all configurable arithmetic boundaries. */
 int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
 {
-    if (!config || (config->enabled != 0 && config->enabled != 1) ||
+    if (!config || config->gpsChannels > 32 || config->galileoChannels > 32 ||
+        !config->workers || config->workers > 16 || (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1) || config->tapCount < 3 ||
         config->tapCount > NG_TRACKING_MAX_TAPS || !(config->tapCount & 1u) ||
@@ -117,10 +123,11 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     memset(tracking->sumQ, 0, sizeof(tracking->sumQ));
     if (tracking->system == 1)
         return NgGpsCaGenerate(result->prn, tracking->chips, error);
-    for (k = 0; k < 4092; ++k)
-        tracking->chips[k] =
-            (ngGalileoCodes[result->prn - 1][k / 8] & (1u << (7u - k % 8u))) ? -1 : 1;
-    return NG_OK;
+    for (k = 0; k < 4092; ++k) {
+        int8_t sign = (ngGalileoCodes[result->prn - 1][k / 8] & (1u << (7u - k % 8u))) ? -1 : 1;
+        tracking->chips[2*k] = sign;
+        tracking->chips[2*k+1] = (int8_t)-sign;
+    }    return NG_OK;
 }
 
 /** Classic second-order recurrence; coefficients retain zeta=1/sqrt(2), wn=B/0.53. */
@@ -225,25 +232,26 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
             count = window->meta.count - position;
         NgSearchCarrier(t->carrier, count, t->stream.sampleRateHz, t->carrierHz, t->carrierPhase,
                         t->config.squareCarrier);
-        for (n = 0; n < count; ++n) {
-            t->values[n].i = (float)NgIqComponent(window, position + n, 0);
-            t->values[n].q = (float)(NgIqComponent(window, position + n, 1) *
-                                     (t->stream.spectrumInverted ? -1 : 1));
-        }
-        NgSearchMix(t->values, t->carrier, count);
+        if (window->format == 0 || window->format == NG_FORMAT_CI8) {
+            const TNgIq8 *input = window->samples + position;
+            float polarity = t->stream.spectrumInverted ? -1.0f : 1.0f;
+            for (n = 0; n < count; ++n) {
+                t->values[n].i = (float)input[n].i;
+                t->values[n].q = (float)input[n].q * polarity;
+            }
+        } else {
+            for (n = 0; n < count; ++n) {
+                t->values[n].i = (float)NgIqComponent(window, position + n, 0);
+                t->values[n].q = (float)(NgIqComponent(window, position + n, 1) *
+                                         (t->stream.spectrumInverted ? -1 : 1));
+            }
+        }        NgSearchMix(t->values, t->carrier, count);
+        NgTrackingCodePhases(t->phases,count,t->codePhase,t->snapshot.codeRateHz,
+                              t->stream.sampleRateHz);
         for (tap = 0; tap < t->config.tapCount; ++tap) {
             double i, q;
-            for (n = 0; n < count; ++n) {
-                double phase = t->codePhase +
-                               (double)n * t->snapshot.codeRateHz / t->stream.sampleRateHz -
-                               t->snapshot.offset[tap];
-                double wrapped = fmod(fmod(phase, t->period) + t->period, t->period);
-                int sign = t->chips[(size_t)wrapped];
-                if (t->system == 2 && wrapped - floor(wrapped) >= 0.5)
-                    sign = -sign;
-                t->replica[n] = (float)sign;
-            }
-            NgSearchCorrelate(t->values, t->replica, count, t->config.xorCorrelation, &i, &q);
+            NgTrackingReplica(t->replica,t->phases,count,t->chips,t->period,
+                               t->snapshot.offset[tap],t->system==2);            NgSearchCorrelate(t->values, t->replica, count, t->config.xorCorrelation, &i, &q);
             t->sumI[tap] += i;
             t->sumQ[tap] += q;
         }

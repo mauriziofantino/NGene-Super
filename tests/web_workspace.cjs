@@ -230,7 +230,7 @@ histogram_update_hz=20
     for (const key of ['acquisition', 'tracking', 'navigation', 'pvt']) {
       await select(key);
       const text = await page.locator(`#${views[key]}`).innerText();
-      if (key === 'tracking') assert.match(text, /No completed tracking integrations/);
+      if (key === 'tracking') assert.match(text, /No configured channels|Waiting for an available search assignment/);
       else assert.match(text, /not integrated|not attached|unavailable|not available/i, `${key} must explain unavailable processing`);
       assert.doesNotMatch(text, /(?:GPS|GAL|SBAS)\s*(?:PRN\s*)?\d{2}\b|\b(?:latitude|longitude)\s*[:=]\s*-?\d/i,
         `${key} must not present invented tracked satellites or a synthetic fix`);

@@ -86,7 +86,7 @@ int main(int argc, char **argv)
             "NGene: [--web] [--config FILE] [--replay FILE] [--port 8080] [--output-dir "
             "captures]\n       "
             "--list-devices | --version\nC receiver, optional GPS/Galileo acquisition and local web console; no "
-            "tracking or PVT yet.");
+            "qualified navigation or PVT yet.");
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
@@ -259,7 +259,13 @@ int main(int argc, char **argv)
                 return 1;
             }
         }
-    }    result =
+    }    if (NgTrackingBankLink(trackingBanks[0],trackingBanks[1],&error) != NG_OK) {
+        fprintf(stderr,"%s\n",error.message);
+        NgTrackingBankDestroy(trackingBanks[0]); NgTrackingBankDestroy(trackingBanks[1]);
+        NgAcquisitionDestroy(acquisition); NgAcquisitionDestroy(galileoAcquisition);
+        NgFrontendDestroy(&frontend); return 1;
+    }
+    result =
         NgReceiverRun(&config, &frontend, &conditioner, acquisitionCount ? acquisitionChannels : NULL,
                       acquisitionCount, ShouldStop, NULL, &stats, &error);
     printf("windows=%" PRIu64 " processed_pairs=%" PRIu64 " written_pairs=%" PRIu64 " gaps=%" PRIu64

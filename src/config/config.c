@@ -230,6 +230,9 @@ static int CopyText(char *out, size_t capacity, const char *text)
 static int Apply(TNgConfig *c, const char *key, const char *value)
 {
     uint64_t n;
+    UINT_KEY("tracking.gps_channels", tracking.gpsChannels)
+    UINT_KEY("tracking.galileo_channels", tracking.galileoChannels)
+    UINT_KEY("tracking.workers", tracking.workers)
     BOOL_KEY("tracking.enabled", tracking.enabled)
     BOOL_KEY("tracking.square_carrier", tracking.squareCarrier)
     BOOL_KEY("tracking.xor_correlation", tracking.xorCorrelation)
@@ -766,7 +769,9 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     fprintf(output, "\n[receiver]\nmode=%s\nrun_seconds=%.17g\nidle_timeout_ms=%u\n",
             (config->recordOnly) != 0 ? "record" : "capture", config->runSeconds,
             config->idleTimeoutMs);
-    fprintf(output, "\n[tracking]\nenabled=%s\nsquare_carrier=%s\nxor_correlation=%s\ntap_count=%u\nspacing_chips=%.17g\n",
+    fprintf(output, "\n[tracking]\ngps_channels=%u\ngalileo_channels=%u\nworkers=%u\n",
+        config->tracking.gpsChannels, config->tracking.galileoChannels, config->tracking.workers);
+    fprintf(output, "enabled=%s\nsquare_carrier=%s\nxor_correlation=%s\ntap_count=%u\nspacing_chips=%.17g\n",
         config->tracking.enabled ? "true" : "false", config->tracking.squareCarrier ? "true" : "false",
         config->tracking.xorCorrelation ? "true" : "false", config->tracking.tapCount, config->tracking.spacingChips);
     fprintf(output,

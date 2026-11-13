@@ -6,6 +6,9 @@
 
 /** Frozen per-run numerical and correlator configuration; no automatic precision changes. */
 typedef struct {
+    unsigned gpsChannels; /**< GPS receiver slots, 0..32. */
+    unsigned galileoChannels; /**< Galileo receiver slots, 0..32. */
+    unsigned workers; /**< Fixed tracking worker pool, 1..16. */
     int enabled;         /**< Track confirmed acquisition results when nonzero. */
     int squareCarrier;   /**< Explicit approximate square carrier; precise is default. */
     int xorCorrelation;  /**< Exact sign XOR, independent of carrier mode. */
@@ -15,6 +18,8 @@ typedef struct {
 
 /** Completed coherent integration, in native ADC units per sample. */
 typedef struct {
+    unsigned channelId; /**< Stable slot identity, independent of assigned PRN. */
+    unsigned state; /**< 0 waiting, 1 acquisition, 2 tracking. */
     unsigned prn;           /**< Zero while unassigned. */
     unsigned constellation; /**< 1 GPS, 2 Galileo E1-B. */
     int active;             /**< NCO and loop state valid in current epoch. */

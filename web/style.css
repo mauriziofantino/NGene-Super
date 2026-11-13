@@ -382,3 +382,5 @@ td a{color:#80dce4}
 .caf-signal-picker select{min-width:180px;padding:7px 10px;border:1px solid #35546a;border-radius:6px;background:#10263a;color:#d2e4ee}
 
 .tracking-panel{padding:18px 20px}.tracking-panel h2{margin:0 0 8px}.tracking-panel p{font-size:12px;color:var(--muted)}.tracking-panel svg{display:block;width:100%;height:auto}.tracking-panel .caf-controls{justify-content:flex-start;gap:20px}
+
+.channel-status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-top:12px}.channel-status-grid button{text-align:left;font-size:12px}.channel-status-grid [aria-pressed=true]{border-color:#34d399}.channel-status-grid [data-channel-state='2']{color:#34d399}

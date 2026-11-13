@@ -105,4 +105,8 @@ void NgAcquisitionReadSearchSpace(TNgAcquisition *acquisition, unsigned prn,
 /** Cancel/join worker and free owned memory after the engine has stopped using channel.
  * Accepts NULL. Results remain acquisition observations; no fake TRACKING transition. */
 void NgAcquisitionDestroy(TNgAcquisition *acquisition);
+/** Set scheduling exclusions and admission on the owning receiver thread.
+ * mask bit PRN-1 excludes a satellite already assigned to tracking. Pausing admits
+ * no new capture/search; an in-flight single-satellite decision may finish unchanged. */
+void NgAcquisitionSetAdmission(TNgAcquisition *acquisition, uint32_t mask, int paused);
 #endif

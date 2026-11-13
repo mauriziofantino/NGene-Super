@@ -25,6 +25,8 @@ extern const TNgAcquisitionStrategy ngGalileoAcquisitionStrategy;
 
 /** Owned capture handoff; slot is published only through release/acquire atomics. */
 struct TNgAcquisition {
+    uint32_t excludedMask; /**< Scheduling mask protected by snapshot mutex. */
+    int paused; /**< Admission predicate protected by snapshot mutex. */
     TNgAcquisitionConfig config;
     TNgAcquisitionCapture capture;
     TNgComplex *storage;
@@ -100,6 +102,12 @@ static void SearchWorker(void *context)
             if (Cancelled(acquisition))
                 break;
             NgMutexLock(&acquisition->mutex);
+            if (acquisition->paused || (acquisition->excludedMask & (UINT32_C(1) << (prn - 1)))) {
+                int paused = acquisition->paused;
+                NgMutexUnlock(&acquisition->mutex);
+                if (paused) break;
+                continue;
+            }
             acquisition->snapshot.currentPrn = prn;
             NgMutexUnlock(&acquisition->mutex);
             status = acquisition->strategy->search(acquisition->context, &acquisition->capture, prn,
@@ -156,7 +164,12 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
         acquisition->haveEpoch = 1;
     }
     acquisition->expectedSample = window->meta.firstSample + window->meta.count;
-    if (NgAtomicGet(&acquisition->slot) != 0) {
+    NgMutexLock(&acquisition->mutex);
+    int paused = acquisition->paused;
+    NgMutexUnlock(&acquisition->mutex);
+    if (paused && NgAtomicGet(&acquisition->slot) == 0) {
+        acquisition->filled = 0;
+    } else if (NgAtomicGet(&acquisition->slot) != 0) {
         acquisition->skipped += window->meta.count;
     } else {
         if (acquisition->filled == 0)
@@ -326,4 +339,14 @@ void NgAcquisitionDestroy(TNgAcquisition *acquisition)
     NgMutexDestroy(&acquisition->mutex);
     free(acquisition->storage);
     free(acquisition);
+}
+
+/** Publish future search admission; do not cancel or modify an in-flight strategy. */
+void NgAcquisitionSetAdmission(TNgAcquisition *acquisition, uint32_t mask, int paused)
+{
+    if (!acquisition) return;
+    NgMutexLock(&acquisition->mutex);
+    acquisition->excludedMask = mask;
+    acquisition->paused = paused != 0;
+    NgMutexUnlock(&acquisition->mutex);
 }
