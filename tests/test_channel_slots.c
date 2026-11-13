@@ -17,7 +17,8 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
                   const TNgAcquisitionConfig *config, TNgAcquisitionCancel cancel,
                   void *cancelContext, TNgAcquisitionResult *result, TNgError *error)
 {
-    (void)context;
+    if (context)
+        NgSleepMs(*(const unsigned *)context);
     (void)config;
     (void)cancel;
     (void)cancelContext;
@@ -47,6 +48,52 @@ static void Window(TNgChannel *channel, TNgChannel *galileo, TNgIqView *view)
     NgSleepMs(1);
 }
 
+/** Faster confirmed results claim shared slots, independent of constellation order. */
+static void AutomaticPool(unsigned faster)
+{
+    TNgTrackingConfig config;
+    TNgAcquisitionConfig searchConfig;
+    TNgStreamInfo stream = {0};
+    TNgAcquisition *searches[2] = {NULL, NULL};
+    TNgTrackingBank *banks[2] = {NULL, NULL};
+    TNgChannel channels[2];
+    TNgTrackingSnapshot slots[64];
+    TNgIq8 samples[2048] = {{0}};
+    TNgIqView view = {0};
+    TNgError error = {{0}};
+    const TNgAcquisitionStrategy strategy = {Search};
+    unsigned delay[2] = {faster == 1 ? 0u : 150u, faster == 2 ? 0u : 150u};
+    unsigned system, n;
+    NgTrackingDefaults(&config);
+    config.channelCount = 2;
+    config.workers = 2;
+    NgAcquisitionDefaults(&searchConfig);
+    searchConfig.lastPrn = 3;
+    stream.sampleRateHz = 2048000;
+    for (system = 0; system < 2; ++system) {
+        CHECK(NgAcquisitionCreateWithStrategy(&searchConfig, &stream, &strategy, &delay[system],
+                                              &searches[system], &channels[system],
+                                              &error) == NG_OK);
+        channels[system].id.constellation = system + 1;
+        CHECK(NgTrackingBankCreate(&config, &stream, searches[system], &channels[system],
+                                   &banks[system], &error) == NG_OK);
+    }
+    CHECK(NgTrackingBankLink(banks[0], banks[1], &error) == NG_OK);
+    view.samples = samples;
+    view.meta.count = 2048;
+    view.meta.epoch = 1;
+    for (n = 0; n < 120; ++n)
+        Window(&channels[0], &channels[1], &view);
+    NgTrackingBankReadAll(banks[0], slots);
+    CHECK(slots[0].channelId == 1 && slots[1].channelId == 2 && !slots[2].channelId);
+    CHECK(slots[0].constellation == faster && slots[1].constellation == faster);
+    CHECK(slots[0].state == 2 && slots[1].state == 2 && slots[0].prn != slots[1].prn);
+    NgTrackingBankDestroy(banks[0]);
+    NgTrackingBankDestroy(banks[1]);
+    NgAcquisitionDestroy(searches[0]);
+    NgAcquisitionDestroy(searches[1]);
+}
+
 /** Fill slots, pause searches at capacity, invalidate on a gap and reuse the same identities. */
 int main(void)
 {
@@ -65,6 +112,7 @@ int main(void)
     unsigned n;
     stream.sampleRateHz = 2048000;
     NgTrackingDefaults(&config);
+    config.channelCount = 3;
     config.gpsChannels = 2;
     config.galileoChannels = 1;
     config.workers = 2;
@@ -80,7 +128,8 @@ int main(void)
                                &error) == NG_OK);
     CHECK(NgTrackingBankLink(bank, galileoBank, &error) == NG_OK);
     NgTrackingBankRead(bank, slots);
-    CHECK(slots[0].channelId == 1 && slots[1].channelId == 2 && slots[2].channelId == 0);
+    CHECK(slots[0].channelId == 1 && slots[1].channelId == 2 && slots[2].channelId == 3 &&
+          slots[3].channelId == 0);
     CHECK(slots[0].state == 0 && slots[1].state == 0);
     view.samples = samples;
     view.meta.count = 2048;
@@ -108,12 +157,15 @@ int main(void)
     CHECK(slots[0].state == 2 && slots[0].epoch == 2);
     CHECK(slots[1].state == 2 && slots[1].epoch == 2);
     NgTrackingBankRead(galileoBank, slots);
-    CHECK(slots[0].channelId == 33 && slots[0].state == 2 && slots[0].epoch == 2);
-    CHECK(slots[1].channelId == 0);
+    CHECK(slots[2].channelId == 3 && slots[2].state == 2 && slots[2].epoch == 2 &&
+          slots[2].constellation == 2);
+    CHECK(slots[3].channelId == 0);
     NgTrackingBankDestroy(bank);
     NgTrackingBankDestroy(galileoBank);
     NgAcquisitionDestroy(acquisition);
     NgAcquisitionDestroy(galileoAcquisition);
-    puts("bounded channel slots and gap reuse passed");
+    AutomaticPool(1);
+    AutomaticPool(2);
+    puts("shared channel allocation, reservations and gap reuse passed");
     return 0;
 }

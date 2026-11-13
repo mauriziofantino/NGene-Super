@@ -83,7 +83,7 @@ static TNgTrackingSnapshot Run(int square, int xorMode, size_t split)
 }
 
 /** Independent long waveform exercises loop polarity and Galileo BOC replicas. */
-static void Convergence(unsigned system, int inverted, int offsetSign)
+static void Convergence(unsigned system, int inverted, int offsetSign, double codeError)
 {
     TNgTrackingConfig config;
     TNgStreamInfo stream = {0};
@@ -108,14 +108,14 @@ static void Convergence(unsigned system, int inverted, int offsetSign)
         CHECK(file);
         CHECK(fread(chips, 1, 4092, file) == 4092);
         fclose(file);
-        config.spacingChips = 0.125;
+        /* Exercise signal defaults; the previous shared half-chip setting was wrong for BOC. */
     }
     CHECK(NgTrackingCreate(&config, &stream, system, &tracking, &error) == NG_OK);
     seed.prn = 7;
     seed.confirmed = 1;
     seed.epoch = 9;
     seed.dopplerHz = 350.0 + 2.0 * offsetSign;
-    seed.codePhaseChips = 173.25 + 0.05 * offsetSign;
+    seed.codePhaseChips = 173.25 + codeError;
     CHECK(NgTrackingSeed(tracking, &seed, &error) == NG_OK);
     for (first = 0; first < 2048000; first += 4096) {
         for (n = 0; n < 4096; n++) {
@@ -141,6 +141,65 @@ static void Convergence(unsigned system, int inverted, int offsetSign)
     CHECK(snapshot.active && snapshot.pll);
     CHECK(fabs(snapshot.dopplerHz - 350) < 0.5);
     CHECK(fabs(snapshot.dllError) < 0.05);
+    if(system==2) {
+        unsigned middle=snapshot.tapCount/2;
+        if(fabs(codeError)>0.3) CHECK(!snapshot.mainPeakVerified);
+        else {
+            CHECK(snapshot.mainPeakVerified);
+            CHECK(hypot(snapshot.i[middle],snapshot.q[middle])>hypot(snapshot.i[middle-1],snapshot.q[middle-1]));
+            CHECK(hypot(snapshot.i[middle],snapshot.q[middle])>hypot(snapshot.i[middle+1],snapshot.q[middle+1]));
+        }
+    }
+    NgTrackingDestroy(tracking);
+}
+
+/** Reproducible complex white noise, independent of receiver kernels. */
+static double Gaussian(uint32_t *random)
+{
+    *random = *random * 1664525u + 1013904223u;
+    double u = ((double)(*random >> 8) + 0.5) / 16777216.0;
+    *random = *random * 1664525u + 1013904223u;
+    double v = ((double)(*random >> 8) + 0.5) / 16777216.0;
+    return sqrt(-2 * log(u)) * cos(6.2831853071795864769 * v);
+}
+
+/** Verify the native-complex moment C/N0 against a known independent noise level. */
+static void Cn0Reference(void)
+{
+    TNgTrackingConfig config;
+    TNgStreamInfo stream = {0};
+    TNgTracking *tracking;
+    TNgTrackingSnapshot snapshot;
+    TNgAcquisitionResult seed = {0};
+    TNgIq8 samples[2048];
+    TNgIqView view = {0};
+    TNgError error = {{0}};
+    int8_t chips[1023];
+    uint32_t random = 913;
+    unsigned ms, n;
+    stream.sampleRateHz = 2048000;
+    NgTrackingDefaults(&config);
+    CHECK(NgTrackingCreate(&config, &stream, 1, &tracking, &error) == NG_OK);
+    CHECK(NgGpsCaGenerate(1, chips, &error) == NG_OK);
+    seed.confirmed = 1;
+    seed.prn = 1;
+    seed.codePhaseChips = 0.25;
+    CHECK(NgTrackingSeed(tracking, &seed, &error) == NG_OK);
+    view.samples = samples;
+    view.meta.count = 2048;
+    for (ms = 0; ms < 1500; ++ms) {
+        for (n = 0; n < 2048; ++n) {
+            double phase = fmod(0.25 + (double)n * 1023000 / 2048000, 1023);
+            samples[n].i = (int8_t)lround((double)chips[(size_t)phase] + 8 * Gaussian(&random));
+            samples[n].q = (int8_t)lround(8 * Gaussian(&random));
+        }
+        view.meta.firstSample = (uint64_t)ms * 2048;
+        CHECK(NgTrackingProcess(tracking, &view, &error) == NG_OK);
+    }
+    NgTrackingRead(tracking, &snapshot);
+    double reference = 10 * log10(2048000.0 / (2 * 8 * 8));
+    fprintf(stderr, "C/N0 estimated %.3f, reference %.3f dB-Hz\n", snapshot.cn0DbHz, reference);
+    CHECK(snapshot.cn0Valid && fabs(snapshot.cn0DbHz - reference) < 3);
     NgTrackingDestroy(tracking);
 }
 
@@ -202,11 +261,14 @@ int main(void)
     NgTrackingDefaults(&config);
     config.tapCount = 4;
     CHECK(NgTrackingValidate(&config, &error) == NG_ERROR);
+    Cn0Reference();
     ReplicaParity();
-    Convergence(1, 0, 1);
-    Convergence(1, 1, -1);
-    Convergence(2, 0, 1);
-    Convergence(2, 1, -1);
+    Convergence(1, 0, 1, 0.05);
+    Convergence(1, 1, -1, -0.05);
+    Convergence(2, 0, 1, 0.05);
+    Convergence(2, 1, -1, -0.05);
+    Convergence(2, 0, 1, 0.5);
+    Convergence(2, 1, -1, -0.5);
     puts("tracking contracts passed");
     return 0;
 }

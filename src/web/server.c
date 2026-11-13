@@ -644,6 +644,12 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             cJSON_AddItemToArray(channels, row);
             Number(row, "channel_id", t->channelId);
             Number(row, "state", t->state);
+            Number(row, "reservation", t->reservation);
+            cJSON_AddBoolToObject(row,"cn0_valid",t->cn0Valid);
+            if(t->cn0Valid) Number(row,"cn0_db_hz",t->cn0DbHz);
+            else cJSON_AddNullToObject(row,"cn0_db_hz");
+            cJSON_AddBoolToObject(row,"main_peak_verified",t->mainPeakVerified);
+            Number(row,"code_delay_chips",t->codeDelayChips);
             Number(row, "prn", t->prn);
             Number(row, "constellation", t->constellation);
             cJSON_AddBoolToObject(row, "active", t->active);

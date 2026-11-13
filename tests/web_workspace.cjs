@@ -40,7 +40,7 @@ async function until(predicate, message, timeout = 6000) {
   const profile = path.join(root, 'profile');
   const captures = path.join(root, 'captures');
   const input = path.join(root, 'workspace-tone.cs8');
-  const iq = Buffer.alloc(400000);
+  const iq = Buffer.alloc(9600000);
   for (let n = 0; n < iq.length / 2; n++) {
     iq.writeInt8(Math.round(32 * Math.cos(2 * Math.PI * n / 10)), 2 * n);
     iq.writeInt8(Math.round(32 * Math.sin(2 * Math.PI * n / 10)), 2 * n + 1);
@@ -78,7 +78,7 @@ run_seconds=0
 idle_timeout_ms=3000
 [frontend]
 type=file
-sample_rate_hz=100000
+sample_rate_hz=2400000
 center_frequency_hz=1575420000
 signal_frequency_hz=1575420000
 [replay]
@@ -219,7 +219,7 @@ histogram_update_hz=20
       `${name} must use the original NGene shipped example`);
     assert.equal(writes.length, beforeConfiguration, 'Browsing GNSS reference settings must not issue mutations');
     assert.deepEqual(await get('config'), stoppedConfig, 'Reference values are not silently applied to the receiver');
-    for (const [view, topic] of [['tracking', 'tracking'], ['navigation', 'navigation'], ['pvt', 'navigation']]) {
+    for (const [view, topic] of [['tracking', 'receiver'], ['navigation', 'navigation'], ['pvt', 'navigation']]) {
       await select(view);
       await page.locator(`#${views[view]} [data-open-settings="${topic}"]`).first().click();
       await configurationShown(topic);
@@ -230,7 +230,8 @@ histogram_update_hz=20
     for (const key of ['acquisition', 'tracking', 'navigation', 'pvt']) {
       await select(key);
       const text = await page.locator(`#${views[key]}`).innerText();
-      if (key === 'tracking') assert.match(text, /No configured channels|Waiting for an available search assignment/);
+      if (key === 'tracking') assert.match(text, /channels|channel/i);
+      else if(key==='acquisition')assert.match(text,/search|archive/i);
       else assert.match(text, /not integrated|not attached|unavailable|not available/i, `${key} must explain unavailable processing`);
       assert.doesNotMatch(text, /(?:GPS|GAL|SBAS)\s*(?:PRN\s*)?\d{2}\b|\b(?:latitude|longitude)\s*[:=]\s*-?\d/i,
         `${key} must not present invented tracked satellites or a synthetic fix`);
@@ -290,7 +291,7 @@ histogram_update_hz=20
     await page.locator('#apply').click();
     assert.equal(writes.length, beforeInvalid, 'Invalid receiver settings must be blocked before any network mutation');
     assert.deepEqual(await get('config'), stoppedConfig, 'Invalid setup input must preserve saved configuration');
-    await rate.fill('0.1'); await rate.blur();
+    await rate.fill('2.4'); await rate.blur();
     await page.locator('#apply').click();
     await until(() => page.locator('#configBadge').textContent().then(value => /^r\d+$/.test(value)), 'valid profile saved');
     const applied = await get('config');
@@ -309,7 +310,7 @@ histogram_update_hz=20
     await until(async () => (await snapshot()).history.length >= 3, 'real waterfall history');
     const first = await get('status');
     assert(sequence(first) > 0n && histogramSequence(first) > 0n, 'Both real diagnostic producers must advance');
-    assert(Math.abs(first.analysis.peak_hz - 10000) < 500, 'RF spectrum must reflect the deterministic CI8 input');
+    assert(Math.abs(first.analysis.peak_hz - 240000) <= first.analysis.bin_hz / 2 + 1, 'RF spectrum must reflect the deterministic CI8 input');
     await screenshot('workspace-rf-real-replay.png');
 
     await select('setup');

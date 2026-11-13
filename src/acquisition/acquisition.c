@@ -113,6 +113,7 @@ static void SearchWorker(void *context)
             status = acquisition->strategy->search(acquisition->context, &acquisition->capture, prn,
                                                    &acquisition->config, Cancelled, acquisition,
                                                    &result, &error);
+            result.completedSeconds = NgMonotonicSeconds();
             NgMutexLock(&acquisition->mutex);
             if (!Cancelled(acquisition)) {
                 acquisition->snapshot.results[prn - 1] = result;

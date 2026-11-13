@@ -7,23 +7,24 @@
 /** Acquisition-only options; no tracking or navigation decisions are implied. */
 typedef struct {
     double falseAlarmProbability; /**< Per-cell Pfa, default 1e-9; shared noise policy. */
-    int enabled;        /**< Zero disables channel registration. */
-    unsigned firstPrn;  /**< First GPS C/A PRN, 1..32. */
-    unsigned lastPrn;   /**< Last PRN, firstPrn..32. */
-    int squareCarrier;  /**< Squared local sin/cos instead of sinusoidal carrier. */
-    int xorCorrelation; /**< Exact SIMD code sign XOR instead of multiplication. */
+    int enabled;                  /**< Zero disables channel registration. */
+    unsigned firstPrn;            /**< First GPS C/A PRN, 1..32. */
+    unsigned lastPrn;             /**< Last PRN, firstPrn..32. */
+    int squareCarrier;            /**< Squared local sin/cos instead of sinusoidal carrier. */
+    int xorCorrelation;           /**< Exact SIMD code sign XOR instead of multiplication. */
 } TNgAcquisitionConfig;
 
 /** One search outcome, referenced to the first sample of its capture. */
 typedef struct {
-    unsigned prn;          /**< GPS L1 C/A PRN. */
-    int confirmed;         /**< Nonzero only after 3 successes out of 4 independent attempts. */
-    double dopplerHz;      /**< Physical Doppler, excluding digital IF. */
-    double codePhaseChips; /**< Local replica phase at firstSample, modulo 1023. */
-    double peakRatio;      /**< Coarse power divided by its statistical threshold. */
-    unsigned successes;    /**< Confirmation successes, 0..4. */
-    uint64_t epoch;        /**< Common-ring continuity generation. */
-    uint64_t firstSample;  /**< Capture origin, not a GNSS time. */
+    double completedSeconds; /**< Monotonic completion time, scheduling only, never GNSS time. */
+    unsigned prn;            /**< GPS L1 C/A PRN. */
+    int confirmed;           /**< Nonzero only after 3 successes out of 4 independent attempts. */
+    double dopplerHz;        /**< Physical Doppler, excluding digital IF. */
+    double codePhaseChips;   /**< Local replica phase at firstSample, modulo 1023. */
+    double peakRatio;        /**< Coarse power divided by its statistical threshold. */
+    unsigned successes;      /**< Confirmation successes, 0..4. */
+    uint64_t epoch;          /**< Common-ring continuity generation. */
+    uint64_t firstSample;    /**< Capture origin, not a GNSS time. */
 } TNgAcquisitionResult;
 
 /** Bounded display of a completed coarse search. Code cells retain the maximum of
@@ -32,10 +33,11 @@ typedef struct {
 #define NG_ACQUISITION_CODE_BINS 1024u
 #define NG_ACQUISITION_DOPPLER_BINS 16u
 #define NG_ACQUISITION_MAX_DOPPLER_BINS 116u
+
 typedef struct {
     int valid;
     TNgAcquisitionResult result;
-    unsigned dopplerBins; /**< Actual grid rows: GPS 16, Galileo 116. */
+    unsigned dopplerBins;     /**< Actual grid rows: GPS 16, Galileo 116. */
     unsigned codePeriodChips; /**< Primary-code period: GPS 1023, Galileo 4092. */
     unsigned fftSize;
     double threshold;
@@ -47,12 +49,12 @@ typedef struct {
 /** Copied bounded worker telemetry. Results belong to the most recent tested capture per PRN. */
 typedef struct {
     double falseAlarmProbability; /**< Per-cell Pfa, default 1e-9; shared noise policy. */
-    int enabled;             /**< Registration enabled for this run. */
-    int searching;           /**< Worker is processing an owned capture. */
-    unsigned currentPrn;     /**< PRN being searched, zero while waiting. */
-    uint64_t searches;       /**< Completed satellite searches. */
-    uint64_t skippedSamples; /**< Samples not captured while search owns the buffer. */
-    uint64_t gaps;           /**< Discontinuities that invalidated the capture generation. */
+    int enabled;                  /**< Registration enabled for this run. */
+    int searching;                /**< Worker is processing an owned capture. */
+    unsigned currentPrn;          /**< PRN being searched, zero while waiting. */
+    uint64_t searches;            /**< Completed satellite searches. */
+    uint64_t skippedSamples;      /**< Samples not captured while search owns the buffer. */
+    uint64_t gaps;                /**< Discontinuities that invalidated the capture generation. */
     TNgAcquisitionResult results[32]; /**< Latest result per GPS PRN. */
     char message[256]; /**< Bounded algorithm error/status; no I/O on the sample path. */
 } TNgAcquisitionSnapshot;
@@ -101,7 +103,7 @@ int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TN
 void NgAcquisitionRead(TNgAcquisition *acquisition, TNgAcquisitionSnapshot *snapshot);
 /** Copy the last completed map for PRN 1..32; zero output if unavailable. */
 void NgAcquisitionReadSearchSpace(TNgAcquisition *acquisition, unsigned prn,
-                                 TNgAcquisitionSearchSpace *space);
+                                  TNgAcquisitionSearchSpace *space);
 /** Cancel/join worker and free owned memory after the engine has stopped using channel.
  * Accepts NULL. Results remain acquisition observations; no fake TRACKING transition. */
 void NgAcquisitionDestroy(TNgAcquisition *acquisition);

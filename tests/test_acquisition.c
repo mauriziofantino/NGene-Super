@@ -1,5 +1,6 @@
 /** @file test_acquisition.c @brief End-to-end acquisition with independent sample-time oracle. */
 #include "ngene/acquisition.h"
+#include "ngene/tracking.h"
 #include "ngene/dsp/gps_ca.h"
 #include "platform/platform.h"
 #include <math.h>
@@ -222,6 +223,48 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
         CHECK(snapshot.results[6].successes == 3);
         CHECK(snapshot.results[6].firstSample == 1000000);
         CHECK(snapshot.results[6].epoch == 3);
+        /* Consume the actual refined/confirmed result after an unaligned processing
+           delay. The independent waveform keeps its capture-relative code/carrier
+           origin, including data transitions and native inverted/wide formats. */
+        TNgTrackingConfig trackingConfig;
+        TNgTrackingSnapshot tracked;
+        TNgTracking *tracking=NULL;
+        size_t followed=0;
+        size_t future=count+(size_t)((uint64_t)rate*137u/1000u)+257;
+        size_t followCount=(size_t)((uint64_t)rate*160u/1000u);
+        NgTrackingDefaults(&trackingConfig);
+        CHECK(NgTrackingCreate(&trackingConfig,&stream,2,&tracking,&error)==NG_OK);
+        CHECK(NgTrackingSeed(tracking,&snapshot.results[6],&error)==NG_OK);
+        while(followed<followCount) {
+            size_t take=followCount-followed;
+            size_t n;
+            if(take>4096)take=4096;
+            for(n=0;n<take;++n) {
+                double time=(double)(future+followed+n)/rate;
+                double unwrapped=phase+time*1023000.0*(1+doppler/1575420000.0);
+                double chip=fmod(unwrapped,4092);
+                double angle=6.283185307179586*((double)digitalIf+doppler)*time+0.71;
+                double amplitude=5*chips[(size_t)chip]*(chip-floor(chip)<0.5?1:-1);
+                if(((unsigned long long)floor(unwrapped/4092))%2u)amplitude=-amplitude;
+                if(stream.spectrumInverted)angle=-angle;
+                int i=(int)lround(amplitude*cos(angle)+28*Noise(&random)+2.3);
+                int q=(int)lround(amplitude*sin(angle)+28*Noise(&random)-1.7);
+                samples[n].i=(int8_t)i;samples[n].q=(int8_t)q;
+                if(wide){wideSamples[2*n]=(int16_t)(i*101);wideSamples[2*n+1]=(int16_t)(q*101);}
+            }
+            window.samples=wide?(const TNgIq8 *)wideSamples:samples;
+            window.meta.firstSample=1000000+future+followed;window.meta.count=take;
+            CHECK(NgTrackingProcess(tracking,&window,&error)==NG_OK);
+            followed+=take;
+        }
+        NgTrackingRead(tracking,&tracked);
+        CHECK(tracked.active && tracked.mainPeakVerified);
+        CHECK(fabs(tracked.dopplerHz-doppler)<5);
+        CHECK(hypot(tracked.i[1],tracked.q[1])>hypot(tracked.i[0],tracked.q[0]));
+        CHECK(hypot(tracked.i[1],tracked.q[1])>hypot(tracked.i[2],tracked.q[2]));
+        printf("Galileo acquisition-to-tracking handoff: Fs=%u native=%s main-peak=%d\n",
+               rate,wide?"CI16":"CI8",tracked.mainPeakVerified);
+        NgTrackingDestroy(tracking);
     }
     NgAcquisitionDestroy(acquisition);
     free(samples);

@@ -225,6 +225,8 @@ int main(int argc, char **argv)
            frontend.info.centerFrequencyHz, frontend.info.bandwidthHz, config.windowSamples);
     printf("signal=%" PRIu64 " Hz digital_IF=%" PRId64 " Hz conditioning=%s\n",
            frontend.info.signalFrequencyHz, frontend.info.digitalIfHz, conditioner.name);
+    config.acquisition.enabled = config.galileoAcquisition.enabled = 1;
+    config.tracking.enabled = 1;
     if (!config.recordOnly && NgAcquisitionCreate(&config.acquisition, &frontend.info, &acquisition,
                                                   &acquisitionChannels[acquisitionCount], &error) != NG_OK) {
         fprintf(stderr, "%s\n", error.message);

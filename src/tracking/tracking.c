@@ -17,6 +17,12 @@ struct TNgTracking {
     TNgStreamInfo stream;         /**< Actual opened source geometry. */
     TNgTrackingSnapshot snapshot; /**< Latest completed integration. */
     TNgAcquisitionResult seed;    /**< Capture-referenced initialization. */
+    double startPhase;            /**< Code phase at the integration start. */
+    double m2, m4, cn0Smooth;     /**< Classic moment-method exponential memories. */
+    unsigned cn0Samples;          /**< Valid prompt moments accumulated since seed. */
+    double sideI[2], sideQ[2];    /**< Half-chip BOC qualification coherent sums. */
+    double peakPower[3];          /**< 100-ms accumulated left/prompt/right powers. */
+    unsigned peakMs;              /**< Signal-time age of the qualification sums. */
     unsigned system;              /**< Constellation. */
     unsigned period;              /**< Code length in chips. */
     int started;                  /**< At least one window accepted after seed. */
@@ -44,19 +50,25 @@ struct TNgTracking {
 void NgTrackingDefaults(TNgTrackingConfig *config)
 {
     memset(config, 0, sizeof(*config));
-    config->gpsChannels = 8;
-    config->galileoChannels = 8;
+    config->channelCount = 16;
+    config->galileoSpacingChips = 0.2;
+    config->gpsChannels = 0;
+    config->galileoChannels = 0;
     config->workers = 4;
     config->enabled = 1;
     config->tapCount = 3;
-    config->spacingChips = 0.5;
+    config->spacingChips = 0.4;
 }
 
 /** Validate all configurable arithmetic boundaries. */
 int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
 {
-    if (!config || config->gpsChannels > 32 || config->galileoChannels > 32 || !config->workers ||
-        config->workers > 16 || (config->enabled != 0 && config->enabled != 1) ||
+    if (!config || !config->channelCount || config->channelCount > 64 ||
+        config->gpsChannels + config->galileoChannels > config->channelCount ||
+        !isfinite(config->galileoSpacingChips) || config->galileoSpacingChips <= 0 ||
+        config->galileoSpacingChips >= 1.0 / 3.0 || config->gpsChannels > 32 ||
+        config->galileoChannels > 32 || !config->workers || config->workers > 16 ||
+        (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1) || config->tapCount < 3 ||
         config->tapCount > NG_TRACKING_MAX_TAPS || !(config->tapCount & 1u) ||
@@ -89,6 +101,16 @@ int NgTrackingCreate(const TNgTrackingConfig *config, const TNgStreamInfo *strea
     return NG_OK;
 }
 
+/** Reuse a slot's private workspace for either primary code without allocating. */
+int NgTrackingSetSignal(TNgTracking *tracking, unsigned constellation, TNgError *error)
+{
+    if (!tracking || (constellation != 1 && constellation != 2))
+        return NgFail(error, "Invalid tracking signal assignment");
+    tracking->system = constellation;
+    tracking->period = constellation == 1 ? 1023u : 4092u;
+    return NG_OK;
+}
+
 /** Reset every integration and loop memory when a new acquisition is accepted. */
 int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TNgError *error)
 {
@@ -97,6 +119,12 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
         !isfinite(result->dopplerHz) || !isfinite(result->codePhaseChips))
         return NgFail(error, "Tracking requires a finite confirmed acquisition seed");
     memset(&tracking->snapshot, 0, sizeof(tracking->snapshot));
+    tracking->m2 = tracking->m4 = tracking->cn0Smooth = 0;
+    tracking->cn0Samples = 0;
+    tracking->peakMs = 0;
+    memset(tracking->peakPower, 0, sizeof(tracking->peakPower));
+    memset(tracking->sideI, 0, sizeof(tracking->sideI));
+    memset(tracking->sideQ, 0, sizeof(tracking->sideQ));
     tracking->seed = *result;
     tracking->started = 0;
     tracking->accumulated = 0;
@@ -117,8 +145,9 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     tracking->snapshot.epoch = result->epoch;
     tracking->snapshot.tapCount = tracking->config.tapCount;
     for (k = 0; k < tracking->config.tapCount; ++k)
-        tracking->snapshot.offset[k] =
-            ((double)k - tracking->config.tapCount / 2u) * tracking->config.spacingChips;
+        tracking->snapshot.offset[k] = ((double)k - tracking->config.tapCount / 2u) *
+                                       (tracking->system == 2 ? tracking->config.galileoSpacingChips
+                                                              : tracking->config.spacingChips);
     memset(tracking->sumI, 0, sizeof(tracking->sumI));
     memset(tracking->sumQ, 0, sizeof(tracking->sumQ));
     if (tracking->system == 1)
@@ -139,6 +168,57 @@ static double Loop(double previous, double error, double oldError, double bandwi
     double t1 = gain / (wn * wn);
     double t2 = sqrt(2.0) / wn;
     return previous + t2 / t1 * (error - oldError) + delta / t1 * error;
+}
+
+/** Classic M2/M4 moment estimator, adapted to a full precision complex carrier.
+ * Unlike the packed IF path, no fixed carrier quantization correction is added.
+ * This observation never changes acquisition thresholds or certifies navigation lock. */
+static void EstimateCn0(TNgTracking *t, double i, double q, double duration)
+{
+    double power = i * i + q * q;
+    t->snapshot.cn0Valid = 0;
+    if (!t->cn0Samples) {
+        t->m2 = power;
+        t->m4 = power * power;
+    } else {
+        t->m2 += (power - t->m2) / 100.0;
+        t->m4 += (power * power - t->m4) / 100.0;
+    }
+    ++t->cn0Samples;
+    double squareSignal = 2 * t->m2 * t->m2 - t->m4;
+    if (t->cn0Samples >= 100 && squareSignal > 0 && duration > 0 && !t->config.squareCarrier) {
+        double signal = sqrt(squareSignal), noise = t->m2 - signal;
+        if (noise > 0 && signal > 0) {
+            double estimate = 10 * log10(signal / noise / duration);
+            if (isfinite(estimate)) {
+                t->cn0Smooth =
+                    t->cn0Smooth == 0 ? estimate : t->cn0Smooth + (estimate - t->cn0Smooth) / 100.0;
+                t->snapshot.cn0DbHz = t->cn0Smooth;
+                t->snapshot.cn0Valid = 1;
+            }
+        }
+    }
+}
+
+/** Observe half-chip BOC probes over 100 ms. Classic's side-peak correction
+ * helper is not called by its active tracking path. These observations therefore
+ * qualify the acquisition handoff without changing code phase or search decisions. */
+static void QualifyGalileoPeak(TNgTracking *t, double i, double q)
+{
+    unsigned side;
+    for (side = 0; side < 2; ++side)
+        t->peakPower[side == 0 ? 0 : 2] +=
+            t->sideI[side] * t->sideI[side] + t->sideQ[side] * t->sideQ[side];
+    t->peakPower[1] += i * i + q * q;
+    t->peakMs += 4;
+    memset(t->sideI, 0, sizeof(t->sideI));
+    memset(t->sideQ, 0, sizeof(t->sideQ));
+    if (t->peakMs < 100)
+        return;
+    double left = t->peakPower[0], prompt = t->peakPower[1], right = t->peakPower[2];
+    t->snapshot.mainPeakVerified = prompt > left && prompt > right;
+    memset(t->peakPower, 0, sizeof(t->peakPower));
+    t->peakMs = 0;
 }
 
 /** Commit one coherent integration and update Classic FLL/Costas PLL and power DLL. */
@@ -182,6 +262,22 @@ static void Complete(TNgTracking *t)
         }
         t->oldMean = t->meanFrequency;
     }
+    EstimateCn0(t, i / (double)t->accumulated, q / (double)t->accumulated,
+                (double)t->accumulated / t->stream.sampleRateHz);
+    if (t->system == 2)
+        QualifyGalileoPeak(t, i, q);
+    else
+        t->snapshot.mainPeakVerified = 1;
+    double elapsed = (double)(t->start - t->seed.firstSample) / t->stream.sampleRateHz;
+    double reference = fmod(t->seed.codePhaseChips +
+                                elapsed * 1023000.0 * (1.0 + t->seed.dopplerHz / 1575420000.0),
+                            t->period);
+    double delay = reference - t->startPhase;
+    if (delay > t->period / 2.0)
+        delay -= t->period;
+    if (delay < -(double)t->period / 2.0)
+        delay += t->period;
+    t->snapshot.codeDelayChips = delay;
     t->snapshot.firstSample = t->start;
     t->snapshot.endSample = t->expected;
     t->snapshot.dopplerHz = t->carrierHz - (double)t->stream.digitalIfHz;
@@ -225,6 +321,7 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
             if (!t->target)
                 t->target = 1;
             t->start = t->expected;
+            t->startPhase = t->codePhase;
         }
         count = t->target - t->accumulated;
         if (count > NG_TRACKING_CHUNK)
@@ -258,6 +355,17 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
             t->sumI[tap] += i;
             t->sumQ[tap] += q;
         }
+        if (t->system == 2) {
+            unsigned side;
+            for (side = 0; side < 2; ++side) {
+                double i, q;
+                NgTrackingReplica(t->replica, t->phases, count, t->chips, t->period,
+                                  side == 0 ? -0.5 : 0.5, 1);
+                NgSearchCorrelate(t->values, t->replica, count, t->config.xorCorrelation, &i, &q);
+                t->sideI[side] += i;
+                t->sideQ[side] += q;
+            }
+        }
         t->codePhase =
             fmod(t->codePhase + (double)count * t->snapshot.codeRateHz / t->stream.sampleRateHz,
                  t->period);
@@ -272,6 +380,8 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
                 t->accumulated = 0;
                 memset(t->sumI, 0, sizeof(t->sumI));
                 memset(t->sumQ, 0, sizeof(t->sumQ));
+                memset(t->sideI, 0, sizeof(t->sideI));
+                memset(t->sideQ, 0, sizeof(t->sideQ));
             } else
                 Complete(t);
         }

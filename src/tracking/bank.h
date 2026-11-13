@@ -10,6 +10,8 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
                          TNgError *error);
 /** Copy latest telemetry on the receiver thread only. */
 void NgTrackingBankRead(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[32]);
+/** Copy the unified receiver slot pool, including automatic reservations. */
+void NgTrackingBankReadAll(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[64]);
 /** Release tracking before destroying acquisition; accepts NULL. */
 void NgTrackingBankDestroy(TNgTrackingBank *bank);
 /** Link constellation admission counters on the receiver thread before starting RX. */

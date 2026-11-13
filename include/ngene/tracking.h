@@ -6,23 +6,30 @@
 
 /** Frozen per-run numerical and correlator configuration; no automatic precision changes. */
 typedef struct {
-    unsigned gpsChannels;     /**< GPS receiver slots, 0..32. */
-    unsigned galileoChannels; /**< Galileo receiver slots, 0..32. */
-    unsigned workers;         /**< Fixed tracking worker pool, 1..16. */
-    int enabled;              /**< Track confirmed acquisition results when nonzero. */
-    int squareCarrier;        /**< Explicit approximate square carrier; precise is default. */
-    int xorCorrelation;       /**< Exact sign XOR, independent of carrier mode. */
-    unsigned tapCount;        /**< Odd count 3..33, equally spaced around prompt. */
-    double spacingChips;      /**< Adjacent tap spacing; E/L are adjacent to prompt. */
+    unsigned channelCount;      /**< Total shared receiver slots, 1..64. */
+    double galileoSpacingChips; /**< Galileo adjacent tap delay, central BOC lobe. */
+    unsigned gpsChannels;       /**< Slots reserved for GPS; remaining slots are shared. */
+    unsigned galileoChannels;   /**< Slots reserved for Galileo; remaining slots are shared. */
+    unsigned workers;           /**< Fixed tracking worker pool, 1..16. */
+    int enabled;                /**< Track confirmed acquisition results when nonzero. */
+    int squareCarrier;          /**< Explicit approximate square carrier; precise is default. */
+    int xorCorrelation;         /**< Exact sign XOR, independent of carrier mode. */
+    unsigned tapCount;          /**< Odd count 3..33, equally spaced around prompt. */
+    double spacingChips;        /**< Adjacent tap spacing; E/L are adjacent to prompt. */
 } TNgTrackingConfig;
 
 /** Completed coherent integration, in native ADC units per sample. */
 typedef struct {
-    unsigned channelId;     /**< Stable slot identity, independent of assigned PRN. */
-    unsigned state;         /**< 0 waiting, 1 acquisition, 2 tracking. */
-    unsigned prn;           /**< Zero while unassigned. */
-    unsigned constellation; /**< 1 GPS, 2 Galileo E1-B. */
-    int active;             /**< NCO and loop state valid in current epoch. */
+    unsigned reservation;     /**< 0 automatic, 1 GPS, 2 Galileo. */
+    int cn0Valid;             /**< Moment estimate has accumulated enough coherent epochs. */
+    double cn0DbHz;           /**< Native-complex M2/M4 estimate; NaN/invalid when unavailable. */
+    int mainPeakVerified;     /**< Galileo half-chip probes support the central BOC peak. */
+    double codeDelayChips;    /**< Local code delay relative to acquisition prediction. */
+    unsigned channelId;       /**< Stable slot identity, independent of assigned PRN. */
+    unsigned state;           /**< 0 waiting, 1 acquisition, 2 tracking. */
+    unsigned prn;             /**< Zero while unassigned. */
+    unsigned constellation;   /**< 1 GPS, 2 Galileo E1-B. */
+    int active;               /**< NCO and loop state valid in current epoch. */
     int pll;              /**< FLL convergence passed; does not establish navigation eligibility. */
     uint64_t epoch;       /**< Continuity generation. */
     uint64_t firstSample; /**< Integration start. */
@@ -47,6 +54,8 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error);
  * No sample memory is retained; caller serializes process/seed/read/destroy. */
 int NgTrackingCreate(const TNgTrackingConfig *config, const TNgStreamInfo *stream,
                      unsigned constellation, TNgTracking **out, TNgError *error);
+/** Select signal-specific geometry on an unassigned slot; no allocation. */
+int NgTrackingSetSignal(TNgTracking *tracking, unsigned constellation, TNgError *error);
 /** Seed from a confirmed result. Propagate code phase from capture origin to next window.
  * Stale epochs and discontinuities are rejected by Process, requiring a new acquisition. */
 int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TNgError *error);

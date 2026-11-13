@@ -401,8 +401,7 @@ static void Progress(void *context, const TNgReceiverStats *stats)
         c->status.receiver = *stats;
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
         NgAcquisitionRead(c->galileoAcquisition, &c->status.galileoAcquisition);
-        NgTrackingBankRead(c->trackingBanks[0], c->status.tracking);
-        NgTrackingBankRead(c->trackingBanks[1], c->status.tracking + 32);
+        NgTrackingBankReadAll(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1], c->status.tracking);
         ArchiveSearchSpaces(c);
         NgMutexUnlock(&c->mutex);
     }
@@ -420,6 +419,9 @@ static void Progress(void *context, const TNgReceiverStats *stats)
 static void ReceiverWorker(void *context)
 {
     TNgControl *c = context;
+    c->runConfig.acquisition.enabled = 1;
+    c->runConfig.galileoAcquisition.enabled = 1;
+    c->runConfig.tracking.enabled = 1;
     TNgFrontend source;
     TNgChannel acquisitionChannels[2];
     size_t acquisitionCount = 0;
@@ -484,8 +486,7 @@ static void ReceiverWorker(void *context)
         NgMutexLock(&c->mutex);
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
         NgAcquisitionRead(c->galileoAcquisition, &c->status.galileoAcquisition);
-        NgTrackingBankRead(c->trackingBanks[0], c->status.tracking);
-        NgTrackingBankRead(c->trackingBanks[1], c->status.tracking + 32);
+        NgTrackingBankReadAll(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1], c->status.tracking);
         ArchiveSearchSpaces(c);
         c->status.acquisition.searching = 0;
         c->status.acquisition.currentPrn = 0;

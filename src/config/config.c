@@ -59,10 +59,10 @@ void NgConfigDefaults(TNgConfig *config)
     NgAnalysisDefaults(&config->analysis);
     NgAcquisitionDefaults(&config->acquisition);
     NgTrackingDefaults(&config->tracking);
-    /* Generic capture profiles remain capture-only unless explicitly enabled. */
-    config->acquisition.enabled = 0;
+    /* Acquisition/tracking are intrinsic receiver stages; record-only skips channel work. */
+    config->acquisition.enabled = 1;
     NgAcquisitionDefaults(&config->galileoAcquisition);
-    config->galileoAcquisition.enabled = 0;
+    config->galileoAcquisition.enabled = 1;
     config->rtlAutoGain = 1;
     config->rtlIfGainDb = -1;
     config->bladeGainDb = 30;
@@ -233,19 +233,27 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("tracking.gps_channels", tracking.gpsChannels)
     UINT_KEY("tracking.galileo_channels", tracking.galileoChannels)
     UINT_KEY("tracking.workers", tracking.workers)
-    BOOL_KEY("tracking.enabled", tracking.enabled)
+    if (strcmp(key,"tracking.enabled")==0 || strcmp(key,"acquisition.enabled")==0 ||
+        strcmp(key,"galileo_acquisition.enabled")==0) {
+        int legacy;
+        return ParseBool(value,&legacy); /* Accepted on import; stages remain active. */
+    }
+    UINT_KEY("receiver.channels", tracking.channelCount)
+    UINT_KEY("receiver.gps_reserved", tracking.gpsChannels)
+    UINT_KEY("receiver.galileo_reserved", tracking.galileoChannels)
+    REAL_KEY("tracking.galileo_spacing_chips", tracking.galileoSpacingChips)
     BOOL_KEY("tracking.square_carrier", tracking.squareCarrier)
     BOOL_KEY("tracking.xor_correlation", tracking.xorCorrelation)
     UINT_KEY("tracking.tap_count", tracking.tapCount)
     REAL_KEY("tracking.spacing_chips", tracking.spacingChips)
     REAL_KEY("acquisition.pfa", acquisition.falseAlarmProbability)
-    BOOL_KEY("acquisition.enabled", acquisition.enabled)
+
     UINT_KEY("acquisition.first_prn", acquisition.firstPrn)
     UINT_KEY("acquisition.last_prn", acquisition.lastPrn)
     BOOL_KEY("acquisition.square_carrier", acquisition.squareCarrier)
     BOOL_KEY("acquisition.xor_correlation", acquisition.xorCorrelation)
     REAL_KEY("galileo_acquisition.pfa", galileoAcquisition.falseAlarmProbability)
-    BOOL_KEY("galileo_acquisition.enabled", galileoAcquisition.enabled)
+
     UINT_KEY("galileo_acquisition.first_prn", galileoAcquisition.firstPrn)
     UINT_KEY("galileo_acquisition.last_prn", galileoAcquisition.lastPrn)
     BOOL_KEY("galileo_acquisition.square_carrier", galileoAcquisition.squareCarrier)
@@ -578,9 +586,6 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (NgTrackingValidate(&config->tracking, error) != NG_OK) return NG_ERROR;
     if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK)
         return NG_ERROR;
-    if ((config->acquisition.enabled || config->galileoAcquisition.enabled) && !config->recordOnly &&
-        (config->sampleRateHz < 2048000u || config->sampleRateHz > 20000000u))
-        return NgFail(error, "Acquisition requires 2.048..20 Msps");
     if (config->dcRemoval != 0 ||
         (config->streamFormat != 0 && config->streamFormat != NG_FORMAT_CI8 &&
          config->streamFormat != NG_FORMAT_CI16))
@@ -769,25 +774,21 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     fprintf(output, "\n[receiver]\nmode=%s\nrun_seconds=%.17g\nidle_timeout_ms=%u\n",
             (config->recordOnly) != 0 ? "record" : "capture", config->runSeconds,
             config->idleTimeoutMs);
-    fprintf(output, "\n[tracking]\ngps_channels=%u\ngalileo_channels=%u\nworkers=%u\n",
-        config->tracking.gpsChannels, config->tracking.galileoChannels, config->tracking.workers);
-    fprintf(output, "enabled=%s\nsquare_carrier=%s\nxor_correlation=%s\ntap_count=%u\nspacing_chips=%.17g\n",
-        config->tracking.enabled ? "true" : "false", config->tracking.squareCarrier ? "true" : "false",
-        config->tracking.xorCorrelation ? "true" : "false", config->tracking.tapCount, config->tracking.spacingChips);
-    fprintf(output,
-            "\n[acquisition]\nenabled=%s\nfirst_prn=%u\nlast_prn=%u\n"
-            "square_carrier=%s\nxor_correlation=%s\npfa=%.17g\n",
-            config->acquisition.enabled ? "true" : "false", config->acquisition.firstPrn,
-            config->acquisition.lastPrn, config->acquisition.squareCarrier ? "true" : "false",
-            config->acquisition.xorCorrelation ? "true" : "false",
-            config->acquisition.falseAlarmProbability);
-    fprintf(output,
-            "\n[galileo_acquisition]\nenabled=%s\nfirst_prn=%u\nlast_prn=%u\n"
-            "square_carrier=%s\nxor_correlation=%s\npfa=%.17g\n",
-            config->galileoAcquisition.enabled ? "true" : "false", config->galileoAcquisition.firstPrn,
-            config->galileoAcquisition.lastPrn, config->galileoAcquisition.squareCarrier ? "true" : "false",
-            config->galileoAcquisition.xorCorrelation ? "true" : "false",
-            config->galileoAcquisition.falseAlarmProbability);
+    fprintf(output,"channels=%u\ngps_reserved=%u\ngalileo_reserved=%u\n",
+            config->tracking.channelCount,config->tracking.gpsChannels,config->tracking.galileoChannels);
+    fprintf(output,"\n[tracking]\nworkers=%u\nsquare_carrier=%s\nxor_correlation=%s\n"
+                   "tap_count=%u\nspacing_chips=%.17g\ngalileo_spacing_chips=%.17g\n",
+            config->tracking.workers,config->tracking.squareCarrier?"true":"false",
+            config->tracking.xorCorrelation?"true":"false",config->tracking.tapCount,
+            config->tracking.spacingChips,config->tracking.galileoSpacingChips);
+    fprintf(output,"\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\nsquare_carrier=%s\n"
+                   "xor_correlation=%s\npfa=%.17g\n",config->acquisition.firstPrn,
+            config->acquisition.lastPrn,config->acquisition.squareCarrier?"true":"false",
+            config->acquisition.xorCorrelation?"true":"false",config->acquisition.falseAlarmProbability);
+    fprintf(output,"\n[galileo_acquisition]\nfirst_prn=%u\nlast_prn=%u\nsquare_carrier=%s\n"
+                   "xor_correlation=%s\npfa=%.17g\n",config->galileoAcquisition.firstPrn,
+            config->galileoAcquisition.lastPrn,config->galileoAcquisition.squareCarrier?"true":"false",
+            config->galileoAcquisition.xorCorrelation?"true":"false",config->galileoAcquisition.falseAlarmProbability);
     fprintf(output,
             "\n[recording]\nenabled=%s\nprefix=%s\nqueue_blocks=%zu\nsegment_samples=%" PRIu64 "\n",
             (config->recordingEnabled) != 0 ? "true" : "false", config->recordingPrefix,

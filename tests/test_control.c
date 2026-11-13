@@ -100,8 +100,8 @@ int main(void)
     snprintf(directory, sizeof(directory), "ngene_control_test_%02x%02x%02x%02x", random[0],
              random[1], random[2], random[3]);
     NgConfigDefaults(&cfg);
-    cfg.sampleRateHz = 100000;
-    cfg.windowSamples = 1000;
+    cfg.sampleRateHz = 2400000;
+    cfg.windowSamples = 2400;
     cfg.runSeconds = 0;
     snprintf(cfg.replayPath, sizeof(cfg.replayPath), "%s_input.cs8", directory);
     CHECK(NgTestWriteTone(cfg.replayPath, 50000, cfg.sampleRateHz) == NG_OK);
