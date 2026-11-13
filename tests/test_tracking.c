@@ -151,35 +151,40 @@ static void ReplicaParity(void)
     float replica[2049];
     int8_t primary[4092], expanded[8184];
     unsigned system, tap, k, trial;
-    const size_t counts[] = {1,2,3,37,2049};
-    for(k=0;k<4092;++k) {
-        primary[k] = (k%7)<3 ? 1 : -1;
-        expanded[2*k] = primary[k]; expanded[2*k+1] = (int8_t)-primary[k];
+    const size_t counts[] = {1, 2, 3, 37, 2049};
+    for (k = 0; k < 4092; ++k) {
+        primary[k] = (k % 7) < 3 ? 1 : -1;
+        expanded[2 * k] = primary[k];
+        expanded[2 * k + 1] = (int8_t)-primary[k];
     }
-    for(system=1;system<=2;++system) {
-        unsigned period = system==1?1023u:4092u;
-        for(trial=0;trial<5;++trial) {
+    for (system = 1; system <= 2; ++system) {
+        unsigned period = system == 1 ? 1023u : 4092u;
+        for (trial = 0; trial < 5; ++trial) {
             size_t count = counts[trial], n;
-            NgTrackingCodePhases(phases,count,0.123456,1023000.0+0.123,16000000.0);
-            for(n=0;n<count;n++) CHECK(phases[n]==0.123456+(double)n*(1023000.0+0.123)/16000000.0);
-            if(count>=3) {
-                phases[count-3]=nextafter((double)period,0);
-                phases[count-2]=(double)period;
-                phases[count-1]=nextafter((double)period,INFINITY);
+            NgTrackingCodePhases(phases, count, 0.123456, 1023000.0 + 0.123, 16000000.0);
+            for (n = 0; n < count; n++)
+                CHECK(phases[n] == 0.123456 + (double)n * (1023000.0 + 0.123) / 16000000.0);
+            if (count >= 3) {
+                phases[count - 3] = nextafter((double)period, 0);
+                phases[count - 2] = (double)period;
+                phases[count - 1] = nextafter((double)period, INFINITY);
             }
-            for(tap=0;tap<33;++tap) {
-                double offset=((double)tap-16)*0.125;
-                NgTrackingReplica(replica,phases,count,system==1?primary:expanded,period,offset,system==2);
-                for(n=0;n<count;++n) {
-                    double wrapped=fmod(fmod(phases[n]-offset,period)+period,period);
-                    int sign=primary[(size_t)wrapped];
-                    if(system==2 && wrapped-floor(wrapped)>=0.5)sign=-sign;
-                    CHECK(replica[n]==(float)sign);
+            for (tap = 0; tap < 33; ++tap) {
+                double offset = ((double)tap - 16) * 0.125;
+                NgTrackingReplica(replica, phases, count, system == 1 ? primary : expanded, period,
+                                  offset, system == 2);
+                for (n = 0; n < count; ++n) {
+                    double wrapped = fmod(fmod(phases[n] - offset, period) + period, period);
+                    int sign = primary[(size_t)wrapped];
+                    if (system == 2 && wrapped - floor(wrapped) >= 0.5)
+                        sign = -sign;
+                    CHECK(replica[n] == (float)sign);
                 }
             }
         }
     }
 }
+
 /** Compare arbitrary window splits and independent sign-XOR selection. */
 int main(void)
 {

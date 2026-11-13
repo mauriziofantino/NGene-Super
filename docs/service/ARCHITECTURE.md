@@ -256,5 +256,5 @@ directories. See the [current operator manual](https://github.com/mauriziofantin
 NGene::Tracking now links the reusable DSP layer independently of devices and control.
 CLI/service install a shared-window acquisition/tracking composition with private
 per-PRN state. See [TRACKING.md](TRACKING.md) for ownership, replacement, telemetry,
-serial scheduling and the remaining lock-supervisor limitations. Earlier future-only
+bounded slot allocation, the shared tracking worker pool and remaining lock-supervisor limitations. Earlier future-only
 tracking descriptions above are superseded for the delivered DLL/FLL/PLL scope.

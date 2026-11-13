@@ -1,5 +1,6 @@
 /** @file channel.c @brief Shared channel transition contract, independent of engine/platform. */
 #include "ngene/channel.h"
+
 /**
  * @brief Check a proposed receiver channel state transition.
  *
@@ -34,4 +35,3 @@ int NgChannelTransitionValid(TNgChannelState from, TNgChannelState to)
         return 0;
     }
 }
-

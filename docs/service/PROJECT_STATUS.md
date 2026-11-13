@@ -25,7 +25,7 @@ selector for results and synchronized search-space views. Synthetic service/brow
 validation and the shared wrong-Doppler noise policy are established; no recorded
 RF replay/live result is established. See [the API scope and limits](GALILEO_ACQUISITION.md).
 
-A first GPS/Galileo tracking loop integration now follows confirmed acquisition in CLI and service, with a replaceable tracking library, configurable multi-tap correlation and browser delay/time plots. See [tracking scope and validation](TRACKING.md); complete Classic lock supervision, HOLDOVER and fast reacquisition remain pending.
+A first GPS/Galileo tracking loop integration now follows confirmed acquisition in CLI and service, with a replaceable tracking library, configurable multi-tap correlation and browser delay/time plots. The Channels view now follows bounded, reusable slots through waiting/acquisition/tracking, with configurable GPS/Galileo capacities and one fixed tracking pool. SIMD replica generation replaces the initial per-tap scalar wrapping loops. See [tracking scope and validation](TRACKING.md); complete Classic lock supervision, HOLDOVER and fast reacquisition remain pending.
 
 This is **not yet an end-to-end GNSS receiver**: navigation-message decoding,
 observables, and PVT/PNT are not integrated. SBAS acquisition and multibit

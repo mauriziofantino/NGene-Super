@@ -55,8 +55,8 @@ void NgTrackingDefaults(TNgTrackingConfig *config)
 /** Validate all configurable arithmetic boundaries. */
 int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
 {
-    if (!config || config->gpsChannels > 32 || config->galileoChannels > 32 ||
-        !config->workers || config->workers > 16 || (config->enabled != 0 && config->enabled != 1) ||
+    if (!config || config->gpsChannels > 32 || config->galileoChannels > 32 || !config->workers ||
+        config->workers > 16 || (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1) || config->tapCount < 3 ||
         config->tapCount > NG_TRACKING_MAX_TAPS || !(config->tapCount & 1u) ||
@@ -125,9 +125,10 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
         return NgGpsCaGenerate(result->prn, tracking->chips, error);
     for (k = 0; k < 4092; ++k) {
         int8_t sign = (ngGalileoCodes[result->prn - 1][k / 8] & (1u << (7u - k % 8u))) ? -1 : 1;
-        tracking->chips[2*k] = sign;
-        tracking->chips[2*k+1] = (int8_t)-sign;
-    }    return NG_OK;
+        tracking->chips[2 * k] = sign;
+        tracking->chips[2 * k + 1] = (int8_t)-sign;
+    }
+    return NG_OK;
 }
 
 /** Classic second-order recurrence; coefficients retain zeta=1/sqrt(2), wn=B/0.53. */
@@ -245,13 +246,15 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
                 t->values[n].q = (float)(NgIqComponent(window, position + n, 1) *
                                          (t->stream.spectrumInverted ? -1 : 1));
             }
-        }        NgSearchMix(t->values, t->carrier, count);
-        NgTrackingCodePhases(t->phases,count,t->codePhase,t->snapshot.codeRateHz,
-                              t->stream.sampleRateHz);
+        }
+        NgSearchMix(t->values, t->carrier, count);
+        NgTrackingCodePhases(t->phases, count, t->codePhase, t->snapshot.codeRateHz,
+                             t->stream.sampleRateHz);
         for (tap = 0; tap < t->config.tapCount; ++tap) {
             double i, q;
-            NgTrackingReplica(t->replica,t->phases,count,t->chips,t->period,
-                               t->snapshot.offset[tap],t->system==2);            NgSearchCorrelate(t->values, t->replica, count, t->config.xorCorrelation, &i, &q);
+            NgTrackingReplica(t->replica, t->phases, count, t->chips, t->period,
+                              t->snapshot.offset[tap], t->system == 2);
+            NgSearchCorrelate(t->values, t->replica, count, t->config.xorCorrelation, &i, &q);
             t->sumI[tap] += i;
             t->sumQ[tap] += q;
         }

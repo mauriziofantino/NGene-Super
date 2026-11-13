@@ -60,19 +60,39 @@ explicit chip-delay geometry rather than retaining its sample-pointer arrangemen
 links DSP only. `NGENE_TRACKING_SOURCE` selects alternative source implementations
 of the public API at CMake configuration time. There is no dynamic plugin ABI.
 
-`src/tracking/bank.c` composes a borrowed acquisition channel with 32 private PRN
-workspaces. All workspaces consume the same borrowed engine window, synchronously;
-none has a ring cursor or retains its samples. The acquisition worker still owns
-its frozen capture. Confirmed results are copied under its existing snapshot lock
-and seeded on the receiver thread, once per capture. Channels already active are
-not restarted by repeat detections. CLI and service both install this composition.
-The current bank runs its satellites sequentially; per-satellite pool dispatch and
-tracking-aware acquisition budgets remain scheduling work, not implemented claims.
-All allocations occur before reception; no allocation or I/O is added per window.
+`src/tracking/bank.c` allocates bounded receiver slots per enabled constellation,
+not a tracking channel for every detected PRN. Default capacities follow Classic's
+sample GNSS_RX.conf: eight GPS slots and eight Galileo slots; SBAS is not integrated.
+Counts are independently configurable in 0..32. A slot retains its channel ID when
+assigned a PRN and when recycled after discontinuity. Waiting, acquisition and
+tracking are independently represented; the same PRN cannot occupy two tracking
+slots. Completed acquisition transfers a free slot to tracking. Assigned PRNs are
+excluded from subsequent searches, and search admission pauses when capacity fills.
+
+All tracking slots share one fixed worker pool (four workers by default), private
+NCOs/scratch and an immutable borrowed engine window. GPS and Galileo share that
+same worker budget. One barrier completes all tracking before capture copies or
+new search admission. With no active tracking slots, idle DSP jobs are not dispatched.
+There is no per-satellite thread or independent sample cursor. Workers never publish
+to controller/GUI state directly. The channel transition validator lives in the
+base library; the reusable dispatcher lives in the platform library to avoid a
+tracking/engine dependency cycle. On timeline discontinuity the owner resets slot
+registrations before dispatching, then invalidated slots return to acquisition;
+no samples are bridged and no HOLDOVER behavior is claimed.
+
+Acquisition still has one sequential strategy worker per enabled constellation,
+with its own frozen capture. Scheduling masks are mutex-protected, applied between
+satellites; a single-satellite search already in flight finishes unchanged. Classic's
+4/3/2/1 concurrent-acquisition limits are upper bounds: two constellation workers
+already stay below the limits through 16 tracked satellites. Above 16, GPS retains
+the sole new admission while it has free slots. At most one Galileo attempt runs
+while GPS is filling, as in Classic. The single-satellite search, refinements,
+confirmation and thresholds are unchanged. CLI and service install the same slot
+allocator. All memory, thread and job resources are prepared before frontend start.
 
 Controller progress/final callbacks copy telemetry under the controller mutex.
 HTTP and WebSocket serialize copies, never live workspace pointers. Memory and
-telemetry are bounded to 64 PRNs and 33 taps per channel. UI history retains at most
+telemetry are bounded to 64 slots and 33 taps per channel. UI history retains at most
 240 received snapshots per channel, timestamps them with sample indices/Fs, and
 breaks lines over missing telemetry/integrations. It is a sampled display, not a
 lossless export of every integration.
@@ -82,6 +102,9 @@ lossless export of every integration.
 ```ini
 [tracking]
 enabled=true
+gps_channels=8
+galileo_channels=8
+workers=4
 square_carrier=false
 xor_correlation=false
 tap_count=9
@@ -100,7 +123,7 @@ preserves amplitude. Fast square carrier is explicitly approximate, with harmoni
 images; it is experimental and has no demonstrated RF sensitivity/lock accuracy.
 There is no automatic downgrade in response to CPU load.
 
-The Tracking view selects a GPS/Galileo channel and shows measured tap points
+The Channels view shows clickable slot status and selects a GPS/Galileo channel and shows measured tap points
 versus chip delay and signal time. Magnitude, I and Q can be selected. The dashed
 GPS triangle is an ideal reference, never synthesized measurements. Galileo BOC
 is not represented as a triangular reference. FLL/PLL text reports the running
@@ -111,7 +134,7 @@ loop, without fabricated C/N0, navigation eligibility or PVT fixes.
 Windows x64, Clang 22.1.3, CMake 4.3.1, Ninja, Release, strict compiler diagnostics.
 Build directory: `build/tracking-validation`. Native SDR adapters disabled for this
 validation. A separate Ninja build was used because the installed Visual Studio
-instance remains incomplete; this is not acceptance of the native MSVC presets.
+instance was incomplete at the initial validation; this is not acceptance of the native MSVC presets.
 The local build supplies `_CRT_SECURE_NO_WARNINGS` and an explicit existing dumpbin
 path, required by the host's incomplete developer environment.
 
@@ -140,3 +163,62 @@ were rerun in a process-local developer environment with Ninja in PATH and passe
 Both PowerShell helper suites also passed explicitly. GPS plus tracking and mixed
 GPS/Galileo plus tracking browser runs passed, including restart in Galileo-only
 mode. The nine-workspace regression passed. No host-wide execution policy was changed.
+
+## Throughput and channel lifecycle correction, 2026-11-13
+
+The first integration's serial bank and per-sample/per-tap double `fmod` replica
+loops were not suitable for high-rate multi-channel operation. Input conversion
+now selects the CI8 loop once per block; wider formats keep native signed levels.
+Double code phases are computed once per chunk using SSE2/ARM64 NEON lanes, then
+reused across every tap. Replica generation uses SIMD wrap/index operations and
+preexpanded Galileo BOC half chips, preserving the previous double wrap rounding.
+There is no Q32 phase approximation, sign-only ADC quantization or scalar `fmod`
+inside the sample/tap loops. The carrier generator, complex mixer and correlator
+continue to use their existing SIMD paths on x64. Double coherent accumulation
+and independent fast/precise choices are retained. ARM64 replica intrinsics are
+implemented but no ARM execution result is established here.
+
+The isolated probe in `benchmarks/tracking/` is excluded from normal builds. One
+Windows x64 Release run (same machine, generated deterministic samples, precise
+carrier/products, half GPS and half Galileo) measured:
+
+| Slots | Fs | Taps | Workers | Signal duration | Elapsed |
+|---|---|---|---|---|---|
+| 8, original serial implementation | 16 Msps | 3 | 1 | 50 ms | 187.916 ms |
+| 8, updated kernels | 16 Msps | 3 | 1 | 50 ms | 45.018 ms |
+| 8, updated kernels and pool | 16 Msps | 3 | 4 | 50 ms | 20.462 ms |
+| 8, original serial implementation | 16 Msps | 9 | 1 | 50 ms | 533.264 ms |
+| 8, updated kernels | 16 Msps | 9 | 1 | 50 ms | 99.562 ms |
+| 8, updated kernels and pool | 16 Msps | 9 | 4 | 50 ms | 46.991 ms |
+| 16, updated kernels and pool | 16 Msps | 3 | 4 | 200 ms | 135.454 ms |
+| 16, updated kernels and pool | 16 Msps | 9 | 4 | 200 ms | 279.854 ms |
+| 16, updated kernels and pool | 2.4 Msps | 9 | 4 | 200 ms | 53.098 ms |
+
+Serial/parallel checksums match for the same input/configuration; the eight-slot
+50-ms cases also match the saved pre-change checksums. These are isolated tracking
+measurements, not whole-receiver deadlines: USB, acquisition, analysis, recording,
+OS contention and thermal effects are excluded. In particular, 16 slots with nine
+taps at 16 Msps remain above real time on this machine; no live guarantee is made.
+Do not compensate by silently reducing precision, dropping samples or enlarging
+buffers. The existing stop-on-overflow policy remains intact. Device enumeration
+reported zero HackRF devices, so the user's physical ingress overflow has not been
+retested here.
+
+Regression coverage now also includes SIMD-vs-original replica parity at exact
+chip/wrap/BOC boundaries and odd tails; bounded GPS/Galileo slot allocation sharing
+one pool; no duplicate PRNs; paused acquisition at capacity; and reuse of the same
+slot identities after a gap. Browser tests click waiting and tracking slots and
+verify detailed plots. The mixed test capture is four seconds long so Galileo's
+search need not finish before the artificial one-second loop reset of the former
+fixture. This changes the test input duration, not acquisition decisions.
+
+Final validation of the slot/pool/SIMD correction: Windows x64 Clang/Ninja Release
+with native HackRF support, existing local HackRF SDK and runtime staging:
+**21/21 CTest cases passed** in `build/tracking-hackrf`, including the mocked native
+HackRF contract. The production build has `NGENE_TRACKING_BENCHMARK=OFF` and no
+additional profiling in the receiver. The mixed GPS/Galileo and Galileo-only browser
+scenario passed with clickable waiting/tracking slots and nine-tap plots, as did
+the nine-workspace regression. Executable: `build/tracking-hackrf/ngene.exe`.
+The hardware enumeration test passed with zero devices; it is not an RF reception
+or USB-throughput acceptance result. Existing native MSVC build resolution was
+reported by the user separately and is not reclassified as a tracking RF result.
