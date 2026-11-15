@@ -70,7 +70,34 @@ function pvtMarkup() {
     'Code and Doppler measurements share one input epoch. GPS and Galileo have separate clock biases.',
     settingsButton('navigation', 'Navigation & PVT settings') + button('tracking', 'Inspect channels')) +
     '<section class="card tracking-panel"><h2 data-pvt-state>No solution available</h2><p data-pvt-counts></p><dl data-pvt-values></dl><p data-pvt-model></p></section>' +
-    '<section class="card tracking-panel"><h2>Receiver position and track</h2><div data-pvt-map></div></section>';
+    '<section class="card tracking-panel"><h2>Receiver position and track</h2><div data-pvt-map></div></section>' +
+    '<section class="card tracking-panel"><h2>Satellite skyplot</h2><p>Satellites used at the solution epoch. GPS: blue; Galileo: amber. Radius indicates elevation: horizon at the edge, zenith at the centre.</p><div data-pvt-sky></div></section>';
+}
+
+/** Draw only real broadcast geometry, and only while the PVT view is visible. */
+function renderSkyplot(pvt) {
+  const host=document.querySelector('[data-pvt-sky]');
+  if(document.getElementById('pvtView').hidden || document.getElementById('pvtView').classList.contains('hidden'))return;
+  const key=JSON.stringify([pvt?.epoch,pvt?.sample,pvt?.available,pvt?.sky]);
+  if(host.dataset.geometry===key)return;
+  host.dataset.geometry=key;host.replaceChildren();
+  if(!pvt?.available || !pvt.sky?.length){host.textContent='Waiting for a position and valid broadcast geometry.';return;}
+  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
+  svg.setAttribute('viewBox','0 0 360 360');svg.setAttribute('role','img');
+  svg.setAttribute('aria-label','Satellite azimuth and elevation');svg.classList.add('pvt-skyplot');
+  const add=(tag,attrs,text)=>{const e=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);if(text!==undefined)e.textContent=text;svg.append(e);return e;};
+  for(const r of [50,100,150])add('circle',{cx:180,cy:180,r,fill:'none',stroke:'#476078'});
+  add('path',{d:'M30 180H330M180 30V330',stroke:'#476078',fill:'none'});
+  for(const [label,x,y] of [['N',180,18],['E',346,185],['S',180,352],['W',14,185],['30°',188,84],['60°',188,134]])add('text',{x,y,fill:'#9bb8cc','text-anchor':'middle'},label);
+  for(const sat of pvt.sky){
+    if(!Number.isFinite(sat.azimuth_deg)||!Number.isFinite(sat.elevation_deg)||sat.elevation_deg<0)continue;
+    const r=150*(1-sat.elevation_deg/90),az=sat.azimuth_deg*Math.PI/180,x=180+r*Math.sin(az),y=180-r*Math.cos(az);
+    const colour=sat.constellation===1?'#69c6f4':'#f4bc68',label=(sat.constellation===1?'G':'E')+String(sat.prn).padStart(2,'0');
+    const dot=add('circle',{cx:x,cy:y,r:7,fill:colour});
+    const title=document.createElementNS(ns,'title');title.textContent=`${label}: azimuth ${sat.azimuth_deg.toFixed(1)}°, elevation ${sat.elevation_deg.toFixed(1)}°`;dot.append(title);
+    add('text',{x,y:y-12,fill:colour,'text-anchor':'middle','font-size':12},label);
+  }
+  host.append(svg);
 }
 
 function recordingMarkup() {
@@ -258,12 +285,17 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     onChannelInterest(observed?Number(observed[1]):0);
     const pvt=live?.pvt, pvtState=document.querySelector('[data-pvt-state]');
     pvtMap.update(pvt, live?.run_id, live?.state === 'running');
+    renderSkyplot(pvt);
     pvtState.textContent=pvt?.available?'Broadcast least-squares solution':'No solution available';
     document.querySelector('[data-pvt-counts]').textContent=pvt?`Eligible measurements: ${pvt.satellites} (GPS ${pvt.gps}, Galileo ${pvt.galileo}) | Epoch ${pvt.epoch}, sample ${pvt.sample}`:'Waiting for receiver';
     document.querySelector('[data-pvt-model]').textContent=pvt?.model||'Waiting for validated navigation data and consistent ephemerides.';
     const pvtValues=document.querySelector('[data-pvt-values]');pvtValues.replaceChildren();
     if(pvt?.available) for(const [label,value] of [['Latitude',pvt.latitude_deg.toFixed(8)+' deg'],['Longitude',pvt.longitude_deg.toFixed(8)+' deg'],['Ellipsoidal height',pvt.height_m.toFixed(2)+' m'],['Residual RMS',pvt.residual_rms_m.toFixed(2)+' m'],['Nominal receiver TOW',pvt.tow_seconds.toFixed(6)+' s'],['Velocity ECEF',pvt.velocity_available?[pvt.velocity_x_mps,pvt.velocity_y_mps,pvt.velocity_z_mps].map(v=>v.toFixed(3)).join(', ')+' m/s':'Unavailable']]) {
       const row=document.createElement('div'),term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=value;row.append(term,description);pvtValues.append(row);
+    }
+    if(pvt?.available) for(const label of ['GDOP','HDOP','VDOP']) {
+      const row=document.createElement('div'),term=document.createElement('dt'),description=document.createElement('dd');
+      term.textContent=label;description.textContent=pvt.dop_available?Number(pvt[label.toLowerCase()]).toFixed(2):'Unavailable';row.append(term,description);pvtValues.append(row);
     }
     const configuredSource = profile['frontend.type'];
     const source = SOURCE_NAMES[configuredSource] || configuredSource || UNAVAILABLE;
@@ -367,6 +399,15 @@ function updateTracking(channels, run, status) {
       t.bit_synchronized?String(t.navigation_symbols||0):'—',
       t.tow_valid?String(t.tow_seconds):'—'])row.insertCell().textContent=value;
     row.onclick=event=>{if(!event.target.closest('a'))open(t.channel_id);};
+  }
+  for(const row of body.rows) {
+    const t=channels.find(t=>String(t.channel_id)===row.dataset.channelId), cell=row.cells[5];
+    const value=cell.textContent;cell.replaceChildren();
+    const meter=document.createElement('meter'),number=document.createElement('span');
+    meter.min=0;meter.max=60;meter.low=25;meter.high=35;meter.optimum=45;
+    meter.value=t.cn0_valid?Math.max(0,Math.min(60,t.cn0_db_hz)):0;
+    meter.setAttribute('aria-label',t.cn0_valid?'C/N0 '+value+' dB-Hz':'C/N0 unavailable');
+    number.textContent=value;cell.className='channel-cn0';cell.append(meter,number);
   }
   wrap.append(grid);table.append(wrap);
   picker.onchange=()=>open(picker.value);

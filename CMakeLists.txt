@@ -436,6 +436,8 @@ message(STATUS "NGene target ${CMAKE_SYSTEM_NAME}/${NGENE_ARCH}; native HackRF=$
 
 option(NGENE_TRACKING_BENCHMARK "Build isolated tracking throughput probe" OFF)
 if(NGENE_TRACKING_BENCHMARK)
+    add_executable(ngene_tracking_replay benchmarks/tracking/replay.c)
+    target_link_libraries(ngene_tracking_replay PRIVATE ngene_tracking)
     add_executable(ngene_tracking_profile benchmarks/tracking/profile.c)
     target_include_directories(ngene_tracking_profile PRIVATE src)
     target_link_libraries(ngene_tracking_profile PRIVATE ngene_tracking ngene_platform)

@@ -7,9 +7,9 @@
 
 /** Receiver-owned pool. All allocation/assignment happens outside DSP jobs. */
 typedef struct {
-    TNgPvtSnapshot pvt;                  /**< Last common-epoch code/Doppler solve. */
-    double sampleRate;                   /**< Actual source pairs per second. */
-    uint64_t lastPvtSample;               /**< Last periodic solver invocation. */
+    TNgPvtSnapshot pvt;                    /**< Last common-epoch code/Doppler solve. */
+    double sampleRate;                     /**< Actual source pairs per second. */
+    uint64_t lastPvtSample;                /**< Last periodic solver invocation. */
     TNgTrackingConfig config;              /**< Frozen total capacity and reservations. */
     TNgTracking *tracking[64];             /**< One reusable private workspace per receiver slot. */
     TNgChannel jobs[64];                   /**< Stable identities independent of constellation. */
@@ -18,13 +18,16 @@ typedef struct {
     TNgChannel captures[2];                /**< Borrowed original acquisition registrations. */
     TNgAcquisition *acquisition[2];        /**< Borrowed workers. */
     TNgAcquisitionResult accepted[2][32];  /**< Consumed seeds. */
+    TNgBroadcast broadcast[2][32];        /**< Classic satellite cache survives slot reacquisition. */
     TNgChannelDispatch *dispatch;          /**< One fixed pool for all slots. */
     uint64_t epoch, firstSample, expected; /**< Common-window identity. */
     size_t count;                          /**< Last window sample count. */
-    int haveWindow;        /**< A frame has been processed. */
+    int haveWindow;                        /**< A frame has been processed. */
     unsigned observedChannel; /**< Optional tap interest; receiver-owner writes only. */
     double trackingLoad;      /**< Signal-time EMA of mandatory dispatch wall time / window. */
     uint64_t budgetSamples;   /**< Sample timing only once per ten milliseconds of signal. */
+    double budgetTime, schedulingDebt; /**< Monotonic progress versus processed signal time. */
+    int catchingUp;                    /**< Hysteresis while foreground processing recovers. */
 } TNgChannelPool;
 
 /** A light signal subscriber points to the same shared pool after linking. */
@@ -44,7 +47,8 @@ static int Track(void *context, const TNgChannelId *id, TNgChannelState state,
     (void)state;
     result = NgTrackingProcess(context, window, error);
     NgTrackingRead(context, &snapshot);
-    *next = snapshot.active ? NG_CHANNEL_TRACKING : NG_CHANNEL_ACQUISITION;
+    *next = snapshot.active ? NG_CHANNEL_TRACKING :
+            state == NG_CHANNEL_TRACKING ? NG_CHANNEL_HOLDOVER : state;
     return result;
 }
 
@@ -58,8 +62,16 @@ static void Refresh(TNgChannelPool *pool)
     unsigned k;
     for (k = 0; k < pool->config.channelCount; ++k) {
         NgTrackingRead(pool->tracking[k], &pool->slots[k]);
-        if (!pool->slots[k].active)
+        if (pool->slots[k].prn && pool->slots[k].constellation >= 1 && pool->slots[k].constellation <= 2) {
+            const TNgBroadcast *b = &pool->slots[k].navigation.broadcast;
+            if (b->subframe1Received || b->subframe2Received || b->subframe3Received)
+                pool->broadcast[pool->slots[k].constellation - 1][pool->slots[k].prn - 1] = *b;
+        }
+        if (!pool->slots[k].active) {
             memset(&pool->slots[k], 0, sizeof(pool->slots[k]));
+            /* The receiver owner releases this assignment after the worker barrier. */
+            pool->jobs[k].state = NG_CHANNEL_ACQUISITION;
+        }
         pool->slots[k].channelId = k + 1;
         pool->slots[k].reservation = pool->reservation[k];
         pool->slots[k].state = pool->slots[k].active ? 2u : 0u;
@@ -94,6 +106,8 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
          (window->meta.flags & NG_BLOCK_GAP))) {
         memset(&pool->pvt, 0, sizeof(pool->pvt));
         pool->lastPvtSample = 0;
+        pool->budgetTime = pool->schedulingDebt = 0;
+        pool->catchingUp = 0;
         for (k = 0; k < pool->config.channelCount; ++k)
             pool->jobs[k].state = NG_CHANNEL_ACQUISITION;
     }
@@ -108,17 +122,35 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         double duration = (double)window->meta.count / pool->sampleRate;
         pool->budgetSamples += window->meta.count;
         measure = (double)pool->budgetSamples >= pool->sampleRate * 0.01;
-        if (measure) started = NgMonotonicSeconds();
+        if (measure)
+            started = NgMonotonicSeconds();
         if (NgChannelDispatchProcess(pool->dispatch, window, error) != NG_OK)
             return NG_ERROR;
         if (measure && duration > 0) {
+            double finished = NgMonotonicSeconds();
+            double signalTime = (double)pool->budgetSamples / pool->sampleRate;
             double weight = (double)pool->budgetSamples / pool->sampleRate / 0.1;
-            if (weight > 1) weight = 1;
-            pool->trackingLoad += weight * ((NgMonotonicSeconds() - started) / duration - pool->trackingLoad);
+            if (weight > 1)
+                weight = 1;
+            pool->trackingLoad += weight * ((finished - started) / duration - pool->trackingLoad);
+            if (pool->budgetTime > 0) {
+                pool->schedulingDebt += finished - pool->budgetTime - signalTime;
+                if (pool->schedulingDebt < 0)
+                    pool->schedulingDebt = 0;
+                if (pool->schedulingDebt > 0.25)
+                    pool->schedulingDebt = 0.25;
+                if (pool->schedulingDebt > 0.02)
+                    pool->catchingUp = 1;
+                else if (pool->schedulingDebt < 0.005)
+                    pool->catchingUp = 0;
+            }
+            pool->budgetTime = finished;
             pool->budgetSamples = 0;
         }
     } else {
         pool->trackingLoad = 0;
+        pool->budgetTime = pool->schedulingDebt = 0;
+        pool->catchingUp = 0;
     }
     pool->epoch = window->meta.epoch;
     pool->firstSample = window->meta.firstSample;
@@ -147,12 +179,13 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
                     (used->confirmed && used->epoch == seed->epoch &&
                      used->firstSample >= seed->firstSample))
                     continue;
-                int preferred = pool->reservation[slot] == 0 &&
-                                pool->config.autoPriority == system + 1;
+                int preferred =
+                    pool->reservation[slot] == 0 && pool->config.autoPriority == system + 1;
                 int previousPreferred = best && pool->reservation[bestSlot] == 0 &&
                                         pool->config.autoPriority == bestSystem + 1;
-                if (!best || (preferred != previousPreferred ? preferred :
-                              seed->completedSeconds < best->completedSeconds)) {
+                if (!best || (preferred != previousPreferred
+                                  ? preferred
+                                  : seed->completedSeconds < best->completedSeconds)) {
                     best = seed;
                     bestSystem = system;
                     bestSlot = slot;
@@ -165,6 +198,7 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
             NgTrackingSeed(pool->tracking[bestSlot], best, error) != NG_OK)
             return NG_ERROR;
         pool->jobs[bestSlot].state = NG_CHANNEL_TRACKING;
+        NgTrackingRestoreBroadcast(pool->tracking[bestSlot], &pool->broadcast[bestSystem][best->prn - 1]);
         pool->accepted[bestSystem][best->prn - 1] = *best;
         mask[bestSystem] |= UINT32_C(1) << (best->prn - 1);
         Refresh(pool);
@@ -177,26 +211,36 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         unsigned slot = FreeSlot(pool, system + 1, 1);
         unsigned quota = 0, totalLimit = pool->config.channelCount - active;
         unsigned capacity = searches[system].parallelCapacity;
+        unsigned budget = capacity;
         for (k = 0; k < pool->config.channelCount; ++k)
-            if (!pool->slots[k].active && (pool->reservation[k] == 0 || pool->reservation[k] == system + 1))
+            if (!pool->slots[k].active &&
+                (pool->reservation[k] == 0 || pool->reservation[k] == system + 1))
                 ++quota;
         if (active && capacity) {
             double headroom = 1.0 - pool->trackingLoad / 0.85;
-            unsigned budget = headroom > 0 ? (unsigned)((double)capacity * headroom) : 0;
-            if (headroom > 0 && !budget) budget = 1;
-            if (totalLimit > budget) totalLimit = budget;
+            budget = headroom > 0 ? (unsigned)((double)capacity * headroom) : 0;
+            if (headroom > 0 && !budget)
+                budget = 1;
+            if (pool->catchingUp)
+                budget = 0;
+            if (totalLimit > budget)
+                totalLimit = budget;
         }
-        NgAcquisitionSetParallelism(pool->acquisition[system], totalLimit, quota);
-        int wait = !totalLimit;
-        unsigned delay = !active ? 0u : pool->trackingLoad > 0.95 ? 20u :
-                         pool->trackingLoad > 0.75 ? 4u : pool->trackingLoad > 0.55 ? 1u : 0u;
+        NgAcquisitionSetParallelism(pool->acquisition[system], totalLimit, quota, budget);
+        unsigned delay = !active                     ? 0u
+                         : pool->trackingLoad > 0.95 ? 20u
+                         : pool->trackingLoad > 0.75 ? 4u
+                         : pool->trackingLoad > 0.55 ? 1u
+                                                     : 0u;
         NgAcquisitionSetBudget(pool->acquisition[system], delay);
         NgAcquisitionSetAdmission(pool->acquisition[system], mask[system],
-                                  slot == pool->config.channelCount || wait);
+                                  slot == pool->config.channelCount);
         for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane) {
             unsigned prn = searches[system].currentPrns[lane];
             slot = FreeSlot(pool, system + 1, 1);
-            if (!prn || slot == pool->config.channelCount || (mask[system] & (UINT32_C(1) << (prn - 1)))) continue;
+            if (!prn || slot == pool->config.channelCount ||
+                (mask[system] & (UINT32_C(1) << (prn - 1))))
+                continue;
             pool->slots[slot].state = 1;
             pool->slots[slot].constellation = system + 1;
             pool->slots[slot].prn = prn;
@@ -310,14 +354,16 @@ void NgTrackingBankReadAll(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[
 /** PVT snapshots contain values only and share the receiver-thread publication barrier. */
 void NgTrackingBankObserve(TNgTrackingBank *bank, unsigned channelId)
 {
-    if (bank) bank->pool->observedChannel = channelId;
+    if (bank)
+        bank->pool->observedChannel = channelId;
 }
 
 /** PVT snapshots contain values only and share the receiver-thread publication barrier. */
 void NgTrackingBankReadPvt(TNgTrackingBank *bank, TNgPvtSnapshot *snapshot)
 {
     memset(snapshot, 0, sizeof(*snapshot));
-    if (bank) *snapshot = bank->pool->pvt;
+    if (bank)
+        *snapshot = bank->pool->pvt;
 }
 
 /** Only the owner frees shared slots; non-owner subscribers retain no resources. */

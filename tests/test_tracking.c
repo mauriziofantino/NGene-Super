@@ -66,7 +66,8 @@ static TNgTrackingSnapshot Run(int square, int xorMode, size_t split, int observ
     NgTrackingRead(tracking, &snapshot);
     CHECK(snapshot.active && snapshot.integrations >= 8);
     CHECK(hypot(snapshot.i[snapshot.tapCount / 2], snapshot.q[snapshot.tapCount / 2]) > 40);
-    CHECK(hypot(snapshot.i[snapshot.tapCount / 2], snapshot.q[snapshot.tapCount / 2]) > hypot(snapshot.i[snapshot.tapCount / 2 - 1], snapshot.q[snapshot.tapCount / 2 - 1]));
+    CHECK(hypot(snapshot.i[snapshot.tapCount / 2], snapshot.q[snapshot.tapCount / 2]) >
+          hypot(snapshot.i[snapshot.tapCount / 2 - 1], snapshot.q[snapshot.tapCount / 2 - 1]));
     if (xorMode)
         for (n = 0; n < snapshot.tapCount; n++) {
             snapshot.i[n] /= 256;
@@ -84,7 +85,8 @@ static TNgTrackingSnapshot Run(int square, int xorMode, size_t split, int observ
 }
 
 /** Independent long waveform exercises loop polarity and Galileo BOC replicas. */
-static void Convergence(unsigned system, int inverted, int offsetSign, double codeError)
+static void Convergence(unsigned system, int inverted, int offsetSign, double codeError,
+                        unsigned seconds, double codeDrift)
 {
     TNgTrackingConfig config;
     TNgStreamInfo stream = {0};
@@ -97,7 +99,7 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     int8_t chips[4092];
     size_t first, n;
     unsigned period = system == 1 ? 1023u : 4092u;
-    double codeRate = 1023000.0 * (1.0 + 350.0 / 1575420000.0);
+    double codeRate = 1023000.0 * (1.0 + 350.0 / 1575420000.0) + codeDrift;
     NgTrackingDefaults(&config);
     stream.sampleRateHz = 2048000;
     stream.digitalIfHz = -210000;
@@ -118,7 +120,7 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     seed.dopplerHz = 350.0 + 2.0 * offsetSign;
     seed.codePhaseChips = 173.25 + codeError;
     CHECK(NgTrackingSeed(tracking, &seed, &error) == NG_OK);
-    for (first = 0; first < 2048000; first += 4096) {
+    for (first = 0; first < 2048000u * seconds; first += 4096) {
         for (n = 0; n < 4096; n++) {
             double phase = fmod(173.25 + (double)(first + n) * codeRate / 2048000, period);
             int sign = chips[(size_t)phase];
@@ -142,13 +144,20 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     CHECK(snapshot.active && snapshot.pll);
     CHECK(fabs(snapshot.dopplerHz - 350) < 0.5);
     CHECK(fabs(snapshot.dllError) < 0.05);
-    if(system==2) {
-        unsigned middle=snapshot.tapCount/2;
-        if(fabs(codeError)>0.3) CHECK(!snapshot.mainPeakVerified);
+    if (seconds > 1) {
+        CHECK(fabs(snapshot.codeRateHz - codeRate) < 0.1);
+        CHECK(hypot(snapshot.i[snapshot.tapCount / 2], snapshot.q[snapshot.tapCount / 2]) > 35);
+    }
+    if (system == 2) {
+        unsigned middle = snapshot.tapCount / 2;
+        if (fabs(codeError) > 0.3)
+            CHECK(!snapshot.mainPeakVerified);
         else {
             CHECK(snapshot.mainPeakVerified);
-            CHECK(hypot(snapshot.i[middle],snapshot.q[middle])>hypot(snapshot.i[middle-1],snapshot.q[middle-1]));
-            CHECK(hypot(snapshot.i[middle],snapshot.q[middle])>hypot(snapshot.i[middle+1],snapshot.q[middle+1]));
+            CHECK(hypot(snapshot.i[middle], snapshot.q[middle]) >
+                  hypot(snapshot.i[middle - 1], snapshot.q[middle - 1]));
+            CHECK(hypot(snapshot.i[middle], snapshot.q[middle]) >
+                  hypot(snapshot.i[middle + 1], snapshot.q[middle + 1]));
         }
     }
     NgTrackingDestroy(tracking);
@@ -188,10 +197,10 @@ static void Cn0Reference(void)
     CHECK(NgTrackingSeed(tracking, &seed, &error) == NG_OK);
     view.samples = samples;
     view.meta.count = 2048;
-    for (ms = 0; ms < 1500; ++ms) {
+    for (ms = 0; ms < 30000; ++ms) {
         for (n = 0; n < 2048; ++n) {
             double phase = fmod(0.25 + (double)n * 1023000 / 2048000, 1023);
-            samples[n].i = (int8_t)lround((double)chips[(size_t)phase] + 8 * Gaussian(&random));
+            samples[n].i = (int8_t)lround((double)chips[(size_t)phase] * ((ms / 20) % 2 ? -1 : 1) + 8 * Gaussian(&random));
             samples[n].q = (int8_t)lround(8 * Gaussian(&random));
         }
         view.meta.firstSample = (uint64_t)ms * 2048;
@@ -201,6 +210,18 @@ static void Cn0Reference(void)
     double reference = 10 * log10(2048000.0 / (2 * 8 * 8));
     fprintf(stderr, "C/N0 estimated %.3f, reference %.3f dB-Hz\n", snapshot.cn0DbHz, reference);
     CHECK(snapshot.cn0Valid && fabs(snapshot.cn0DbHz - reference) < 3);
+    /* A previously coherent channel must release its slot after Classic's
+       one-second relock timeout, rather than keep a stale PLL flag forever. */
+    for (; ms < 31500; ++ms) {
+        for (n = 0; n < 2048; ++n) {
+            samples[n].i = (int8_t)lround(8 * Gaussian(&random));
+            samples[n].q = (int8_t)lround(8 * Gaussian(&random));
+        }
+        view.meta.firstSample = (uint64_t)ms * 2048;
+        CHECK(NgTrackingProcess(tracking, &view, &error) == NG_OK);
+    }
+    NgTrackingRead(tracking, &snapshot);
+    CHECK(!snapshot.active && !snapshot.navigation.towValid);
     NgTrackingDestroy(tracking);
 }
 
@@ -254,8 +275,10 @@ int main(void)
     TNgError error = {{0}};
     unsigned k;
     TNgTrackingSnapshot hidden = Run(0, 0, 20480, 0);
-    CHECK(hidden.tapCount == 3 && hidden.dopplerHz == a.dopplerHz && hidden.codeRateHz == a.codeRateHz);
-    for (k = 0; k < 3; ++k) CHECK(hidden.i[k] == a.i[k + 3] && hidden.q[k] == a.q[k + 3]);
+    CHECK(hidden.tapCount == 3 && hidden.dopplerHz == a.dopplerHz &&
+          hidden.codeRateHz == a.codeRateHz);
+    for (k = 0; k < 3; ++k)
+        CHECK(hidden.i[k] == a.i[k + 3] && hidden.q[k] == a.q[k + 3]);
     CHECK(c.endSample == d.endSample);
     for (k = 0; k < c.tapCount; k++)
         CHECK(fabs(c.i[k] - d.i[k]) < 0.002);
@@ -267,12 +290,14 @@ int main(void)
     CHECK(NgTrackingValidate(&config, &error) == NG_ERROR);
     Cn0Reference();
     ReplicaParity();
-    Convergence(1, 0, 1, 0.05);
-    Convergence(1, 1, -1, -0.05);
-    Convergence(2, 0, 1, 0.05);
-    Convergence(2, 1, -1, -0.05);
-    Convergence(2, 0, 1, 0.5);
-    Convergence(2, 1, -1, -0.5);
+    Convergence(1, 0, 1, 0.05, 1, 0);
+    Convergence(1, 1, -1, -0.05, 1, 0);
+    Convergence(2, 0, 1, 0.05, 1, 0);
+    Convergence(2, 1, -1, -0.05, 1, 0);
+    Convergence(2, 0, 1, 0.5, 1, 0);
+    Convergence(2, 1, -1, -0.5, 1, 0);
+    Convergence(1, 0, 1, 0.12, 40, -0.5);
+    Convergence(2, 0, 1, 0.05, 40, -0.25);
     puts("tracking contracts passed");
     return 0;
 }

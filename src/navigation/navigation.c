@@ -13,6 +13,17 @@ void NgNavigationReset(TNgNavigation *navigation)
     navigation->transitions = -1;
 }
 
+/** Carrier/timing loss does not invalidate a satellite's already parsed ephemerides. */
+void NgNavigationLoseTiming(TNgNavigation *n)
+{
+    if (n->epochs || n->snapshot.symbols || n->snapshot.bitSynchronized || n->galileo.count) {
+        TNgBroadcast broadcast = n->snapshot.broadcast;
+        NgNavigationReset(n);
+        broadcast.towValid = 0;
+        n->snapshot.broadcast = broadcast;
+    }
+}
+
 /** Retain Classic's six parity masks and D30-dependent data polarity. */
 int NgNavigationGpsParity(uint32_t *word)
 {
@@ -86,18 +97,16 @@ void NgNavigationGpsBit(TNgNavigation *n, unsigned bit, uint64_t endSample)
 void NgNavigationGpsPrompt(TNgNavigation *n, double i, double q, int pll, uint64_t endSample)
 {
     if (!pll || !isfinite(i) || !isfinite(q)) {
-        NgNavigationReset(n);
+        NgNavigationLoseTiming(n);
         return;
     }
     n->epochs++;
-    n->inPhasePower += i * i;
-    n->quadPower += q * q;
-    if (++n->qualityCount == 100) {
+    n->inPhasePower = 0.99 * n->inPhasePower + 0.01 * i * i;
+    n->quadPower = 0.99 * n->quadPower + 0.01 * q * q;
+    {
         double total = n->inPhasePower + n->quadPower;
         n->quality = total > 0 && (n->inPhasePower - n->quadPower) / total >= 0.4;
-        n->qualityCount = 0;
-        n->inPhasePower = n->quadPower = 0;
-        if (!n->quality) {
+        if (!n->quality && !n->snapshot.bitSynchronized) {
             n->snapshot.bitSynchronized = n->snapshot.towValid = 0;
             n->transitions = -1;
             n->collecting = 0;

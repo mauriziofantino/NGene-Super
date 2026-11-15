@@ -78,7 +78,8 @@ int NgPvtSatellite(const TNgBroadcast *b, unsigned system, double tx, double x[3
 }
 
 /** Column-pivoted Householder QR; no normal-equation squaring of the condition number. */
-static int Solve(double a[64][5], double b[64], unsigned rows, unsigned cols, double x[5])
+static int Solve(double a[64][5], double b[64], unsigned rows, unsigned cols, double x[5],
+                 double covariance[5][5])
 {
     unsigned permutation[5] = {0, 1, 2, 3, 4}, k, i, j;
     double y[5] = {0};
@@ -137,6 +138,21 @@ static int Solve(double a[64][5], double b[64], unsigned rows, unsigned cols, do
     }
     for (i = 0; i < cols; ++i)
         x[permutation[i]] = y[i];
+    if (covariance) {
+        double inverse[5][5] = {{0}};
+        memset(covariance, 0, 25 * sizeof(double));
+        for (j = 0; j < cols; ++j)
+            for (i = cols; i-- > 0;) {
+                double value = i == j ? 1.0 : 0.0;
+                for (k = i + 1; k < cols; ++k)
+                    value -= a[i][k] * inverse[k][j];
+                inverse[i][j] = value / a[i][i];
+            }
+        for (i = 0; i < cols; ++i)
+            for (j = 0; j < cols; ++j)
+                for (k = 0; k < cols; ++k)
+                    covariance[permutation[i]][permutation[j]] += inverse[i][k] * inverse[j][k];
+    }
     return 1;
 }
 
@@ -174,7 +190,7 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
                   double fs, TNgPvtSnapshot *s)
 {
     double satellite[64][3], velocity[64][3], clocks[64], drifts[64], tx[64], doppler[64];
-    unsigned systems[64], n = 0, k, j, iteration, cols, gps = 0, galileo = 0;
+    unsigned systems[64], prns[64], n = 0, k, j, iteration, cols, gps = 0, galileo = 0;
     double nominal = 0, pos[5] = {0}, matrix[64][5], rhs[64], correction[5];
     double lat = 0, lon = 0, height = 0, residual = 0;
     memset(s, 0, sizeof(*s));
@@ -204,6 +220,7 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
         tx[n] = time;
         doppler[n] = t->dopplerHz;
         systems[n] = t->constellation;
+        prns[n] = t->prn;
         if (!n || time > nominal)
             nominal = time;
         if (t->constellation == 1)
@@ -252,7 +269,7 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
             rhs[k] = NG_C * (nominal - tx[k] + clocks[k]) - range - pos[clockIndex] - tropo;
             residual += rhs[k] * rhs[k];
         }
-        if (!Solve(matrix, rhs, n, cols, correction))
+        if (!Solve(matrix, rhs, n, cols, correction, NULL))
             return;
         for (j = 0; j < cols; ++j)
             pos[j] += correction[j];
@@ -292,9 +309,53 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
             matrix[k][j] = -unit;
             rhs[k] -= unit * rotatedVelocity[j];
         }
-        matrix[k][3] = 1;
+        matrix[k][cols == 5 && systems[k] == 2 ? 4 : 3] = 1;
+        {
+            TNgPvtSatelliteView *view = &s->sky[k];
+            double east = matrix[k][0] * sin(s->longitude) - matrix[k][1] * cos(s->longitude);
+            double north = matrix[k][0] * sin(s->latitude) * cos(s->longitude) +
+                           matrix[k][1] * sin(s->latitude) * sin(s->longitude) -
+                           matrix[k][2] * cos(s->latitude);
+            double up = -matrix[k][0] * cos(s->latitude) * cos(s->longitude) -
+                        matrix[k][1] * cos(s->latitude) * sin(s->longitude) -
+                        matrix[k][2] * sin(s->latitude);
+            view->prn = prns[k];
+            view->constellation = systems[k];
+            view->azimuth = atan2(east, north);
+            if (view->azimuth < 0)
+                view->azimuth += 2 * NG_PI;
+            view->elevation = asin(fmax(-1, fmin(1, up)));
+        }
     }
-    if (Solve(matrix, rhs, n, 4, correction)) {
+    s->skyCount = n;
+    {
+        double geometry[64][5], zero[64] = {0}, covariance[5][5], unused[5];
+        double enu[3][3] = {{-sin(s->longitude), cos(s->longitude), 0},
+                            {-sin(s->latitude) * cos(s->longitude),
+                             -sin(s->latitude) * sin(s->longitude), cos(s->latitude)},
+                            {cos(s->latitude) * cos(s->longitude),
+                             cos(s->latitude) * sin(s->longitude), sin(s->latitude)}};
+        double variance[3] = {0}, trace = 0;
+        memcpy(geometry, matrix, sizeof(geometry));
+        if (Solve(geometry, zero, n, cols, unused, covariance)) {
+            for (k = 0; k < 3; ++k)
+                for (j = 0; j < 3; ++j)
+                    for (unsigned axis = 0; axis < 3; ++axis)
+                        variance[k] += enu[k][j] * covariance[j][axis] * enu[k][axis];
+            for (k = 0; k < cols; ++k)
+                trace += covariance[k][k];
+            s->hdop = sqrt(fmax(0, variance[0] + variance[1]));
+            s->vdop = sqrt(fmax(0, variance[2]));
+            s->gdop = sqrt(fmax(0, trace));
+            s->dopAvailable = isfinite(s->hdop) && isfinite(s->vdop) && isfinite(s->gdop);
+        }
+    }
+    /* Doppler uses one common clock drift, independent of the code-bias columns. */
+    for (k = 0; k < n; ++k) {
+        matrix[k][3] = 1;
+        matrix[k][4] = 0;
+    }
+    if (Solve(matrix, rhs, n, 4, correction, NULL)) {
         memcpy(s->velocity, correction, sizeof(s->velocity));
         s->clockDrift = correction[3];
         s->velocityAvailable = 1;

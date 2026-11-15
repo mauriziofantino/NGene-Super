@@ -692,6 +692,20 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         Number(p, "satellites", s->satellites); Number(p, "gps", s->gps); Number(p, "galileo", s->galileo);
         Counter(p, "epoch", s->epoch); Counter(p, "sample", s->sample);
         Number(p, "tow_seconds", s->towSeconds);
+        cJSON_AddBoolToObject(p, "dop_available", s->dopAvailable);
+        if (s->dopAvailable) {
+            Number(p, "gdop", s->gdop); Number(p, "hdop", s->hdop); Number(p, "vdop", s->vdop);
+        }
+        cJSON *sky = cJSON_AddArrayToObject(p, "sky");
+        for (unsigned k = 0; k < s->skyCount; ++k) {
+            cJSON *satellite = cJSON_CreateObject();
+            Number(satellite, "prn", s->sky[k].prn);
+            Number(satellite, "constellation", s->sky[k].constellation);
+            Number(satellite, "azimuth_deg", s->sky[k].azimuth * 57.29577951308232);
+            Number(satellite, "elevation_deg", s->sky[k].elevation * 57.29577951308232);
+            cJSON_AddBoolToObject(satellite, "used", 1);
+            cJSON_AddItemToArray(sky, satellite);
+        }
         if (s->available) {
             Number(p, "latitude_deg", s->latitude * 57.29577951308232);
             Number(p, "longitude_deg", s->longitude * 57.29577951308232);
@@ -715,6 +729,8 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         Number(acquisition, "parallel_limit", status.acquisition.parallelLimit);
         Number(acquisition, "parallel_capacity", status.acquisition.parallelCapacity);
         Number(acquisition, "pool_active", status.acquisition.poolActive);
+        Number(acquisition, "pool_executing", status.acquisition.poolExecuting);
+        Number(acquisition, "execution_limit", status.acquisition.executionLimit);
         {
             cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
             for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
@@ -753,6 +769,8 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         Number(acquisition, "parallel_limit", status.galileoAcquisition.parallelLimit);
         Number(acquisition, "parallel_capacity", status.galileoAcquisition.parallelCapacity);
         Number(acquisition, "pool_active", status.galileoAcquisition.poolActive);
+        Number(acquisition, "pool_executing", status.galileoAcquisition.poolExecuting);
+        Number(acquisition, "execution_limit", status.galileoAcquisition.executionLimit);
         {
             cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
             for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)

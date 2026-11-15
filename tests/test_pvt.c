@@ -99,6 +99,35 @@ static void Fixture(unsigned mixed, int rollover)
     }
     NgPvtCompute(channels, 7, 2400000, 2400000, &solution);
     CHECK(solution.available && solution.velocityAvailable && solution.satellites == 10);
+    CHECK(solution.dopAvailable && solution.skyCount == 10);
+    CHECK(solution.hdop > 0 && solution.vdop > 0 && solution.gdop > 0);
+    CHECK(solution.gdop * solution.gdop >=
+          solution.hdop * solution.hdop + solution.vdop * solution.vdop);
+    for (k = 0; k < solution.skyCount; k++) {
+        const TNgPvtSatelliteView *sky = &solution.sky[k];
+        double position[3], velocity[3], clock, drift, range = 24000000, rotated[3];
+        CHECK(sky->prn == k + 1 && sky->constellation == channels[k].constellation);
+        CHECK(NgPvtSatellite(&channels[k].navigation.broadcast, sky->constellation,
+                             channels[k].navigation.transmitTimeSeconds, position, velocity, &clock,
+                             &drift));
+        for (j = 0; j < 3; j++) {
+            double angle = W * range / C;
+            rotated[0] = cos(angle) * position[0] + sin(angle) * position[1];
+            rotated[1] = -sin(angle) * position[0] + cos(angle) * position[1];
+            rotated[2] = position[2];
+            range = hypot(hypot(rotated[0] - receiver[0], rotated[1] - receiver[1]),
+                          rotated[2] - receiver[2]);
+        }
+        double dx = rotated[0] - receiver[0], dy = rotated[1] - receiver[1],
+               dz = rotated[2] - receiver[2];
+        double east = -sin(lon) * dx + cos(lon) * dy;
+        double north = -sin(lat) * cos(lon) * dx - sin(lat) * sin(lon) * dy + cos(lat) * dz;
+        double az = atan2(east, north);
+        if (az < 0)
+            az += 6.283185307179586;
+        double up = cos(lat) * cos(lon) * dx + cos(lat) * sin(lon) * dy + sin(lat) * dz;
+        CHECK(fabs(sky->azimuth - az) < 1e-7 && fabs(sky->elevation - asin(up / range)) < 1e-7);
+    }
     CHECK(hypot(hypot(solution.ecef[0] - receiver[0], solution.ecef[1] - receiver[1]),
                 solution.ecef[2] - receiver[2]) < 0.2);
     CHECK(fabs(solution.velocity[0] - 12) < 1e-5 && fabs(solution.velocity[1] + 3) < 1e-5 &&

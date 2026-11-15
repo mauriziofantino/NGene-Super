@@ -26,6 +26,9 @@ struct TNgTracking {
     double startPhase;            /**< Code phase at the integration start. */
     double m2, m4, cn0Smooth;     /**< Classic moment-method exponential memories. */
     unsigned cn0Samples;          /**< Valid prompt moments accumulated since seed. */
+    double lockI, lockQ;          /**< Classic length-100 PLL power means. */
+    unsigned lockAge, failureMs;  /**< Signal-time acquisition/relock deadlines. */
+    int qualified;               /**< High PLL metric was established after the transient. */
     double sideI[2], sideQ[2];    /**< Half-chip BOC qualification coherent sums. */
     double peakPower[3];          /**< 100-ms accumulated left/prompt/right powers. */
     unsigned peakMs;              /**< Signal-time age of the qualification sums. */
@@ -130,6 +133,9 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     memset(&tracking->snapshot, 0, sizeof(tracking->snapshot));
     tracking->m2 = tracking->m4 = tracking->cn0Smooth = 0;
     tracking->cn0Samples = 0;
+    tracking->lockI = tracking->lockQ = 0;
+    tracking->lockAge = tracking->failureMs = 0;
+    tracking->qualified = 0;
     tracking->peakMs = 0;
     memset(tracking->peakPower, 0, sizeof(tracking->peakPower));
     memset(tracking->sideI, 0, sizeof(tracking->sideI));
@@ -279,6 +285,31 @@ static void Complete(TNgTracking *t)
         QualifyGalileoPeak(t, i, q);
     else
         t->snapshot.mainPeakVerified = 1;
+    /* Classic PLL power qualification and bounded relock. FLL convergence alone
+       must never occupy a receiver slot indefinitely on noise or a lost signal.
+       Full false-lock correction and NCO holdover remain separate supervision. */
+    t->lockAge += t->system == 1 ? 1u : 4u;
+    if (t->snapshot.pll) {
+        double ni = i / (double)t->accumulated, nq = q / (double)t->accumulated;
+        t->lockI = 0.99 * t->lockI + 0.01 * ni * ni;
+        t->lockQ = 0.99 * t->lockQ + 0.01 * nq * nq;
+        if (t->lockAge % 100u == 0) {
+            double total = t->lockI + t->lockQ;
+            double ratio = total > 0 ? (t->lockI - t->lockQ) / total : 0;
+            if (!t->qualified && ratio > 0.8) t->qualified = 1;
+            if (t->qualified) {
+                if (ratio < 0.4) t->failureMs += 100;
+                else if (ratio > 0.8) t->failureMs = 0;
+                if (t->failureMs > 1000) t->snapshot.active = 0;
+            }
+        }
+    }
+    if ((!t->snapshot.pll && t->lockAge >= 4000) || (!t->qualified && t->lockAge >= 8000))
+        t->snapshot.active = 0;
+    if (!t->snapshot.active) {
+        t->snapshot.navigation.towValid = 0;
+        return;
+    }
     if (t->system == 1) {
         NgNavigationGpsPrompt(&t->navigation, i, q, t->snapshot.pll, t->expected);
         t->snapshot.navigation = t->navigation.snapshot;
@@ -427,6 +458,8 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
                 memset(t->sideQ, 0, sizeof(t->sideQ));
             } else
                 Complete(t);
+            if (!t->snapshot.active)
+                return NG_OK;
         }
         if (!isfinite(t->carrierHz) || !isfinite(t->snapshot.codeRateHz) ||
             t->snapshot.codeRateHz < 1000000 || t->snapshot.codeRateHz > 1050000)
@@ -439,6 +472,14 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
 void NgTrackingRead(const TNgTracking *tracking, TNgTrackingSnapshot *snapshot)
 {
     *snapshot = tracking->snapshot;
+}
+
+/** Change interest only outside jobs; an in-flight integration retains its geometry. */
+void NgTrackingRestoreBroadcast(TNgTracking *tracking, const TNgBroadcast *broadcast)
+{
+    tracking->navigation.snapshot.broadcast = *broadcast;
+    tracking->navigation.snapshot.broadcast.towValid = 0;
+    tracking->snapshot.navigation.broadcast = tracking->navigation.snapshot.broadcast;
 }
 
 /** Change interest only outside jobs; an in-flight integration retains its geometry. */

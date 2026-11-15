@@ -25,8 +25,7 @@ typedef struct {
     uint64_t epochs, transition;    /**< One-ms prompt counters. */
     int transitions;                /**< -1 before first transition, then valid intervals. */
     double previous, sum;           /**< Prompt sign history and data-bit accumulator. */
-    double inPhasePower, quadPower; /**< 100-ms PLL quality observation. */
-    unsigned qualityCount;          /**< Epochs in quality observation. */
+    double inPhasePower, quadPower; /**< Classic length-100 exponential PLL power means. */
     int quality;                    /**< Classic low PLL threshold passed. */
     unsigned bitMs;                 /**< Prompt epochs accumulated in one bit. */
     uint32_t shift, words[10];      /**< Two previous parity bits plus current 30-bit word. */
@@ -44,6 +43,8 @@ typedef struct {
 
 /** Reset all timing and fragments on assignment, RF gap or loss of qualification. */
 void NgNavigationReset(TNgNavigation *navigation);
+/** Discard demodulation/timing after carrier loss, retaining the per-satellite broadcast cache. */
+void NgNavigationLoseTiming(TNgNavigation *navigation);
 /** Verify and polarity-correct one GPS word, including preceding D29 and D30. */
 int NgNavigationGpsParity(uint32_t *word);
 /** Feed one GPS data bit; used by the prompt demodulator and deterministic fixtures. */

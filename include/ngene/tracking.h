@@ -49,6 +49,8 @@ typedef struct {
 } TNgTrackingSnapshot;
 /** Opaque private tracking state; no shared mutable DSP buffers. */
 typedef struct TNgTracking TNgTracking;
+/** Restore only per-satellite broadcast cache; new demodulation must establish fresh TOW. */
+void NgTrackingRestoreBroadcast(TNgTracking *tracking, const TNgBroadcast *broadcast);
 /** Initialize precise carrier/products and three taps at -0.5,0,+0.5 chips. */
 void NgTrackingDefaults(TNgTrackingConfig *config);
 /** Reject unsupported modes, count and spacing; NG_OK or NG_ERROR. */

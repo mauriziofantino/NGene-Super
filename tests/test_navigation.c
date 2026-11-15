@@ -78,6 +78,10 @@ int main(void)
     CHECK(n.snapshot.bitSynchronized && n.snapshot.symbols > 0);
     NgNavigationGpsPrompt(&n, 20, 0, 0, 0);
     CHECK(!n.snapshot.bitSynchronized && !n.snapshot.towValid && !n.snapshot.symbols);
+    n.snapshot.broadcast.ephemeridesReceived=1;
+    n.snapshot.broadcast.eph.sqrtA=5153.7;
+    NgNavigationGpsPrompt(&n,20,0,0,0);
+    CHECK(n.snapshot.broadcast.ephemeridesReceived && n.snapshot.broadcast.eph.sqrtA==5153.7);
     for (k = 0; k < 300; ++k)
         NgNavigationGpsPrompt(&n, (k / 20) & 1u ? -1 : 1, 20, 1, k * 2400u);
     CHECK(!n.snapshot.bitSynchronized && !n.snapshot.towValid);

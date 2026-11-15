@@ -67,6 +67,7 @@ typedef struct {
     TNgAcquisitionCapture capture; /**< Frozen per-job observer/capture geometry. */
     unsigned prn, lane;            /**< PRN and exclusively claimed workspace. */
     int generation;                /**< Capture cancellation generation. */
+    int permit;                    /**< Owns one cooperative DSP-stage permit. */
 } TNgAcquisitionJob;
 
 /** All constellation jobs share this bounded set of OS workers. */
@@ -76,6 +77,8 @@ struct TNgAcquisitionPool {
     TNgThread workers[NG_ACQUISITION_MAX_PARALLEL]; /**< Prepared worker handles. */
     unsigned started, capacity, active, nextSystem; /**< Pool counters and fair cursor. */
     TNgAtomicInt limit;                             /**< Adaptive shared admission cap. */
+    TNgAtomicInt executionLimit;                    /**< Adaptive cap, including borrowed jobs. */
+    unsigned executing;                             /**< Stages currently holding a permit. */
     int stopping;                                   /**< Pool shutdown predicate. */
     TNgAcquisition *subscriptions[2]; /**< GPS/Galileo or caller strategy subscriptions. */
 };
@@ -111,12 +114,30 @@ static int Cancelled(void *context)
 static int WorkCancelled(void *context)
 {
     TNgAcquisitionJob *job = context;
+    TNgAcquisitionPool *pool = job->acquisition->pool;
     int delay = NgAtomicGet(&job->acquisition->yieldMilliseconds);
+    NgMutexLock(&pool->mutex);
+    if (job->permit) {
+        --pool->executing;
+        job->permit = 0;
+        NgConditionSignal(&pool->work);
+    }
+    NgMutexUnlock(&pool->mutex);
     if (Cancelled(job))
         return 1;
     if (delay)
         NgSleepMs((unsigned)delay);
-    return Cancelled(job);
+    NgMutexLock(&pool->mutex);
+    while (!pool->stopping && !Cancelled(job) &&
+           pool->executing >= (unsigned)NgAtomicGet(&pool->executionLimit))
+        NgConditionWait(&pool->work, &pool->mutex, 20);
+    int cancelled = pool->stopping || Cancelled(job);
+    if (!cancelled) {
+        ++pool->executing;
+        job->permit = 1;
+    }
+    NgMutexUnlock(&pool->mutex);
+    return cancelled;
 }
 
 /** Update the compatibility PRN and release a capture only after its last borrower. */
@@ -178,6 +199,7 @@ static int Claim(TNgAcquisitionPool *pool, TNgAcquisitionJob *job)
         job->generation = a->captureGeneration;
         job->prn = prn;
         job->lane = lane;
+        job->permit = 0;
         pool->nextSystem = 1 - system;
         NgMutexUnlock(&a->mutex);
         return 1;
@@ -250,6 +272,8 @@ static void SearchWorker(void *context)
         NgMutexUnlock(&pool->mutex);
         Execute(&job);
         NgMutexLock(&pool->mutex);
+        if (job.permit)
+            --pool->executing;
         TNgAcquisition *a = job.acquisition;
         NgMutexLock(&a->mutex);
         a->activeJobs--;
@@ -313,6 +337,7 @@ static TNgAcquisitionPool *CreatePool(TNgAcquisition *a, TNgAcquisition *b, TNgE
     pool->subscriptions[1] = b;
     pool->capacity = wanted < Capacity() ? wanted : Capacity();
     NgAtomicSet(&pool->limit, (int)pool->capacity);
+    NgAtomicSet(&pool->executionLimit, (int)pool->capacity);
     for (k = 0; k < pool->capacity; ++k) {
         if (NgThreadStart(&pool->workers[k], SearchWorker, pool)) {
             DestroyPool(pool);
@@ -610,7 +635,8 @@ void NgAcquisitionSetAdmission(TNgAcquisition *a, uint32_t mask, int paused)
 }
 
 /** Publish adaptive total concurrency and this subscription's free-slot quota. */
-void NgAcquisitionSetParallelism(TNgAcquisition *a, unsigned totalLimit, unsigned quota)
+void NgAcquisitionSetParallelism(TNgAcquisition *a, unsigned totalLimit, unsigned quota,
+                                 unsigned executionLimit)
 {
     TNgAcquisitionPool *pool;
     if (!a || !a->pool)
@@ -618,11 +644,16 @@ void NgAcquisitionSetParallelism(TNgAcquisition *a, unsigned totalLimit, unsigne
     pool = a->pool;
     if (totalLimit > pool->capacity)
         totalLimit = pool->capacity;
-    if ((unsigned)NgAtomicGet(&pool->limit) == totalLimit && a->quota == quota)
+    if (executionLimit > pool->capacity)
+        executionLimit = pool->capacity;
+    if ((unsigned)NgAtomicGet(&pool->limit) == totalLimit && a->quota == quota &&
+        (unsigned)NgAtomicGet(&pool->executionLimit) == executionLimit)
         return;
     NgMutexLock(&pool->mutex);
-    int changed = (unsigned)NgAtomicGet(&pool->limit) != totalLimit || a->quota != quota;
+    int changed = (unsigned)NgAtomicGet(&pool->limit) != totalLimit || a->quota != quota ||
+                  (unsigned)NgAtomicGet(&pool->executionLimit) != executionLimit;
     NgAtomicSet(&pool->limit, (int)totalLimit);
+    NgAtomicSet(&pool->executionLimit, (int)executionLimit);
     a->quota = quota;
     if (changed)
         NgConditionSignal(&pool->work);
@@ -665,6 +696,8 @@ void NgAcquisitionRead(TNgAcquisition *acquisition, TNgAcquisitionSnapshot *snap
     if (acquisition->pool) {
         NgMutexLock(&acquisition->pool->mutex);
         snapshot->poolActive = acquisition->pool->active;
+        snapshot->poolExecuting = acquisition->pool->executing;
+        snapshot->executionLimit = (unsigned)NgAtomicGet(&acquisition->pool->executionLimit);
         NgMutexUnlock(&acquisition->pool->mutex);
     }
 }

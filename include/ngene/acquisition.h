@@ -54,13 +54,15 @@ typedef struct {
     int searching;                /**< Worker is processing an owned capture. */
     unsigned currentPrn;          /**< PRN being searched, zero while waiting. */
     unsigned currentPrns[NG_ACQUISITION_MAX_PARALLEL]; /**< Actual concurrent PRNs by workspace. */
-    unsigned activeSearches;       /**< In-flight decisions for this constellation. */
-    unsigned parallelLimit;        /**< Current shared-pool admission limit. */
-    unsigned parallelCapacity;     /**< Preallocated shared CPU workspace capacity. */
-    unsigned poolActive;           /**< Shared background jobs, including deferred maps. */
-    uint64_t searches;            /**< Completed satellite searches. */
-    uint64_t skippedSamples;      /**< Samples not captured while search owns the buffer. */
-    uint64_t gaps;                /**< Discontinuities that invalidated the capture generation. */
+    unsigned activeSearches;   /**< In-flight decisions for this constellation. */
+    unsigned parallelLimit;    /**< Current shared-pool admission limit. */
+    unsigned parallelCapacity; /**< Preallocated shared CPU workspace capacity. */
+    unsigned poolActive;       /**< Shared background jobs, including deferred maps. */
+    unsigned poolExecuting;    /**< In-flight DSP stages holding a CPU permit. */
+    unsigned executionLimit;   /**< Shared stage cap, independent of slot admission. */
+    uint64_t searches;         /**< Completed satellite searches. */
+    uint64_t skippedSamples;   /**< Samples not captured while search owns the buffer. */
+    uint64_t gaps;             /**< Discontinuities that invalidated the capture generation. */
     TNgAcquisitionResult results[32]; /**< Latest result per GPS PRN. */
     char message[256]; /**< Bounded algorithm error/status; no I/O on the sample path. */
 } TNgAcquisitionSnapshot;
@@ -97,7 +99,8 @@ void NgAcquisitionSetBudget(TNgAcquisition *acquisition, unsigned yieldMilliseco
 /** Merge strategy subscriptions into one pool before reception; NULL operands are accepted. */
 int NgAcquisitionLink(TNgAcquisition *gps, TNgAcquisition *galileo, TNgError *error);
 /** Receiver-owned adaptive global concurrency and per-constellation free-slot quota. */
-void NgAcquisitionSetParallelism(TNgAcquisition *acquisition, unsigned totalLimit, unsigned quota);
+void NgAcquisitionSetParallelism(TNgAcquisition *acquisition, unsigned totalLimit, unsigned quota,
+                                 unsigned executionLimit);
 /** Validate PRNs and boolean options without allocating or opening hardware. */
 int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error);
 /** Create the default Classic-derived PCPS strategy. Allocates before reception.

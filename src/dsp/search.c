@@ -1,4 +1,4 @@
-/** @file search.c @brief Allocation-free search kernels with SSE2 and scalar fallback. */
+/** @file search.c @brief Allocation-free search kernels with SSE2, AArch64 NEON and C fallback. */
 #include "ngene/dsp/search.h"
 #include "ngene/dsp/gps_ca.h"
 #include <math.h>
@@ -7,6 +7,9 @@
 #include "dsp/sample_backend.h"
 #if NG_SSE2
 #define NG_SEARCH_SSE 1
+#endif
+#if NG_NEON
+#define NG_SEARCH_NEON 1
 #endif
 #define NG_SEARCH_TAU 6.28318530717958647692
 
@@ -97,6 +100,25 @@ void NgSearchFftExecute(const TNgSearchFft *plan, TNgComplex *values, int invers
                 _mm_storeu_ps((float *)(values + base + k), _mm_add_ps(a, product));
                 _mm_storeu_ps((float *)(values + base + half + k), _mm_sub_ps(a, product));
             }
+#elif defined(NG_SEARCH_NEON)
+            for (; k + 2 <= half; k += 2) {
+                TNgComplex t0 = plan->twiddle[k * stride];
+                TNgComplex t1 = plan->twiddle[(k + 1) * stride];
+                float components[4] = {t0.i, t0.q, t1.i, t1.q};
+                uint32_t signs[4] = {UINT32_C(0x80000000), 0, UINT32_C(0x80000000), 0};
+                float32x4_t tw = vld1q_f32(components);
+                float32x4_t real = vtrn1q_f32(tw, tw), imag = vtrn2q_f32(tw, tw);
+                float32x4_t a = vld1q_f32((const float *)(values + base + k));
+                float32x4_t b = vld1q_f32((const float *)(values + base + half + k));
+                if (inverse)
+                    imag = vnegq_f32(imag);
+                float32x4_t cross = vmulq_f32(vrev64q_f32(b), imag);
+                cross = vreinterpretq_f32_u32(
+                    veorq_u32(vreinterpretq_u32_f32(cross), vld1q_u32(signs)));
+                float32x4_t product = vaddq_f32(vmulq_f32(b, real), cross);
+                vst1q_f32((float *)(values + base + k), vaddq_f32(a, product));
+                vst1q_f32((float *)(values + base + half + k), vsubq_f32(a, product));
+            }
 #endif
             for (; k < half; ++k) {
                 TNgComplex tw = plan->twiddle[k * stride];
@@ -162,6 +184,32 @@ void NgSearchCarrier(TNgComplex *output, size_t count, double rateHz, double fre
         ci = _mm_cvtsd_f64(real);
         cq = _mm_cvtsd_f64(imag);
     }
+#elif defined(NG_SEARCH_NEON)
+    {
+        double re[2] = {ci, ci * di - cq * dq}, im[2] = {cq, ci * dq + cq * di};
+        float64x2_t real = vld1q_f64(re), imag = vld1q_f64(im);
+        float64x2_t stepI = vdupq_n_f64(di * di - dq * dq), stepQ = vdupq_n_f64(2 * di * dq);
+        for (; k + 2 <= count; k += 2) {
+            float32x2_t ri = vcvt_f32_f64(real), rq = vcvt_f32_f64(imag);
+            float32x4_t pair = vcombine_f32(vzip1_f32(ri, rq), vzip2_f32(ri, rq));
+            float64x2_t next = vsubq_f64(vmulq_f64(real, stepI), vmulq_f64(imag, stepQ));
+            if (square)
+                pair = vreinterpretq_f32_u32(vorrq_u32(
+                    vreinterpretq_u32_f32(vdupq_n_f32(1)),
+                    vandq_u32(vcltq_f32(pair, vdupq_n_f32(0)), vdupq_n_u32(UINT32_C(0x80000000)))));
+            vst1q_f32((float *)(output + k), pair);
+            imag = vaddq_f64(vmulq_f64(real, stepQ), vmulq_f64(imag, stepI));
+            real = next;
+            if ((k & 1023u) == 1022u) {
+                float64x2_t norm =
+                    vsqrtq_f64(vaddq_f64(vmulq_f64(real, real), vmulq_f64(imag, imag)));
+                real = vdivq_f64(real, norm);
+                imag = vdivq_f64(imag, norm);
+            }
+        }
+        ci = vgetq_lane_f64(real, 0);
+        cq = vgetq_lane_f64(imag, 0);
+    }
 #endif
     for (; k < count; ++k) {
         double next = ci * di - cq * dq;
@@ -202,6 +250,20 @@ void NgSearchCode(float *output, size_t count, const int8_t *chips, double rateH
         }
         nco.phase = (nco.phase + (uint64_t)k * nco.step) % ((uint64_t)NG_GPS_CA_LENGTH << 32);
     }
+#elif defined(NG_SEARCH_NEON)
+    if (nco.denominator == 0 && count <= 32768u) {
+        uint64_t initial[2] = {nco.phase, nco.phase + nco.step};
+        uint64x2_t phase = vld1q_u64(initial), step = vdupq_n_u64(2 * nco.step);
+        for (; k + 2 <= count; k += 2) {
+            uint64_t indices[2];
+            vst1q_u64(indices, vshrq_n_u64(phase, 32));
+            float signs[2] = {(float)chips[indices[0] % NG_GPS_CA_LENGTH],
+                              (float)chips[indices[1] % NG_GPS_CA_LENGTH]};
+            vst1_f32(output + k, vld1_f32(signs));
+            phase = vaddq_u64(phase, step);
+        }
+        nco.phase = (nco.phase + (uint64_t)k * nco.step) % ((uint64_t)NG_GPS_CA_LENGTH << 32);
+    }
 #endif
     for (; k < count; ++k)
         output[k] = (float)NgGpsCaNext(chips, &nco);
@@ -221,6 +283,15 @@ void NgSearchMix(TNgComplex *values, const TNgComplex *carrier, size_t count)
         __m128 swap = _mm_shuffle_ps(a, a, _MM_SHUFFLE(2, 3, 0, 1));
         _mm_storeu_ps((float *)(values + k),
                       _mm_add_ps(_mm_mul_ps(a, real), _mm_xor_ps(_mm_mul_ps(swap, imag), sign)));
+    }
+#elif defined(NG_SEARCH_NEON)
+    const uint32_t signs[4] = {UINT32_C(0x80000000), 0, UINT32_C(0x80000000), 0};
+    for (; k + 2 <= count; k += 2) {
+        float32x4_t a = vld1q_f32((const float *)(values + k));
+        float32x4_t b = vld1q_f32((const float *)(carrier + k));
+        float32x4_t cross = vmulq_f32(vrev64q_f32(a), vtrn2q_f32(b, b));
+        cross = vreinterpretq_f32_u32(veorq_u32(vreinterpretq_u32_f32(cross), vld1q_u32(signs)));
+        vst1q_f32((float *)(values + k), vaddq_f32(vmulq_f32(a, vtrn1q_f32(b, b)), cross));
     }
 #endif
     for (; k < count; ++k) {
@@ -253,6 +324,23 @@ void NgSearchCorrelate(const TNgComplex *values, const float *code, size_t count
         *i = sum[0];
         *q = sum[1];
     }
+#elif defined(NG_SEARCH_NEON)
+    float64x2_t low = vdupq_n_f64(0), high = vdupq_n_f64(0);
+    for (; k + 2 <= count; k += 2) {
+        float32x4_t a = vld1q_f32((const float *)(values + k));
+        float32x2_t signs = vld1_f32(code + k);
+        float32x4_t c = vcombine_f32(vdup_lane_f32(signs, 0), vdup_lane_f32(signs, 1));
+        float32x4_t p =
+            xorSigns ? vreinterpretq_f32_u32(veorq_u32(
+                           vreinterpretq_u32_f32(a),
+                           vandq_u32(vreinterpretq_u32_f32(c), vdupq_n_u32(UINT32_C(0x80000000)))))
+                     : vmulq_f32(a, c);
+        low = vaddq_f64(low, vcvt_f64_f32(vget_low_f32(p)));
+        high = vaddq_f64(high, vcvt_f64_f32(vget_high_f32(p)));
+    }
+    float64x2_t sum = vaddq_f64(low, high);
+    *i = vgetq_lane_f64(sum, 0);
+    *q = vgetq_lane_f64(sum, 1);
 #else
     (void)xorSigns;
 #endif

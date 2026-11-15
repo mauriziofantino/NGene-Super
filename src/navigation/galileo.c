@@ -32,7 +32,7 @@ void NgNavigationGalileoPrompt(TNgNavigation *n, double i, int pll, uint64_t end
     unsigned char coded[240], decoded[15], crc[28] = {0}, data[16] = {0};
     long metric;
     if (!pll || !isfinite(i)) {
-        NgNavigationReset(n);
+        NgNavigationLoseTiming(n);
         return;
     }
     n->snapshot.symbols++;
