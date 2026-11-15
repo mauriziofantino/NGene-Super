@@ -312,7 +312,10 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     unsigned bin;
     (void)error;
     memset(result, 0, sizeof(*result));
-    memset(&search->space, 0, sizeof(search->space));
+    if (capture->displayPrn == prn)
+        memset(&search->space, 0, sizeof(search->space));
+    else
+        search->space.valid = 0;
     result->prn = prn;
     result->epoch = capture->origin.epoch;
     result->firstSample = capture->origin.firstSample;
@@ -337,10 +340,12 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
             return NG_END;
         Coarse(search, prn, frequency, config->squareCarrier);
         for (k = 0; k < search->size; ++k) {
-            size_t column = ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS / search->size;
-            float value = (float)(search->power[k] / threshold);
-            if (value > search->space.power[bin][column])
-                search->space.power[bin][column] = value;
+            if (capture->displayPrn == prn) {
+                size_t column = ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS / search->size;
+                float value = (float)(search->power[k] / threshold);
+                if (value > search->space.power[bin][column])
+                    search->space.power[bin][column] = value;
+            }
             if (search->power[k] > best) {
                 best = search->power[k];
                 doppler = frequency;
@@ -351,7 +356,7 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     result->peakRatio = best / threshold;
     result->dopplerHz = doppler;
     result->codePhaseChips = fmod(phase + 4092u, 4092u);
-    search->space.valid = 1;
+    search->space.valid = capture->displayPrn == prn;
     search->space.dopplerBins = 116;
     search->space.codePeriodChips = 4092;
     search->space.fftSize = (unsigned)search->size;
@@ -438,4 +443,27 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
 }
 
 /** Public strategy interface; no receiver/controller dependency. */
+/** Build a confirmed satellite's archive after publishing its seed to tracking. */
+int NgAcquisitionGalileoDisplay(void *context, unsigned prn, const TNgAcquisitionConfig *config,
+                               TNgAcquisitionCancel cancel, void *cancelContext)
+{
+    TNgGalileoSearch *search = context;
+    unsigned bin; size_t k;
+    memset(search->space.power,0,sizeof(search->space.power));
+    search->space.valid=0;
+    if (!(search->space.threshold>0)) return NG_END;
+    for(bin=0;bin<116;++bin) {
+        double frequency=-5000 + (double)bin * 87;
+        if(cancel(cancelContext)) return NG_END;
+        Coarse(search,prn,frequency,config->squareCarrier);
+        for(k=0;k<search->size;++k) {
+            size_t column=((search->size-k)%search->size)*NG_ACQUISITION_CODE_BINS/search->size;
+            float value=(float)(search->power[k]/search->space.threshold);
+            if(value>search->space.power[bin][column])search->space.power[bin][column]=value;
+        }
+    }
+    search->space.valid=1;
+    return NG_OK;
+}
+
 const TNgAcquisitionStrategy ngGalileoAcquisitionStrategy = {Search};

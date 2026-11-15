@@ -93,7 +93,7 @@ async function until(fn, label) {
     assert.match(await page.locator('[data-satellite-title]').textContent(),/GPS 7/);
     const taps=testTracking?9:3;
     await until(async ()=>await page.locator('[data-tracking-shape] circle').count()===taps,'measured tap points');
-    assert.equal(await page.locator('[data-tracking-shape] polyline').count(),0,'No reference triangle');
+    assert.equal(await page.locator('[data-tracking-shape] polyline').count(),1,'Measured tap curve');
     assert.match(await page.locator('[data-satellite-acquisition]').textContent(),/confirmed/);
     assert.match(await page.locator('[data-tracking-detail]').textContent(),/C\/N0/);
     const range=await page.locator('[data-tracking-range]').inputValue();

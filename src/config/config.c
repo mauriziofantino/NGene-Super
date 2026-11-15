@@ -241,7 +241,15 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("receiver.channels", tracking.channelCount)
     UINT_KEY("receiver.gps_reserved", tracking.gpsChannels)
     UINT_KEY("receiver.galileo_reserved", tracking.galileoChannels)
+    UINT_KEY("receiver.auto_priority", tracking.autoPriority)
     REAL_KEY("tracking.galileo_spacing_chips", tracking.galileoSpacingChips)
+    if (strcmp(key, "tracking.galileo_spacing_slots") == 0) {
+        double slots;
+        if (ParseReal(value, &slots) != NG_OK)
+            return NG_ERROR;
+        c->tracking.galileoSpacingChips = slots * 0.5;
+        return NG_OK;
+    }
     BOOL_KEY("tracking.square_carrier", tracking.squareCarrier)
     BOOL_KEY("tracking.xor_correlation", tracking.xorCorrelation)
     UINT_KEY("tracking.tap_count", tracking.tapCount)
@@ -774,13 +782,14 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     fprintf(output, "\n[receiver]\nmode=%s\nrun_seconds=%.17g\nidle_timeout_ms=%u\n",
             (config->recordOnly) != 0 ? "record" : "capture", config->runSeconds,
             config->idleTimeoutMs);
-    fprintf(output,"channels=%u\ngps_reserved=%u\ngalileo_reserved=%u\n",
-            config->tracking.channelCount,config->tracking.gpsChannels,config->tracking.galileoChannels);
+    fprintf(output,"channels=%u\ngps_reserved=%u\ngalileo_reserved=%u\nauto_priority=%u\n",
+            config->tracking.channelCount,config->tracking.gpsChannels,
+            config->tracking.galileoChannels,config->tracking.autoPriority);
     fprintf(output,"\n[tracking]\nworkers=%u\nsquare_carrier=%s\nxor_correlation=%s\n"
-                   "tap_count=%u\nspacing_chips=%.17g\ngalileo_spacing_chips=%.17g\n",
+                   "tap_count=%u\nspacing_chips=%.17g\ngalileo_spacing_slots=%.17g\n",
             config->tracking.workers,config->tracking.squareCarrier?"true":"false",
             config->tracking.xorCorrelation?"true":"false",config->tracking.tapCount,
-            config->tracking.spacingChips,config->tracking.galileoSpacingChips);
+            config->tracking.spacingChips,2.0 * config->tracking.galileoSpacingChips);
     fprintf(output,"\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\nsquare_carrier=%s\n"
                    "xor_correlation=%s\npfa=%.17g\n",config->acquisition.firstPrn,
             config->acquisition.lastPrn,config->acquisition.squareCarrier?"true":"false",

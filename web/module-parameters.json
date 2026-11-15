@@ -7,7 +7,7 @@
         {
           "title": "Channel allocation",
           "topic": "receiver",
-          "note": "Acquisition and tracking run automatically. Unreserved slots accept the first confirmed GPS or Galileo result. Reservations constrain only the chosen slots.",
+          "note": "Choose total channels and reservations. Fixed 6 GPS + 4 Galileo: total 10, GPS 6, Galileo 4. Automatic pool: total 12, both reservations 0. Preference applies when confirmed results compete for shared capacity.",
           "fields": [
             {
               "key": "receiver.channels",
@@ -35,6 +35,26 @@
               "integer": true,
               "min": 0,
               "max": 32
+            },
+            {
+              "key": "receiver.auto_priority",
+              "label": "Automatic channel preference",
+              "type": "select",
+              "default": "0",
+              "options": [
+                {
+                  "value": "0",
+                  "label": "First confirmed"
+                },
+                {
+                  "value": "1",
+                  "label": "Prefer GPS"
+                },
+                {
+                  "value": "2",
+                  "label": "Prefer Galileo"
+                }
+              ]
             }
           ]
         }
@@ -124,12 +144,12 @@
               "step": 0.01
             },
             {
-              "key": "tracking.galileo_spacing_chips",
-              "label": "Galileo adjacent tap spacing (chips)",
+              "key": "tracking.galileo_spacing_slots",
+              "label": "Galileo adjacent tap spacing (slots, ? chip)",
               "type": "number",
-              "default": 0.2,
-              "min": 0.001,
-              "max": 0.333333333,
+              "default": 0.4,
+              "min": 0.002,
+              "max": 0.666666666,
               "exclusiveMax": true,
               "step": 0.01
             }

@@ -2,6 +2,7 @@
 #ifndef NG_TRACKING_BANK_H
 #define NG_TRACKING_BANK_H
 #include "ngene/tracking.h"
+#include "ngene/pvt.h"
 /** Receiver-owned composite registration. */
 typedef struct TNgTrackingBank TNgTrackingBank;
 /** Prepare private workspaces and wrap the borrowed acquisition registration. */
@@ -12,6 +13,10 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
 void NgTrackingBankRead(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[32]);
 /** Copy the unified receiver slot pool, including automatic reservations. */
 void NgTrackingBankReadAll(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[64]);
+/** Copy the last common-epoch broadcast solution on the receiver owner thread. */
+void NgTrackingBankReadPvt(TNgTrackingBank *bank, TNgPvtSnapshot *snapshot);
+/** Receiver owner publishes optional correlator interest between window dispatches. */
+void NgTrackingBankObserve(TNgTrackingBank *bank, unsigned channelId);
 /** Release tracking before destroying acquisition; accepts NULL. */
 void NgTrackingBankDestroy(TNgTrackingBank *bank);
 /** Link constellation admission counters on the receiver thread before starting RX. */

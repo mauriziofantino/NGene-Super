@@ -42,6 +42,11 @@ typedef struct {
  * @param context Borrowed owner context, retained until NgThreadJoin.
  */
 typedef void (*TNgThreadFn)(void *context);
+/** Logical processors available to this process; at least one. */
+unsigned NgLogicalProcessorCount(void);
+/** Advisory current-thread scheduling: negative background, positive foreground, zero normal.
+ * Windows uses normal-class thread priorities; other targets retain their OS defaults. */
+void NgThreadSchedulingPriority(int priority);
 /**
  * @brief Initialize a private cross-platform mutex.
  *

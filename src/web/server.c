@@ -288,7 +288,7 @@ static int Headers(struct mg_connection *connection, int status, const char *typ
                      "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
                      "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
                      "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src "
-                     "'self'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:* "
+                     "'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self' ws://127.0.0.1:* "
                      "ws://localhost:*; frame-ancestors 'none'; base-uri 'none'\r\n"
                      "Connection: close\r\n\r\n",
                      status, status < 400 ? "OK" : "Error", type, length);
@@ -645,6 +645,17 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             Number(row, "channel_id", t->channelId);
             Number(row, "state", t->state);
             Number(row, "reservation", t->reservation);
+            cJSON_AddBoolToObject(row, "bit_synchronized", t->navigation.bitSynchronized);
+            cJSON_AddBoolToObject(row, "tow_valid", t->navigation.towValid);
+            Number(row, "tow_seconds", t->navigation.towSeconds);
+            Number(row, "transmit_time_seconds", t->navigation.transmitTimeSeconds);
+            cJSON_AddBoolToObject(row, "ephemeris_valid", t->navigation.broadcast.ephemeridesReceived);
+            Number(row, "broadcast_week", t->navigation.broadcast.wn);
+            Number(row, "subframe_id", t->navigation.subframeId);
+            Counter(row, "navigation_symbols", t->navigation.symbols);
+            Counter(row, "valid_subframes", t->navigation.validSubframes);
+            Counter(row, "navigation_parity_errors", t->navigation.parityErrors);
+            Counter(row, "navigation_boundary_sample", t->navigation.boundarySample);
             cJSON_AddBoolToObject(row,"cn0_valid",t->cn0Valid);
             if(t->cn0Valid) Number(row,"cn0_db_hz",t->cn0DbHz);
             else cJSON_AddNullToObject(row,"cn0_db_hz");
@@ -673,6 +684,24 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             }
         }
     }
+    {
+        const TNgPvtSnapshot *s = &status.pvt;
+        cJSON *p = cJSON_AddObjectToObject(object, "pvt");
+        cJSON_AddBoolToObject(p, "available", s->available);
+        cJSON_AddBoolToObject(p, "velocity_available", s->velocityAvailable);
+        Number(p, "satellites", s->satellites); Number(p, "gps", s->gps); Number(p, "galileo", s->galileo);
+        Counter(p, "epoch", s->epoch); Counter(p, "sample", s->sample);
+        Number(p, "tow_seconds", s->towSeconds);
+        if (s->available) {
+            Number(p, "latitude_deg", s->latitude * 57.29577951308232);
+            Number(p, "longitude_deg", s->longitude * 57.29577951308232);
+            Number(p, "height_m", s->height); Number(p, "residual_rms_m", s->residualRms);
+            Number(p, "clock_gps_m", s->clockGps); Number(p, "clock_galileo_m", s->clockGalileo);
+            Number(p, "velocity_x_mps", s->velocity[0]); Number(p, "velocity_y_mps", s->velocity[1]);
+            Number(p, "velocity_z_mps", s->velocity[2]); Number(p, "clock_drift_mps", s->clockDrift);
+        }
+        String(p, "model", "Broadcast LS; Hopfield troposphere; ionosphere uncorrected; no integrity qualification");
+    }
     telemetry = status.analysis;
     cJSON_AddItemToObject(object, "analysis", AnalysisJson(&telemetry, mask));
     {
@@ -682,6 +711,16 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         cJSON_AddBoolToObject(acquisition, "enabled", status.acquisition.enabled);
         cJSON_AddBoolToObject(acquisition, "searching", status.acquisition.searching);
         Number(acquisition, "current_prn", status.acquisition.currentPrn);
+        Number(acquisition, "active_searches", status.acquisition.activeSearches);
+        Number(acquisition, "parallel_limit", status.acquisition.parallelLimit);
+        Number(acquisition, "parallel_capacity", status.acquisition.parallelCapacity);
+        Number(acquisition, "pool_active", status.acquisition.poolActive);
+        {
+            cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
+            for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
+                if (status.acquisition.currentPrns[lane])
+                    cJSON_AddItemToArray(prns, cJSON_CreateNumber(status.acquisition.currentPrns[lane]));
+        }
         Counter(acquisition, "searches", status.acquisition.searches);
         Counter(acquisition, "skipped_samples", status.acquisition.skippedSamples);
         Counter(acquisition, "gaps", status.acquisition.gaps);
@@ -710,6 +749,16 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         cJSON_AddBoolToObject(acquisition, "enabled", status.galileoAcquisition.enabled);
         cJSON_AddBoolToObject(acquisition, "searching", status.galileoAcquisition.searching);
         Number(acquisition, "current_prn", status.galileoAcquisition.currentPrn);
+        Number(acquisition, "active_searches", status.galileoAcquisition.activeSearches);
+        Number(acquisition, "parallel_limit", status.galileoAcquisition.parallelLimit);
+        Number(acquisition, "parallel_capacity", status.galileoAcquisition.parallelCapacity);
+        Number(acquisition, "pool_active", status.galileoAcquisition.poolActive);
+        {
+            cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
+            for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
+                if (status.galileoAcquisition.currentPrns[lane])
+                    cJSON_AddItemToArray(prns, cJSON_CreateNumber(status.galileoAcquisition.currentPrns[lane]));
+        }
         Counter(acquisition, "searches", status.galileoAcquisition.searches);
         Counter(acquisition, "skipped_samples", status.galileoAcquisition.skippedSamples);
         Counter(acquisition, "gaps", status.galileoAcquisition.gaps);
@@ -1347,6 +1396,11 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngWorkspaceJs, ngWorkspaceJsLength);
             return 200;
         }
+        if (strcmp(path, "/pvt-map.js") == 0) {
+            Headers(connection, 200, "text/javascript; charset=utf-8", ngPvtMapJsLength);
+            mg_write(connection, ngPvtMapJs, ngPvtMapJsLength);
+            return 200;
+        }
         if (strcmp(path, "/receiver-config.js") == 0) {
             Headers(connection, 200, "text/javascript; charset=utf-8", ngReceiverConfigJsLength);
             mg_write(connection, ngReceiverConfigJs, ngReceiverConfigJsLength);
@@ -1537,7 +1591,16 @@ static int Handle(struct mg_connection *connection, void *context)
             }
         }
     }
-    if (strcmp(path, "/api/v1/frontend/calibrate/cancel") == 0) {
+    if (strcmp(path, "/api/v1/channels/observe") == 0) {
+        cJSON *id = cJSON_GetObjectItemCaseSensitive(body, "channel_id");
+        if (!cJSON_IsNumber(id) || id->valuedouble < 0 || id->valuedouble > 64 ||
+            id->valuedouble != (double)id->valueint) {
+            code = Failure(connection, 400, "Expected channel_id 0..64");
+        } else {
+            NgControlObserveChannel(control, (unsigned)id->valueint);
+            code = JsonReply(connection, 200, cJSON_CreateObject());
+        }
+    } else if (strcmp(path, "/api/v1/frontend/calibrate/cancel") == 0) {
         cJSON *job = cJSON_GetObjectItemCaseSensitive(body, "job_id");
         char id[32];
         NgMutexLock(&server->commandMutex);

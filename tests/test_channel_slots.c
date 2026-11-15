@@ -49,7 +49,7 @@ static void Window(TNgChannel *channel, TNgChannel *galileo, TNgIqView *view)
 }
 
 /** Faster confirmed results claim shared slots, independent of constellation order. */
-static void AutomaticPool(unsigned faster)
+static void AutomaticPool(unsigned faster, unsigned priority)
 {
     TNgTrackingConfig config;
     TNgAcquisitionConfig searchConfig;
@@ -66,6 +66,7 @@ static void AutomaticPool(unsigned faster)
     unsigned system, n;
     NgTrackingDefaults(&config);
     config.channelCount = 2;
+    config.autoPriority = priority;
     config.workers = 2;
     NgAcquisitionDefaults(&searchConfig);
     searchConfig.lastPrn = 3;
@@ -82,11 +83,15 @@ static void AutomaticPool(unsigned faster)
     view.samples = samples;
     view.meta.count = 2048;
     view.meta.epoch = 1;
-    for (n = 0; n < 120; ++n)
+    for (n = 0; n < 120; ++n) {
         Window(&channels[0], &channels[1], &view);
+        if (priority && n == 55)
+            NgSleepMs(600); /* Both strategies finish before the next admission. */
+    }
     NgTrackingBankReadAll(banks[0], slots);
     CHECK(slots[0].channelId == 1 && slots[1].channelId == 2 && !slots[2].channelId);
-    CHECK(slots[0].constellation == faster && slots[1].constellation == faster);
+    CHECK(slots[0].constellation == (priority ? priority : faster) &&
+          slots[1].constellation == (priority ? priority : faster));
     CHECK(slots[0].state == 2 && slots[1].state == 2 && slots[0].prn != slots[1].prn);
     NgTrackingBankDestroy(banks[0]);
     NgTrackingBankDestroy(banks[1]);
@@ -164,8 +169,10 @@ int main(void)
     NgTrackingBankDestroy(galileoBank);
     NgAcquisitionDestroy(acquisition);
     NgAcquisitionDestroy(galileoAcquisition);
-    AutomaticPool(1);
-    AutomaticPool(2);
+    AutomaticPool(1, 0);
+    AutomaticPool(2, 0);
+    AutomaticPool(1, 2);
+    AutomaticPool(2, 1);
     puts("shared channel allocation, reservations and gap reuse passed");
     return 0;
 }

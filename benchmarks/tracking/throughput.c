@@ -38,6 +38,8 @@ int main(int argc, char **argv)
     stream.sampleRateHz = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 10) : 16000000;
     NgTrackingDefaults(&config);
     config.tapCount = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 9;
+    config.squareCarrier = argc > 6 ? atoi(argv[6]) : 0;
+    config.xorCorrelation = argc > 7 ? atoi(argv[7]) : 0;
     if (!count || count > 32 || !windows || stream.sampleRateHz < 2048000 ||
         NgTrackingValidate(&config, &error) != NG_OK)
         return 1;
@@ -60,6 +62,7 @@ int main(int argc, char **argv)
                 NG_OK ||
             NgTrackingSeed(channels[channel], &seed, &error) != NG_OK)
             return 1;
+        if (argc > 8) NgTrackingObserve(channels[channel], atoi(argv[8]) == 2 ? channel == 0 : atoi(argv[8]) != 0);
     }
     for (channel = 0; channel < count; ++channel) {
         jobs[channel].ops = &ops;
@@ -88,8 +91,9 @@ int main(int argc, char **argv)
     NgChannelDispatchDestroy(dispatch);
     free(samples);
     printf(
-        "Fs=%u taps=%u channels=%u workers=%u signal=%.3fs elapsed=%.6fs real_time_ratio=%.3f checksum=%.12g\n",
-        stream.sampleRateHz, config.tapCount, count, workers, (double)windows / 1000, elapsed,
-        elapsed / ((double)windows / 1000), checksum);
+        "Fs=%u taps=%u channels=%u workers=%u square=%d xor=%d signal=%.3fs elapsed=%.6fs real_time_ratio=%.3f checksum=%.12g\n",
+        stream.sampleRateHz, config.tapCount, count, workers, config.squareCarrier,
+        config.xorCorrelation, (double)windows * view.meta.count / stream.sampleRateHz, elapsed,
+        elapsed / ((double)windows * view.meta.count / stream.sampleRateHz), checksum);
     return 0;
 }

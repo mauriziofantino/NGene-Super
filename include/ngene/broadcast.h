@@ -1,0 +1,66 @@
+/** @file broadcast.h @brief Classic broadcast orbit/clock values; double SI units.
+ * Adapted from navigationMessageDataStructure.h, Mario Nicola, 2014. */
+#ifndef NGENE_BROADCAST_H
+#define NGENE_BROADCAST_H
+
+typedef struct TNgOrbit {
+    /* Common fields */
+    /* Issue Of Data Ephemerides */
+    int iode1; /**< IODE read in word 1 of the Galileo navigation message */
+    int iode2; /**< IODE read in subframe 2/word 2 of the GPS/Galileo navigation message */
+    int iode3; /**< IODE read in subframe 3/word 3 of the GPS/Galileo navigation message */
+    int iode4; /**< IODE read in word 4 of the Galileo navigation message */
+    /* Ephemerides */
+    double meanAnomaly0;    /**< Mean anomaly @ toe */
+    double deltaN;          /**< Mean motion difference */
+    double eccentricity;    /**< Eccentricity */
+    double sqrtA;           /**< Square root of the semi-major axis */
+    double capitalOmega0;   /**< Longitude of ascending node @ toe */
+    double i0;              /**< Inclination angle */
+    double omega;           /**< Argument of perigee */
+    double capitalOmegaDot; /**< Rate of right ascension */
+    double iDot;            /**< Rate of inclination angle */
+    double capitalCuc;      /**< Amplitude of the cosine harmonic correction term to the argument of
+                               latitude */
+    double capitalCus;      /**< Amplitude of the sine harmonic correction term to the argument of
+                               latitude */
+    double capitalCrc; /**< Amplitude of the cosine harmonic correction term to the orbit radius */
+    double capitalCrs; /**< Amplitude of the sine harmonic correction term to the orbit radius */
+    double capitalCic; /**< Amplitude of the cosine harmonic correction term to the angle of
+                          inclination */
+    double capitalCis; /**< Amplitude of the sine harmonic correction term to the angle of
+                          inclination */
+    double toe;        /**< Reference time (Ephemerides) */
+    /* Signal goodness */
+    int health; /**< SV health */
+    int sisa;   /**< Signal-In-Space Accuracy (for GPS: URA, Use Range Accuracy) */
+    /* Galileo dedicated fields */
+    int galileoDataValidity; /**< Validity status of the Galileo navigation data */
+} TNgOrbit;
+
+typedef struct TNgBroadcastClock {
+    double toc;         /**< Reference time (Clock) */
+    double af[3];       /**< Satellite clock correction coefficients */
+    double tGroupDelay; /**< Group delay */
+    double bgd_E1E5a;   /**< Broadcast Group delay E1,E5a (Galileo) */
+    double bgd_E1E5b;   /**< Broadcast Group delay E1,E5b (Galileo) */
+    int iodc;           /**< Issue Of Data */
+} TNgBroadcastClock;
+
+/** Consistent issue-of-data cache, owned by one channel. */
+typedef struct {
+    TNgOrbit ephTmp, eph;          /**< Pending and committed orbit. */
+    TNgBroadcastClock clkTmp, clk; /**< Pending and committed clock. */
+
+    struct {
+        double alphaGal[3];
+        int sf[5];
+    } iono; /**< Galileo ionosphere telemetry. */
+
+    int satelliteId;                /**< Galileo SVID from word 4; zero before reception. */
+    int wn, tow, wnValid, towValid; /**< Broadcast system time, unexpanded week. */
+    int subframe1Received, subframe2Received, subframe3Received, subframe4Received,
+        subframe5Received;                 /**< Parts received. */
+    int ionoReceived, ephemeridesReceived; /**< Cache validity. */
+} TNgBroadcast;
+#endif

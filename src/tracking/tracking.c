@@ -13,6 +13,12 @@
 
 /** Private NCOs, integration accumulators and reusable block kernels. */
 struct TNgTracking {
+    int observeRequested, observeIntegration; /**< Optional tap interest, latched per integration. */
+    double offsets[NG_TRACKING_MAX_TAPS]; /**< Configured tap delays, never telemetry-compacted. */
+    TNgNavigation navigation;   /**< Per-integration data demodulator; never fed from telemetry. */
+    double transmitBoundary;    /**< Transmit time of latest code boundary. */
+    uint64_t transmitMilliseconds; /**< Exact elapsed code time since decoded anchor. */
+    int transmitTimeValid;      /**< A decoded TOW anchored the code counter. */
     TNgTrackingConfig config;     /**< Frozen arithmetic choices. */
     TNgStreamInfo stream;         /**< Actual opened source geometry. */
     TNgTrackingSnapshot snapshot; /**< Latest completed integration. */
@@ -54,6 +60,7 @@ void NgTrackingDefaults(TNgTrackingConfig *config)
     config->galileoSpacingChips = 0.2;
     config->gpsChannels = 0;
     config->galileoChannels = 0;
+    config->autoPriority = 0;
     config->workers = 4;
     config->enabled = 1;
     config->tapCount = 3;
@@ -67,7 +74,8 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
         config->gpsChannels + config->galileoChannels > config->channelCount ||
         !isfinite(config->galileoSpacingChips) || config->galileoSpacingChips <= 0 ||
         config->galileoSpacingChips >= 1.0 / 3.0 || config->gpsChannels > 32 ||
-        config->galileoChannels > 32 || !config->workers || config->workers > 16 ||
+        config->galileoChannels > 32 || config->autoPriority > 2 ||
+        !config->workers || config->workers > 16 ||
         (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1) || config->tapCount < 3 ||
@@ -94,6 +102,7 @@ int NgTrackingCreate(const TNgTrackingConfig *config, const TNgStreamInfo *strea
     if (!tracking)
         return NgFail(error, "Cannot allocate tracking workspace");
     tracking->config = *config;
+    tracking->observeRequested = 1;
     tracking->stream = *stream;
     tracking->system = constellation;
     tracking->period = constellation == 1 ? 1023u : 4092u;
@@ -126,6 +135,8 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     memset(tracking->sideI, 0, sizeof(tracking->sideI));
     memset(tracking->sideQ, 0, sizeof(tracking->sideQ));
     tracking->seed = *result;
+    NgNavigationReset(&tracking->navigation);
+    tracking->transmitTimeValid = 0;
     tracking->started = 0;
     tracking->accumulated = 0;
     tracking->discardFirst = 1;
@@ -145,7 +156,7 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     tracking->snapshot.epoch = result->epoch;
     tracking->snapshot.tapCount = tracking->config.tapCount;
     for (k = 0; k < tracking->config.tapCount; ++k)
-        tracking->snapshot.offset[k] = ((double)k - tracking->config.tapCount / 2u) *
+        tracking->snapshot.offset[k] = tracking->offsets[k] = ((double)k - tracking->config.tapCount / 2u) *
                                        (tracking->system == 2 ? tracking->config.galileoSpacingChips
                                                               : tracking->config.spacingChips);
     memset(tracking->sumI, 0, sizeof(tracking->sumI));
@@ -268,6 +279,29 @@ static void Complete(TNgTracking *t)
         QualifyGalileoPeak(t, i, q);
     else
         t->snapshot.mainPeakVerified = 1;
+    if (t->system == 1) {
+        NgNavigationGpsPrompt(&t->navigation, i, q, t->snapshot.pll, t->expected);
+        t->snapshot.navigation = t->navigation.snapshot;
+    } else {
+        NgNavigationGalileoPrompt(&t->navigation, i, t->snapshot.pll, t->expected);
+        t->snapshot.navigation = t->navigation.snapshot;
+    }
+    if (t->navigation.snapshot.towValid) {
+        if (t->navigation.snapshot.boundarySample == t->expected) {
+            t->transmitBoundary = t->navigation.snapshot.towSeconds;
+            t->transmitMilliseconds = 0;
+            t->transmitTimeValid = 1;
+        } else if (t->transmitTimeValid) {
+            t->transmitMilliseconds += t->system == 1 ? 1u : 4u;
+        }
+        t->snapshot.navigation.transmitTimeSeconds =
+            fmod(t->transmitBoundary + (double)t->transmitMilliseconds / 1000.0 +
+                 t->codePhase / 1023000.0, 604800.0);
+        if (!t->transmitTimeValid)
+            t->snapshot.navigation.towValid = 0;
+    } else {
+        t->transmitTimeValid = 0;
+    }
     double elapsed = (double)(t->start - t->seed.firstSample) / t->stream.sampleRateHz;
     double reference = fmod(t->seed.codePhaseChips +
                                 elapsed * 1023000.0 * (1.0 + t->seed.dopplerHz / 1575420000.0),
@@ -283,9 +317,14 @@ static void Complete(TNgTracking *t)
     t->snapshot.dopplerHz = t->carrierHz - (double)t->stream.digitalIfHz;
     t->snapshot.dllError = dll;
     t->snapshot.carrierError = error;
+    t->snapshot.tapCount = t->observeIntegration ? t->config.tapCount : 3u;
+    for (k = 0; k < t->snapshot.tapCount; ++k) {
+        unsigned source = t->observeIntegration ? k : p + k - 1;
+        t->snapshot.i[k] = t->sumI[source] / (double)t->accumulated;
+        t->snapshot.q[k] = t->sumQ[source] / (double)t->accumulated;
+        t->snapshot.offset[k] = t->offsets[source];
+    }
     for (k = 0; k < t->config.tapCount; ++k) {
-        t->snapshot.i[k] = t->sumI[k] / (double)t->accumulated;
-        t->snapshot.q[k] = t->sumQ[k] / (double)t->accumulated;
         t->sumI[k] = t->sumQ[k] = 0;
     }
     t->accumulated = 0;
@@ -316,6 +355,7 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
         size_t count, n;
         unsigned tap;
         if (!t->accumulated) {
+            t->observeIntegration = t->observeRequested;
             double remaining = (double)t->period - t->codePhase;
             t->target = (size_t)ceil(remaining * t->stream.sampleRateHz / t->snapshot.codeRateHz);
             if (!t->target)
@@ -349,8 +389,11 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
                              t->stream.sampleRateHz);
         for (tap = 0; tap < t->config.tapCount; ++tap) {
             double i, q;
+            unsigned prompt = t->config.tapCount / 2;
+            if (!t->observeIntegration && (tap + 1 < prompt || tap > prompt + 1))
+                continue;
             NgTrackingReplica(t->replica, t->phases, count, t->chips, t->period,
-                              t->snapshot.offset[tap], t->system == 2);
+                              t->offsets[tap], t->system == 2);
             NgSearchCorrelate(t->values, t->replica, count, t->config.xorCorrelation, &i, &q);
             t->sumI[tap] += i;
             t->sumQ[tap] += q;
@@ -396,6 +439,12 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
 void NgTrackingRead(const TNgTracking *tracking, TNgTrackingSnapshot *snapshot)
 {
     *snapshot = tracking->snapshot;
+}
+
+/** Change interest only outside jobs; an in-flight integration retains its geometry. */
+void NgTrackingObserve(TNgTracking *tracking, int observed)
+{
+    tracking->observeRequested = observed != 0;
 }
 
 /** Release private channel workspace. */

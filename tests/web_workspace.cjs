@@ -11,7 +11,7 @@ const sequence = status => BigInt(status.analysis.sequence_id);
 const histogramSequence = status => BigInt(status.analysis.histogram_sequence);
 const views = {
   journey:'journeyView', setup:'configurationView', rf:'observationView',
-  acquisition:'acquisitionView', tracking:'trackingView', navigation:'navigationView',
+  tracking:'trackingView', navigation:'navigationView',
   pvt:'pvtView', record:'recordingView', health:'healthView'
 };
 
@@ -186,7 +186,7 @@ histogram_update_hz=20
     };
 
     await shown('rf');
-    assert.equal(await page.locator('[data-workspace-view]').count(), 9, 'All receiver workspaces are present');
+    assert.equal(await page.locator('[data-workspace-view]').count(), 8, 'All receiver workspaces are present');
     assert.deepEqual(await page.evaluate(() => {
       const seen = new Set();
       return [...document.querySelectorAll('[id]')].map(node => node.id).filter(id => seen.has(id) || !seen.add(id));
@@ -194,6 +194,11 @@ histogram_update_hz=20
     const stoppedConfig = await get('config');
     const beforeBrowsing = writes.length;
     for (const key of Object.keys(views)) await select(key);
+    await select('tracking');
+    assert.equal(await page.locator('.channel-list thead th').count(),10);
+    assert((await page.locator('.channel-list tbody tr').count())>0);
+    assert.equal(await page.locator('.channel-status-grid').count(),0);
+    await page.screenshot({path:path.resolve('build/channel-list.png'),fullPage:true});
     assert.equal(writes.length, beforeBrowsing, 'Viewing a workspace must not issue mutation requests');
     assert.deepEqual(await get('config'), stoppedConfig, 'Workspace navigation must preserve the applied receiver profile');
     assert.equal((await get('status')).state, 'stopped', 'Selecting module workspaces must not start the receiver');
@@ -227,12 +232,12 @@ histogram_update_hz=20
     assert.equal(writes.length, beforeConfiguration, 'Module configuration shortcuts only navigate');
 
     // Readiness must come from actual module availability, never illustrative PRNs/fixes.
-    for (const key of ['acquisition', 'tracking', 'navigation', 'pvt']) {
+    for (const key of ['tracking', 'navigation', 'pvt']) {
       await select(key);
       const text = await page.locator(`#${views[key]}`).innerText();
       if (key === 'tracking') assert.match(text, /channels|channel/i);
-      else if(key==='acquisition')assert.match(text,/search|archive/i);
-      else assert.match(text, /not integrated|not attached|unavailable|not available/i, `${key} must explain unavailable processing`);
+      else if(key==='pvt')assert.match(text,/No solution available/i);
+      else assert.match(text,/No navigation data available/i);
       assert.doesNotMatch(text, /(?:GPS|GAL|SBAS)\s*(?:PRN\s*)?\d{2}\b|\b(?:latitude|longitude)\s*[:=]\s*-?\d/i,
         `${key} must not present invented tracked satellites or a synthetic fix`);
       const disabled = page.locator(`#${views[key]} button:disabled`);
@@ -250,7 +255,7 @@ histogram_update_hz=20
     assert.match(await page.locator('#workspaceTour').innerText(), /Receiver configuration/, 'Guided stage uses the complete receiver configuration name');
     assert(await page.locator('#workspaceTour').isVisible(), 'The guided workflow explains its current stage');
     assert(await page.locator('#workspaceTour [data-tour="previous"]').isDisabled(), 'The first guided stage has no predecessor');
-    for (const key of ['rf', 'acquisition', 'tracking', 'navigation', 'pvt', 'record']) {
+    for (const key of ['rf', 'tracking', 'navigation', 'pvt', 'record']) {
       await page.locator('#workspaceTour [data-tour="next"]').click();
       await shown(key);
     }
@@ -391,7 +396,7 @@ histogram_update_hz=20
     await select('journey');
     await screenshot('workspace-journey-real-session.png');
 
-    const allowedWrites = new Set(['config', 'analysis/config', 'receiver/start', 'receiver/stop', 'recording/start', 'recording/stop']);
+    const allowedWrites = new Set(['config', 'analysis/config', 'receiver/start', 'receiver/stop', 'recording/start', 'recording/stop', 'channels/observe']);
     assert.deepEqual(writes.filter(request => !allowedWrites.has(request.route)), [], 'No invented acquisition/tracking/navigation API endpoints');
     assert.equal((await snapshot()).rejected, 0, 'Real PSD integrity must remain valid');
     assert.deepEqual(errors, [], 'No browser errors or CSP violations');
@@ -400,7 +405,7 @@ histogram_update_hz=20
     await until(async () => (await get('status')).state === 'stopped', 'receiver stopped');
     await post('shutdown', {});
     assert.equal(await exit, 0);
-    console.log('PASS: nine real receiver workspaces; nine receiver configuration topics and module shortcuts; original NGene reference values isolated from operational profiles and locked across telemetry; preserved front-end validation and receiver buffer save; hash/history/keyboard navigation; honest unavailable GNSS modules; loop replay PSD and 2D/3D waterfall; hidden-view diagnostic worker withdrawal and fresh resumption without stopping reception; real capture/transfer access; mobile layout; production CSP and embedded asset integrity.');
+    console.log('PASS: eight real receiver workspaces; nine receiver configuration topics and module shortcuts; original NGene reference values isolated from operational profiles and locked across telemetry; preserved front-end validation and receiver buffer save; hash/history/keyboard navigation; honest unavailable GNSS modules; loop replay PSD and 2D/3D waterfall; hidden-view diagnostic worker withdrawal and fresh resumption without stopping reception; real capture/transfer access; mobile layout; production CSP and embedded asset integrity.');
   } finally {
     if (browser) await browser.close();
     if (child.exitCode === null) { child.kill('SIGTERM'); await exit; }

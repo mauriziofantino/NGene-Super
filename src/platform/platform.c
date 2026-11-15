@@ -5,6 +5,36 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+/** Query the process CPU allowance without binding workers to particular processors. */
+unsigned NgLogicalProcessorCount(void)
+{
+#ifdef _WIN32
+    DWORD_PTR available = 0, systemMask = 0;
+    unsigned count = 0;
+    if (GetProcessAffinityMask(GetCurrentProcess(), &available, &systemMask)) {
+        while (available) { count += (unsigned)(available & 1); available >>= 1; }
+    }
+    if (!count) { SYSTEM_INFO info; GetSystemInfo(&info); count = (unsigned)info.dwNumberOfProcessors; }
+    return count ? count : 1u;
+#else
+    long count = sysconf(_SC_NPROCESSORS_ONLN);
+    return count > 0 ? (unsigned)count : 1u;
+#endif
+}
+
+/** Give foreground GNSS work precedence over replaceable acquisition/plot work on Windows. */
+void NgThreadSchedulingPriority(int priority)
+{
+#ifdef _WIN32
+    (void)SetThreadPriority(GetCurrentThread(), priority > 0 ? THREAD_PRIORITY_ABOVE_NORMAL :
+                           priority < 0 ? THREAD_PRIORITY_BELOW_NORMAL : THREAD_PRIORITY_NORMAL);
+#else
+    (void)priority;
+#endif
+}
 
 /** @brief Owned startup wrapper freed by the new thread; context remains borrowed. */
 typedef struct {

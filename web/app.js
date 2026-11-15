@@ -1006,7 +1006,13 @@ setInterval(() => { if (waiting && performance.now() - lastRequest > 4000) socke
 
 const plotResizeObserver=new ResizeObserver(schedulePlotDraw);
 for(const id of ['spectrum','waterfall','waterfall3D','histogramI','histogramQ'])plotResizeObserver.observe($(id));
+let observedChannelId=0,observedSent=0,observedPending=false;
 receiverWorkspace = createReceiverWorkspace({
+  onChannelInterest(id) {
+    if(!connected()||observedPending||id===observedChannelId&&(!id||performance.now()-observedSent<800))return;
+    observedChannelId=id;observedSent=performance.now();observedPending=true;
+    api('channels/observe',{channel_id:id}).catch(()=>{}).finally(()=>{observedPending=false;});
+  },
   onViewChange(view) {
     activeWorkspaceView = view;
     requestStatus();

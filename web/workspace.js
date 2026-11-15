@@ -1,12 +1,11 @@
 /* Receiver workspace: navigation and presentation of controller snapshots only. */
 import {createAcquisitionSearchSpace} from './acquisition-search-space.js';
-import {createAcquisitionTable} from './acquisition-table.js';
+import {createPvtMap} from './pvt-map.js';
 let satelliteSearchSpace = null;
 const ROUTES = {
   journey: {label: 'Overview', id: 'journeyView'},
   setup: {label: 'Receiver configuration', id: 'configurationView'},
   rf: {label: 'RF observation', id: 'observationView'},
-  acquisition: {label: 'Acquisition', id: 'acquisitionView'},
   tracking: {label: 'Channels', id: 'trackingView'},
   navigation: {label: 'Navigation data', id: 'navigationView'},
   pvt: {label: 'PVT solution', id: 'pvtView'},
@@ -16,8 +15,7 @@ const ROUTES = {
 const STAGES = [
   ['setup', 'Receiver configuration', 'Configure the front end, receiver channels, acquisition, tracking and navigation.'],
   ['rf', 'RF observation', 'Check I/Q continuity, spectrum, waterfall and amplitude.'],
-  ['acquisition', 'Acquisition', 'Search satellite codes and confirm signal candidates.'],
-  ['tracking', 'Tracking', 'Follow carrier and code lock, correlators and loop state.'],
+  ['tracking', 'Channels', 'Inspect active channels, acquisition and tracking state.'],
   ['navigation', 'Navigation', 'Decode messages, satellite time and valid ephemerides.'],
   ['pvt', 'PVT solution', 'Inspect position, velocity, time and measurement quality.'],
   ['record', 'Record & replay', 'Save common signed I/Q and return to a recorded input.']
@@ -44,19 +42,9 @@ function journeyMarkup() {
     `<nav class="workspace-pipeline" aria-label="Receiver stages">${STAGES.map(([view, title, description], index) => `<button type="button" class="workspace-step" data-go="${view}"><span class="workspace-step-number">${String(index + 1).padStart(2, '0')}</span><h3>${title}</h3><p>${description}</p><span class="workspace-step-state" data-workspace-field="stage-${view}">${['setup', 'rf', 'record'].includes(view) ? 'Waiting for receiver' : 'Module unavailable'}</span></button>`).join('')}</nav>` +
     `<div class="workspace-kpis">${kpi('INPUT SOURCE', field('sourceName'), field('formatDetail'))}${kpi('PROCESSED I/Q PAIRS', field('processed'), field('windowsDetail'))}${kpi('RECEIVER SERVICE', field('receiverState'), field('connectionDetail'))}${kpi('NATIVE I/Q CAPTURE', field('recordingState'), field('capturePoint'))}</div>` +
     `<div class="workspace-grid workspace-grid-wide">${card('Your next step', 'Operate the real signal path before inspecting GNSS stages.',
-      `<div class="workspace-status-strip">${badge('I/Q pipeline available')}${badge('GPS / Galileo acquisition available')}</div><ol class="workspace-next-steps"><li><strong>Prepare the source.</strong> Select a live SDR or a recorded I/Q file, then apply the profile.</li><li><strong>Start reception.</strong> Use Start receiver, then check continuity and native signal statistics in RF observation.</li><li><strong>Inspect the chain.</strong> Choose the receiver channel count and optional reservations, then inspect Channels. Acquisition and tracking run automatically. Navigation and PVT are not yet integrated.</li></ol><div class="workspace-actions">${button('setup', 'Review setup')}${button('health', 'Check system health')}</div>`)}${card('Session at a glance', 'Configured input and the current receiver connection.', rows([
+      `<div class="workspace-status-strip">${badge('I/Q pipeline available')}${badge('GPS / Galileo acquisition available')}</div><ol class="workspace-next-steps"><li><strong>Prepare the source.</strong> Select a live SDR or a recorded I/Q file, then apply the profile.</li><li><strong>Start reception.</strong> Use Start receiver, then check continuity and native signal statistics in RF observation.</li><li><strong>Inspect the chain.</strong> Choose the receiver channel count and optional reservations, then inspect Channels. Acquisition and tracking run automatically. GPS/Galileo navigation and broadcast PVT follow validated messages.</li></ol><div class="workspace-actions">${button('setup', 'Review setup')}${button('health', 'Check system health')}</div>`)}${card('Session at a glance', 'Configured input and the current receiver connection.', rows([
       ['Connection', field('connection')], ['Profile', field('profileState')], ['Native sample format', field('format')], ['Sample rate', field('sampleRate')], ['Signal centre', field('signalFrequency')], ['Position solution', 'Unavailable — PVT module not integrated']
     ]))}</div>`;
-}
-
-function acquisitionMarkup() {
-  return heading('GNSS / DIAGNOSTICS', 'Search archive', 'Coarse search, Doppler and code refinement, then independent 3-of-4 confirmation.', settingsButton('acquisition', 'Acquisition settings')) +
-    '<label class="caf-controls caf-signal-picker">Signal <select aria-label="Acquisition signal" data-acquisition-signal><option value="gps">GPS L1 C/A</option><option value="galileo">Galileo E1-B</option></select></label>' +
-    card('Satellite searches', 'Completed searches are referenced to their captured sample epoch. Current receiver states and satellite details are in Channels.',
-      rows([['Search worker',field('acquisitionState','Waiting for receiver')],['Satellite searches',field('acquisitionSearches','0')],['Capture gaps',field('acquisitionGaps','0')],['Samples outside capture',field('acquisitionSkipped','0')]]) +
-      '<p class="muted" data-acquisition-message></p><div class="table-wrap workspace-table"><table><thead><tr><th>PRN</th><th>Result</th><th>Doppler (Hz)</th><th>Code phase (chips)</th><th>Peak / threshold</th><th>Confirmation</th><th>Capture epoch / sample</th></tr></thead><tbody data-acquisition-results><tr><td colspan="7">Start the receiver to inspect completed searches.</td></tr></tbody></table></div>') +
-    card('Completed search space', 'Inspect the last completed coarse round for each satellite, including searches below threshold.',
-      '<div data-search-space></div>') + route('rf', 'tracking');
 }
 
 function trackingMarkup() {
@@ -67,17 +55,10 @@ function trackingMarkup() {
     '<section class="card tracking-panel"><h2>Acquisition of this satellite</h2><div data-channel-search-space></div></section></section>';
 }
 function navigationMarkup() {
-  return heading('STAGE 05 / NAVIGATION', 'Decode time and navigation data',
-    'Keep message synchronization, satellite health, ephemerides and observables visible before a position is computed.',
-    `${badge()}${settingsButton('navigation', 'Navigation & PVT settings')}${button('tracking', 'Inspect channels')}${button('pvt', 'PVT solution →')}`) +
-    `<div class="workspace-kpis">${kpi('MESSAGE DECODING', 'Unavailable', 'Navigation decoder not integrated')}${kpi('VALID EPHEMERIDES', '—', 'No decoded satellite data')}${kpi('RECEIVER TIME', '—', 'No valid GNSS timebase')}${kpi('OBSERVATION EPOCH', '—', 'No synchronized measurements')}</div>` +
-    card('Satellite navigation data', 'Validity and age must accompany each decoded data set.',
-      table(['Satellite / signal', 'Message sync', 'Time of week', 'Ephemerides', 'Health', 'Age', 'Authentication'], 'No decoded navigation messages available.')) +
-    `<div class="workspace-grid">${card('Time and observables', 'Only valid, synchronized measurements can feed a solution.', rows([
-      ['GPS time / Galileo time', UNAVAILABLE], ['UTC and conversion status', UNAVAILABLE], ['Pseudorange', UNAVAILABLE], ['Carrier phase / Doppler', UNAVAILABLE], ['Measurement epoch / validity', UNAVAILABLE], ['Clock and ephemeris corrections', UNAVAILABLE]
-    ]))}${card('Authentication and assistance', 'Authentication is independent of signal lock and solution availability.', rows([
-      ['OSNMA verification', 'Unavailable — authentication module not integrated'], ['Trusted key / verification time', UNAVAILABLE], ['Assistance / almanac', 'No assistance service available'], ['GPS signal authentication', UNAVAILABLE]
-    ]) + '<p class="muted">Unavailable data is neither a successful verification nor an authentication failure.</p>', badge())}</div>` + route('tracking', 'pvt');
+  return heading('NAVIGATION DATA', 'GPS LNAV and Galileo I/NAV',
+    'Parity and CRC validate messages. Consistent orbit and clock issues feed common-epoch observables.',
+    settingsButton('navigation','Navigation & PVT settings')+button('tracking','Inspect channels')+button('pvt','PVT solution'))+
+    '<section class="card tracking-panel"><h2>Broadcast navigation</h2><div class="channel-list-wrap" data-navigation-status></div><p>UTC conversion, authentication and integrity qualification are not available.</p></section>';
 }
 
 function emptySkyplot() {
@@ -85,18 +66,11 @@ function emptySkyplot() {
 }
 
 function pvtMarkup() {
-  return heading('STAGE 06 / POSITION, VELOCITY & TIME', 'Understand the receiver solution',
-    'Review a valid solution together with its measurement epoch, satellite geometry and quality. A running I/Q stream alone does not establish a position fix.',
-    `${badge()}${settingsButton('navigation', 'Navigation & PVT settings')}${button('navigation', 'Review navigation data')}${button('record', 'Recording & replay →')}`) +
-    `<div class="workspace-kpis">${kpi('SOLUTION STATE', 'Unavailable', 'PVT module not integrated')}${kpi('LATITUDE / LONGITUDE', '—', 'No valid coordinates')}${kpi('ELLIPSOIDAL HEIGHT', '—', 'No height estimate')}${kpi('MEASUREMENT EPOCH', '—', 'No GNSS solution time')}</div>` +
-    `<div class="workspace-grid">${card('Satellite geometry', 'Sky positions of satellites used or observed by the receiver.', emptySkyplot(), badge())}${card('Solution and quality', 'Quality values are displayed only for an available solution.', rows([
-      ['Position / velocity solution', UNAVAILABLE], ['GNSS time / solution age', UNAVAILABLE], ['Satellites used / excluded', UNAVAILABLE], ['GDOP / PDOP / HDOP / VDOP', UNAVAILABLE], ['Receiver clock bias / drift', UNAVAILABLE], ['Residual RMS', UNAVAILABLE], ['Integrity assessment', 'Not computed']
-    ]))}</div>` +
-    `<div class="workspace-grid">${card('Position history', 'A trajectory requires actual, time-stamped coordinates.',
-      empty('No position history', 'A trajectory will appear when valid, time-stamped position fixes are available.'))}${card('Observation residuals', 'Inspect measurement fit, then trace a satellite back to its channel.',
-      empty('No measurement residuals', 'Residuals become available after a solution is computed from valid observables.'))}</div>` +
-    card('Trace a solution back to its input', 'Move between the views that explain a solution or an excluded measurement.',
-      `<div class="workspace-actions">${button('navigation', 'Navigation & observables')}${button('tracking', 'Channels & correlators')}${button('rf', 'RF observation')}${button('record', 'Native I/Q recordings')}</div>`) + route('navigation', 'record');
+  return heading('POSITION, VELOCITY & TIME', 'Broadcast PVT',
+    'Code and Doppler measurements share one input epoch. GPS and Galileo have separate clock biases.',
+    settingsButton('navigation', 'Navigation & PVT settings') + button('tracking', 'Inspect channels')) +
+    '<section class="card tracking-panel"><h2 data-pvt-state>No solution available</h2><p data-pvt-counts></p><dl data-pvt-values></dl><p data-pvt-model></p></section>' +
+    '<section class="card tracking-panel"><h2>Receiver position and track</h2><div data-pvt-map></div></section>';
 }
 
 function recordingMarkup() {
@@ -137,8 +111,8 @@ function frequency(value, suffix, scale = 1e6) {
  * Add receiver workspace views without owning controller state or running signal work.
  * The application supplies snapshots; unavailable GNSS modules have no synthetic data.
  */
-export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings = () => {}, onBrowseReplay = () => {}, onPlotInterestChange = () => {}} = {}) {
-  const renderers = {journey: journeyMarkup, acquisition: acquisitionMarkup, tracking: trackingMarkup, navigation: navigationMarkup, pvt: pvtMarkup};
+export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings = () => {}, onBrowseReplay = () => {}, onPlotInterestChange = () => {}, onChannelInterest = () => {}} = {}) {
+  const renderers = {journey: journeyMarkup, tracking: trackingMarkup, navigation: navigationMarkup, pvt: pvtMarkup};
   for (const [name, render] of Object.entries(renderers)) {
     const panel = document.getElementById(ROUTES[name].id);
     if (panel) panel.innerHTML = render();
@@ -194,12 +168,9 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   const previous = tour.querySelector('[data-tour="previous"]'), next = tour.querySelector('[data-tour="next"]');
   let selected = 'rf', guided = false, tourIndex = 0;
   let acquisitionSnapshot = {};
-  const signalPicker = document.querySelector('[data-acquisition-signal]');
-  signalPicker.addEventListener('change', () => update(acquisitionSnapshot));
-  const acquisitionTable = createAcquisitionTable(document.querySelector('[data-acquisition-results]'));
   satelliteSearchSpace = createAcquisitionSearchSpace(document.querySelector('[data-channel-search-space]'));
+  const pvtMap = createPvtMap(document.querySelector('[data-pvt-map]'));
   document.querySelector('[data-channel-search-space] select').setAttribute('aria-label','Channel search space satellite');
-  const searchSpace = createAcquisitionSearchSpace(document.querySelector('[data-search-space]'));
   const text = (key, value) => {
     const string = String(value ?? UNAVAILABLE);
     for (const node of bindings.get(key) || []) if (node.textContent !== string) node.textContent = string;
@@ -228,9 +199,10 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     if (crumb && crumb.textContent !== ROUTES[view].label) crumb.textContent = ROUTES[view].label;
     if (writeHistory && location.hash !== `#${view}` && (changed || location.hash)) history.pushState(null, '', `#${view}`);
     updateTour();
-    searchSpace.setVisible(view === 'acquisition');
     satelliteSearchSpace?.setVisible(view === 'tracking' && /^#tracking[/][0-9]+$/.test(location.hash));
     onViewChange(view);
+    pvtMap.setVisible(view === 'pvt');
+    if(view!=='tracking')onChannelInterest(0);
     if (focus) {
       const panel = document.getElementById(ROUTES[view].id), title = panel?.querySelector('h1,h2');
       if (title) { title.tabIndex = -1; title.focus({preventScroll: true}); }
@@ -238,7 +210,8 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     return true;
   }
   function fromHash() {
-    const view=location.hash.slice(1).split('/')[0];
+    const requested=location.hash.slice(1).split('/')[0];
+    const view=requested==='acquisition'?'tracking':requested;
     show(Object.hasOwn(ROUTES,view)?view:'rf',{},false);
     update(acquisitionSnapshot);
   }
@@ -275,17 +248,23 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       channelRows=Array.from({length:total},(_,k)=>({channel_id:k+1,reservation:k<gps?1:k<gps+gal?2:0,state:0,constellation:0,prn:0,active:false,taps:[]}));
     }
     updateTracking(channelRows, live?.run_id, live);
-    const system = signalPicker.value;
-    const signalName = system === 'galileo' ? 'Galileo' : 'GPS';
-    const acquisition = system === 'galileo' ? live?.galileo_acquisition : live?.acquisition;
-    searchSpace.update(live ? {...live, acquisition, signal:system} : null);
-    text('acquisitionState', acquisition?.enabled ? (acquisition.searching ? `Searching ${signalName} ${acquisition.current_prn || ''}` : 'Waiting for capture') : 'Waiting for receiver');
-    text('acquisitionSearches', acquisition?.searches || '0');
-    text('acquisitionGaps', acquisition?.gaps || '0');
-    text('acquisitionSkipped', acquisition?.skipped_samples || '0');
-    acquisitionTable.update(acquisition, profile, system);
-    const acquisitionMessage = document.querySelector('[data-acquisition-message]');
-    if (acquisitionMessage) acquisitionMessage.textContent = acquisition?.message || '';
+    const navigationTable=document.querySelector('[data-navigation-status]');navigationTable.replaceChildren();
+    const nt=document.createElement('table'),nh=nt.createTHead().insertRow(),nb=nt.createTBody();
+    for(const title of ['Channel','Signal / PRN','Message parts valid','TOW (s)','Ephemerides']){const th=document.createElement('th');th.textContent=title;nh.append(th);}
+    for(const t of channelRows.filter(t=>t.active)) {const row=nb.insertRow();for(const value of [t.channel_id,(t.constellation===2?'Galileo ':'GPS ')+t.prn,t.valid_subframes||'0',t.tow_valid?t.tow_seconds:'Unavailable',t.ephemeris_valid?'Consistent issue received':'Incomplete'])row.insertCell().textContent=String(value);}
+    if(!nb.rows.length){const cell=nb.insertRow().insertCell();cell.colSpan=5;cell.textContent='No navigation data available';}
+    navigationTable.append(nt);
+    const observed=selected==='tracking'&&live?.state==='running'?location.hash.match(/^#tracking[/]([0-9]+)$/):null;
+    onChannelInterest(observed?Number(observed[1]):0);
+    const pvt=live?.pvt, pvtState=document.querySelector('[data-pvt-state]');
+    pvtMap.update(pvt, live?.run_id, live?.state === 'running');
+    pvtState.textContent=pvt?.available?'Broadcast least-squares solution':'No solution available';
+    document.querySelector('[data-pvt-counts]').textContent=pvt?`Eligible measurements: ${pvt.satellites} (GPS ${pvt.gps}, Galileo ${pvt.galileo}) | Epoch ${pvt.epoch}, sample ${pvt.sample}`:'Waiting for receiver';
+    document.querySelector('[data-pvt-model]').textContent=pvt?.model||'Waiting for validated navigation data and consistent ephemerides.';
+    const pvtValues=document.querySelector('[data-pvt-values]');pvtValues.replaceChildren();
+    if(pvt?.available) for(const [label,value] of [['Latitude',pvt.latitude_deg.toFixed(8)+' deg'],['Longitude',pvt.longitude_deg.toFixed(8)+' deg'],['Ellipsoidal height',pvt.height_m.toFixed(2)+' m'],['Residual RMS',pvt.residual_rms_m.toFixed(2)+' m'],['Nominal receiver TOW',pvt.tow_seconds.toFixed(6)+' s'],['Velocity ECEF',pvt.velocity_available?[pvt.velocity_x_mps,pvt.velocity_y_mps,pvt.velocity_z_mps].map(v=>v.toFixed(3)).join(', ')+' m/s':'Unavailable']]) {
+      const row=document.createElement('div'),term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=value;row.append(term,description);pvtValues.append(row);
+    }
     const configuredSource = profile['frontend.type'];
     const source = SOURCE_NAMES[configuredSource] || configuredSource || UNAVAILABLE;
     const configuredFormat = configuredSource === 'file' ? profile['replay.format'] : configuredSource === 'bladerf' ? profile['bladerf.format'] : {hackrf: 'CI8', rtlsdr: 'CU8', sige:'CI8'}[configuredSource];
@@ -320,7 +299,6 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       'module-gnss': 'Not integrated',
       'stage-setup': dirty ? 'Unsaved changes' : revision ? `Profile r${revision}` : 'Waiting for profile',
       'stage-rf': state,
-      'stage-acquisition': acquisition?.enabled ? (acquisition.searching ? `Searching ${signalName}` : `${signalName} enabled`) : `${signalName} awaiting receiver`,
       'stage-tracking': live?.tracking?.some(t => t.active) ? 'Tracking observations' : 'Waiting for confirmed acquisitions',
       'stage-record': record
     };
@@ -368,17 +346,29 @@ function updateTracking(channels, run, status) {
   const running=status?.state==='running';
   counts.textContent=running?`${channels.length} channels | ${channels.filter(t=>t.state===2).length} tracking | ${channels.filter(t=>t.state===1).length} acquiring | ${channels.filter(t=>t.state===0).length} waiting`:`${channels.length} configured channels | Receiver ${status?.state||'disconnected'}`;
   table.append(counts);
-  const grid=document.createElement('div');grid.className='channel-status-grid';
+  const wrap=document.createElement('div');wrap.className='channel-list-wrap';
+  const grid=document.createElement('table');grid.className='channel-list';
+  const head=grid.createTHead().insertRow();
+  for(const label of ['Channel','Signal','PRN','State','Loop','C/N0 (dB-Hz)','Doppler (Hz)','Allocation','Data bits','TOW (s)']) {
+    const cell=document.createElement('th');cell.scope='col';cell.textContent=label;head.append(cell);
+  }
+  const body=grid.createTBody();
   const open=id=>{location.hash=`tracking/${id}`;};
   for(const t of channels) {
-    const row=document.createElement('button');row.type='button';
+    const row=body.insertRow();
     row.dataset.channelId=String(t.channel_id);row.dataset.channelState=running?String(t.state):'0';
     const system=t.constellation===1?'GPS':t.constellation===2?'Galileo':'Unassigned';
     const reserved=t.reservation===1?'GPS reserved':t.reservation===2?'Galileo reserved':'Automatic';
-    row.textContent=`CH ${t.channel_id} | ${system} ${t.prn||''} | ${running?['Waiting','Acquisition','Tracking'][t.state]:'Stopped'} | ${reserved}${t.cn0_valid?` | ${t.cn0_db_hz.toFixed(1)} dB-Hz`:''}`;
-    row.onclick=()=>open(t.channel_id);grid.append(row);
+    const first=row.insertCell(),link=document.createElement('a');
+    link.href=`#tracking/${t.channel_id}`;link.textContent=`CH ${t.channel_id}`;first.append(link);
+    for(const value of [system,t.prn||'—',running?(t.tow_valid?'Navigation (TOW)':t.bit_synchronized?'Data demodulation':['Waiting','Acquisition','Tracking'][t.state]):'Stopped',
+      t.active?(t.pll?'PLL / DLL':'FLL / DLL'):'—',t.cn0_valid?t.cn0_db_hz.toFixed(1):'—',
+      t.active?Number(t.doppler_hz).toFixed(1):'—',reserved,
+      t.bit_synchronized?String(t.navigation_symbols||0):'—',
+      t.tow_valid?String(t.tow_seconds):'—'])row.insertCell().textContent=value;
+    row.onclick=event=>{if(!event.target.closest('a'))open(t.channel_id);};
   }
-  table.append(grid);
+  wrap.append(grid);table.append(wrap);
   picker.onchange=()=>open(picker.value);
   document.querySelector('[data-channel-back]').onclick=()=>{location.hash='tracking';};
   const render=()=>{
@@ -398,7 +388,7 @@ function updateTracking(channels, run, status) {
 }
 /** Absolute ADC-value geometry; no Prompt division or forced triangle. */
 export function trackingPlotPoints(t,component,range) {
-  return (t?.taps||[]).map(p=>({x:p.offset_chips+(t.code_delay_chips||0),
+  return (t?.taps||[]).map(p=>({x:(p.offset_chips+(t.code_delay_chips||0))*(t.constellation===2?2:1),
     value:component==='magnitude'?Math.hypot(p.i,p.q):p[component],
     i:p.i,q:p.q})).map(p=>({...p,y:component==='magnitude'?225-200*p.value/range:125-100*p.value/range}));
 }
@@ -429,25 +419,28 @@ function renderTracking(t,history,status) {
   const element=(svg,tag,attrs,text)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,String(v));if(text)e.textContent=text;svg.append(e);return e;};
   const colors=['#60a5fa','#34d399','#fb923c','#c084fc','#f472b6'];
   const points=trackingPlotPoints(t,component,range);
-  const extent=Math.max(1,...(t.taps||[]).map(p=>Math.abs(p.offset_chips)+1));
-  const x=d=>45+(d+extent)/(2*extent)*580;
+  const center=(t.code_delay_chips||0)*(t.constellation===2?2:1);
+  const extent=Math.max(0.25,...points.map(p=>Math.abs(p.x-center)))*1.35;
+  const x=d=>45+(d-center+extent)/(2*extent)*580;
   const axis=(svg,label)=>{
     element(svg,'path',{d:'M45 15V225H625',stroke:'#64748b',fill:'none'});
     element(svg,'text',{x:48,y:12,fill:'currentColor','font-size':11},`${component} (ADC units/sample)`);
     element(svg,'text',{x:190,y:252,fill:'currentColor','font-size':11},label);
     for(const value of component==='magnitude'?[0,range/2,range]:[-range,0,range]) {
       const y=component==='magnitude'?225-200*value/range:125-100*value/range;
+      element(svg,'path',{d:`M45 ${y}H625`,stroke:'#263c52','stroke-dasharray':'3 4'});
       element(svg,'text',{x:2,y:y+4,fill:'currentColor','font-size':10},value.toPrecision(3));
     }
   };
-  axis(shape,'Code delay relative to acquisition prediction (chips)');axis(time,'Signal time (seconds within epoch)');
+  axis(shape,`Code delay relative to acquisition (${t.constellation===2?'slots = ? chip':'chips'})`);axis(time,'Signal time (seconds within epoch)');
+  element(shape,'polyline',{points:points.map(p=>`${x(p.x)},${p.y}`).join(' '),fill:'none',stroke:'#6ecbdd','stroke-width':2});
   for(let n=0;n<points.length;++n) {
     const p=points[n],mid=points.length>>1,name=n===mid?'P':n===mid-1?'E':n===mid+1?'L':String(n);
     const dot=element(shape,'circle',{cx:x(p.x),cy:p.y,r:4,fill:colors[n%colors.length],'data-tap':name,'data-value':p.value});
     element(dot,'title',{},`${name}: delay=${p.x}, I=${p.i}, Q=${p.q}`);
     element(shape,'text',{x:x(p.x)+4,y:p.y-8,fill:colors[n%colors.length],'font-size':11},name);
   }
-  for(const d of[-extent,0,extent])element(shape,'text',{x:x(d),y:240,fill:'currentColor','font-size':10},d.toFixed(2));
+  for(const d of[center-extent,center,center+extent])element(shape,'text',{x:x(d),y:240,fill:'currentColor','font-size':10},d.toFixed(2));
   const recent=history.filter(h=>h.epoch===t.epoch&&h.prn===t.prn&&h.taps.length===points.length);
   if(!recent.length||!t.sample_rate_hz)return;
   const first=Number(recent[0].first_sample)/t.sample_rate_hz,last=Number(t.end_sample)/t.sample_rate_hz;

@@ -1,0 +1,48 @@
+/* Real embedded map with mocked tiles: no automated requests reach the OSM tile service. */
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const {spawn}=require('node:child_process');
+const path=require('node:path'),fs=require('node:fs'),assert=require('node:assert/strict');
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evaluate(predicate))return;await delay(30);}throw Error('Map update timed out');}
+(async()=>{
+ const executable=path.resolve(process.env.NGENE_EXECUTABLE||'build/ngene');
+ const root=path.resolve('build/pvt-map-test-'+Date.now());fs.mkdirSync(root,{recursive:true});
+ const port=18296,base=`http://127.0.0.1:${port}`;
+ const child=spawn(executable,['--web','--port',String(port),'--output-dir',root],{stdio:'ignore'});
+ let browser;
+ try {
+  let bootstrap;for(let k=0;k<100;k++){try{bootstrap=await(await fetch(base+'/api/v1/bootstrap')).json();break;}catch{await delay(100);}}
+  assert(bootstrap,'service starts');
+  browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});
+  const page=await browser.newPage({viewport:{width:1100,height:850}});let tiles=0;
+  await page.route('https://tile.openstreetmap.org/**',route=>{tiles++;return route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=','base64')});});
+  await page.goto(base);
+  await page.evaluate(async()=>{
+   const {createPvtMap,mercator}=await import('/pvt-map.js');
+   if(mercator(0,0,2).some(v=>Math.abs(v-512)>1e-10))throw Error('Mercator origin');
+   document.querySelector('main').replaceChildren();
+   const root=document.createElement('section');document.querySelector('main').append(root);
+   window.testMap=createPvtMap(root);
+   window.testFix={available:true,latitude_deg:45.07,longitude_deg:7.69,epoch:'1',sample:'100'};
+   window.testMap.update(window.testFix,'1',true);
+  });
+  await delay(150);assert.equal(tiles,0,'hidden map does not request tiles');
+  await page.evaluate(()=>window.testMap.setVisible(true));
+  await until(page,()=>document.querySelector('canvas').dataset.latitude==='45.07');
+  assert(tiles>0&&tiles<30,'only viewport tiles load');
+  await page.evaluate(()=>{window.testMap.update({...window.testFix,sample:'200',longitude_deg:7.6901},'1',true);});
+  await until(page,()=>document.querySelector('canvas').dataset.points==='2');
+  await page.evaluate(()=>window.testMap.update({available:false},'1',true));
+  await until(page,()=>document.querySelector('[data-map-status]').textContent.startsWith('Last position'));
+  assert.equal(await page.locator('canvas').getAttribute('data-points'),'2');
+  await page.locator('[data-map-in]').click();await page.locator('canvas').focus();await page.keyboard.press('ArrowRight');
+  assert.equal(await page.locator('[data-map-follow]').getAttribute('aria-pressed'),'false');
+  await page.locator('[data-map-follow]').click();
+  assert.equal(await page.locator('[data-map-follow]').getAttribute('aria-pressed'),'true');
+  await page.screenshot({path:path.resolve('build/pvt-map-preview.png'),fullPage:true});
+  await page.evaluate(()=>window.testMap.update(null,'2',false));
+  await delay(100);assert.equal(await page.locator('canvas').getAttribute('data-latitude'),null,'new run clears stale position');
+  await fetch(base+'/api/v1/shutdown',{method:'POST',headers:{'Content-Type':'application/json','X-NGene-Token':bootstrap.token},body:'{}'});
+  console.log('PASS: embedded PVT map, projection, hidden-view requests, trace, loss, run reset and keyboard/pointer controls (mocked tiles).');
+ } finally {if(browser)await browser.close();child.kill();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

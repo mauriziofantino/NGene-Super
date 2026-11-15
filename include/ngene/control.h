@@ -2,6 +2,7 @@
 #ifndef NGENE_CONTROL_H
 #define NGENE_CONTROL_H
 #include "ngene/receiver.h"
+#include "ngene/pvt.h"
 
 /** @brief Opaque owned TNgControl handle; release with the matching destroy operation. */
 typedef struct TNgControl TNgControl;
@@ -44,6 +45,7 @@ typedef struct {
     /** Independent Galileo E1-B telemetry. */
     TNgAcquisitionSnapshot galileoAcquisition;
     TNgTrackingSnapshot tracking[64]; /**< Copied completed integrations. */
+    TNgPvtSnapshot pvt; /**< Copied common-epoch broadcast solution. */
     /** Cumulative written pairs including completed capture sessions. */
     uint64_t totalWrittenSamples;
     /** Baseband filter bandwidth applied by the source, in hertz. */
@@ -178,6 +180,8 @@ void NgControlDiagnosticInterestUntil(TNgControl *control, unsigned mask, double
  * @param status Receives a by-value status snapshot.
  */
 void NgControlSnapshot(TNgControl *control, TNgControlStatus *status);
+/** Lease optional plots for one channel. Zero withdraws interest; engine owner applies it. */
+void NgControlObserveChannel(TNgControl *control, unsigned channelId);
 /** Copy an archived completed coarse map, retained after stop and reset on start. */
 void NgControlAcquisitionSearchSpace(TNgControl *control, unsigned prn,
                                     TNgAcquisitionSearchSpace *space);

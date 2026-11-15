@@ -222,3 +222,15 @@ the nine-workspace regression. Executable: `build/tracking-hackrf/ngene.exe`.
 The hardware enumeration test passed with zero devices; it is not an RF reception
 or USB-throughput acceptance result. Existing native MSVC build resolution was
 reported by the user separately and is not reclassified as a tracking RF result.
+
+## Channel configuration update, 14 November 2026
+
+The receiver uses one total pool. For fixed six GPS and four Galileo slots set receiver.channels=10, gps_reserved=6 and galileo_reserved=4. For twelve automatic slots set channels=12 and both reservations to zero. receiver.auto_priority is 0 for completion order, 1 for GPS preference and 2 for Galileo preference among competing confirmed results for shared slots; existing assignments are retained. Galileo spacing is now presented and saved as tracking.galileo_spacing_slots, one slot equal to half a chip. Legacy chip values remain accepted on import; internal phase and SIMD arithmetic retain chip units.
+
+The standalone search diagnostics workspace has been removed. Channel detail retains correlator plots with Galileo delay in slots. Selection-dependent search computation and immutable acquisition maps remain pending. Live HackRF evidence reproduces unqualified Galileo PLL states with lost BOC peak consistency; this update does not establish an RF tracking fix. See WORKPLAN_CHANNELS_GALILEO_2026-11-14.md for the continuing work and evidence.
+
+## GPS data demodulation, 14 November 2026
+
+GPS coherent epochs now feed a private navigation module directly within the tracking job. Five verified sign-transition intervals at multiples of 20 ms establish bit timing, retaining Classic sample configuration and the low PLL quality criterion. Twenty native double prompt sums yield each data bit; loop integration remains 1 ms. Classic parity masks, D30 polarity correction and ten-word subframe validation yield HOW TOW telemetry. This is a partial navigation port: ephemeris decoding, Galileo I/NAV, observables and PVT are not yet integrated. Channel Navigation (TOW) text denotes message validation, not navigation eligibility for a position solution. TOW expires after a missing subframe; gaps/reassignment clear all fragments. SIMD tracking kernels remain unchanged.
+
+Deterministic tests exercise prompt-to-bit timing, both polarities, parity corruption, loss of PLL qualification and stale TOW. HackRF live: GPS12 yielded four valid subframes in 30 seconds, last ID4, HOW578544 s. No position or accuracy validation follows from these counts.

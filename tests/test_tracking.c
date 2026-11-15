@@ -14,7 +14,7 @@
     } while (0)
 
 /** Generate and track a PRN with a nonzero capture phase and carrier. */
-static TNgTrackingSnapshot Run(int square, int xorMode, size_t split)
+static TNgTrackingSnapshot Run(int square, int xorMode, size_t split, int observed)
 {
     TNgTrackingConfig config;
     TNgStreamInfo stream = {0};
@@ -50,6 +50,7 @@ static TNgTrackingSnapshot Run(int square, int xorMode, size_t split)
     seed.codePhaseChips = 173.25;
     seed.epoch = 7;
     CHECK(NgTrackingSeed(tracking, &seed, &error) == NG_OK);
+    NgTrackingObserve(tracking, observed);
     for (n = 0; n < 20480;) {
         size_t count = 20480 - n;
         if (count > split)
@@ -64,8 +65,8 @@ static TNgTrackingSnapshot Run(int square, int xorMode, size_t split)
     }
     NgTrackingRead(tracking, &snapshot);
     CHECK(snapshot.active && snapshot.integrations >= 8);
-    CHECK(hypot(snapshot.i[4], snapshot.q[4]) > 40);
-    CHECK(hypot(snapshot.i[4], snapshot.q[4]) > hypot(snapshot.i[3], snapshot.q[3]));
+    CHECK(hypot(snapshot.i[snapshot.tapCount / 2], snapshot.q[snapshot.tapCount / 2]) > 40);
+    CHECK(hypot(snapshot.i[snapshot.tapCount / 2], snapshot.q[snapshot.tapCount / 2]) > hypot(snapshot.i[snapshot.tapCount / 2 - 1], snapshot.q[snapshot.tapCount / 2 - 1]));
     if (xorMode)
         for (n = 0; n < snapshot.tapCount; n++) {
             snapshot.i[n] /= 256;
@@ -247,11 +248,14 @@ static void ReplicaParity(void)
 /** Compare arbitrary window splits and independent sign-XOR selection. */
 int main(void)
 {
-    TNgTrackingSnapshot a = Run(0, 0, 20480), b = Run(0, 1, 37), c = Run(1, 1, 103),
-                        d = Run(1, 0, 211);
+    TNgTrackingSnapshot a = Run(0, 0, 20480, 1), b = Run(0, 1, 37, 1), c = Run(1, 1, 103, 1),
+                        d = Run(1, 0, 211, 1);
     TNgTrackingConfig config;
     TNgError error = {{0}};
     unsigned k;
+    TNgTrackingSnapshot hidden = Run(0, 0, 20480, 0);
+    CHECK(hidden.tapCount == 3 && hidden.dopplerHz == a.dopplerHz && hidden.codeRateHz == a.codeRateHz);
+    for (k = 0; k < 3; ++k) CHECK(hidden.i[k] == a.i[k + 3] && hidden.q[k] == a.q[k + 3]);
     CHECK(c.endSample == d.endSample);
     for (k = 0; k < c.tapCount; k++)
         CHECK(fabs(c.i[k] - d.i[k]) < 0.002);

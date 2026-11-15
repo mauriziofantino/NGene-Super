@@ -33,6 +33,7 @@ typedef struct {
 #define NG_ACQUISITION_CODE_BINS 1024u
 #define NG_ACQUISITION_DOPPLER_BINS 16u
 #define NG_ACQUISITION_MAX_DOPPLER_BINS 116u
+#define NG_ACQUISITION_MAX_PARALLEL 32u
 
 typedef struct {
     int valid;
@@ -52,6 +53,11 @@ typedef struct {
     int enabled;                  /**< Registration enabled for this run. */
     int searching;                /**< Worker is processing an owned capture. */
     unsigned currentPrn;          /**< PRN being searched, zero while waiting. */
+    unsigned currentPrns[NG_ACQUISITION_MAX_PARALLEL]; /**< Actual concurrent PRNs by workspace. */
+    unsigned activeSearches;       /**< In-flight decisions for this constellation. */
+    unsigned parallelLimit;        /**< Current shared-pool admission limit. */
+    unsigned parallelCapacity;     /**< Preallocated shared CPU workspace capacity. */
+    unsigned poolActive;           /**< Shared background jobs, including deferred maps. */
     uint64_t searches;            /**< Completed satellite searches. */
     uint64_t skippedSamples;      /**< Samples not captured while search owns the buffer. */
     uint64_t gaps;                /**< Discontinuities that invalidated the capture generation. */
@@ -65,6 +71,7 @@ typedef struct {
     size_t count;              /**< At least 56 ms of contiguous pairs. */
     TNgStreamInfo stream;      /**< Actual rate and digital IF, never inferred from device name. */
     TNgBlockMeta origin;       /**< First capture sample and continuity generation. */
+    unsigned displayPrn;       /**< Frozen observer request; zero skips display reduction. */
 } TNgAcquisitionCapture;
 
 /** Cooperative cancellation predicate; nonzero invalidates any pending result. */
@@ -83,6 +90,14 @@ typedef struct {
 typedef struct TNgAcquisition TNgAcquisition;
 /** Set GPS PRN1..32, sinusoidal carrier and SIMD products; enabled by default. */
 void NgAcquisitionDefaults(TNgAcquisitionConfig *config);
+/** Select one display PRN with a short lease; zero removes interest. Never changes decisions. */
+void NgAcquisitionObserve(TNgAcquisition *acquisition, unsigned prn);
+/** Receiver scheduling only: yield between stages when tracking consumes its budget. */
+void NgAcquisitionSetBudget(TNgAcquisition *acquisition, unsigned yieldMilliseconds);
+/** Merge strategy subscriptions into one pool before reception; NULL operands are accepted. */
+int NgAcquisitionLink(TNgAcquisition *gps, TNgAcquisition *galileo, TNgError *error);
+/** Receiver-owned adaptive global concurrency and per-constellation free-slot quota. */
+void NgAcquisitionSetParallelism(TNgAcquisition *acquisition, unsigned totalLimit, unsigned quota);
 /** Validate PRNs and boolean options without allocating or opening hardware. */
 int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error);
 /** Create the default Classic-derived PCPS strategy. Allocates before reception.

@@ -10,5 +10,6 @@ const path=require('node:path');
  for(let n=0;n<3;++n){assert(Math.abs(q[n].x-p[n].x-0.2)<1e-12);assert(q[n].y<p[n].y);assert.equal(q[n].value,b.taps[n].i);}
  assert.notEqual(p[1].y,q[1].y);assert.notEqual(p[1].y,25);assert.notEqual(q[1].y,25);
  assert.equal(trackingPlotPoints({...a,taps:[{offset_chips:0,i:3,q:-4}]},'q',10)[0].value,-4);
+ assert.equal(trackingPlotPoints({...b,constellation:2},'magnitude',100)[2].x,2*trackingPlotPoints(b,'magnitude',100)[2].x);
  console.log('PASS: absolute correlator values and free Early/Prompt/Late movement');
 })().catch(e=>{console.error(e);process.exitCode=1;});

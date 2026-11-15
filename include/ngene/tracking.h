@@ -2,6 +2,7 @@
 #ifndef NGENE_TRACKING_H
 #define NGENE_TRACKING_H
 #include "ngene/acquisition.h"
+#include "ngene/navigation.h"
 #define NG_TRACKING_MAX_TAPS 33u
 
 /** Frozen per-run numerical and correlator configuration; no automatic precision changes. */
@@ -10,6 +11,7 @@ typedef struct {
     double galileoSpacingChips; /**< Galileo adjacent tap delay, central BOC lobe. */
     unsigned gpsChannels;       /**< Slots reserved for GPS; remaining slots are shared. */
     unsigned galileoChannels;   /**< Slots reserved for Galileo; remaining slots are shared. */
+    unsigned autoPriority;      /**< Shared slot preference: 0 first confirmed, 1 GPS, 2 Galileo. */
     unsigned workers;           /**< Fixed tracking worker pool, 1..16. */
     int enabled;                /**< Track confirmed acquisition results when nonzero. */
     int squareCarrier;          /**< Explicit approximate square carrier; precise is default. */
@@ -20,6 +22,7 @@ typedef struct {
 
 /** Completed coherent integration, in native ADC units per sample. */
 typedef struct {
+    TNgNavigationSnapshot navigation; /**< Demodulated data; no PVT eligibility implied. */
     unsigned reservation;     /**< 0 automatic, 1 GPS, 2 Galileo. */
     int cn0Valid;             /**< Moment estimate has accumulated enough coherent epochs. */
     double cn0DbHz;           /**< Native-complex M2/M4 estimate; NaN/invalid when unavailable. */
@@ -63,6 +66,9 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
 int NgTrackingProcess(TNgTracking *tracking, const TNgIqView *window, TNgError *error);
 /** Copy the latest complete integration; single owner only. */
 void NgTrackingRead(const TNgTracking *tracking, TNgTrackingSnapshot *snapshot);
+/** Request observational taps beyond E/P/L; owner calls between dispatched windows.
+ * Each integration latches the request at its start; E/P/L and loop decisions always run. */
+void NgTrackingObserve(TNgTracking *tracking, int observed);
 /** Release private state; accepts NULL. */
 void NgTrackingDestroy(TNgTracking *tracking);
 #endif

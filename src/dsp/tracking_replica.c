@@ -36,21 +36,29 @@ void NgTrackingReplica(float *output, const double *phases, size_t count, const 
     (void)needsWrap;
 #if NG_SSE2
     __m128d length = _mm_set1_pd((double)period);
-    for (; n + 2 <= count; n += 2) {
+    for (; n + 4 <= count; n += 4) {
         int indices[4];
         __m128d phase = _mm_sub_pd(_mm_loadu_pd(phases + n), _mm_set1_pd(offset));
+        __m128d phase2 = _mm_sub_pd(_mm_loadu_pd(phases + n + 2), _mm_set1_pd(offset));
         if (needsWrap) {
             phase = _mm_add_pd(phase, _mm_and_pd(_mm_cmplt_pd(phase, _mm_setzero_pd()), length));
             phase = _mm_sub_pd(phase, _mm_and_pd(_mm_cmpge_pd(phase, length), length));
+            phase2 = _mm_add_pd(phase2, _mm_and_pd(_mm_cmplt_pd(phase2, _mm_setzero_pd()), length));
+            phase2 = _mm_sub_pd(phase2, _mm_and_pd(_mm_cmpge_pd(phase2, length), length));
         }
         phase = _mm_sub_pd(_mm_add_pd(phase, length), length);
         phase = _mm_sub_pd(phase, _mm_and_pd(_mm_cmpge_pd(phase, length), length));
-        if (boc)
+        phase2 = _mm_sub_pd(_mm_add_pd(phase2, length), length);
+        phase2 = _mm_sub_pd(phase2, _mm_and_pd(_mm_cmpge_pd(phase2, length), length));
+        if (boc) {
             phase = _mm_add_pd(phase, phase);
-        __m128i integer = _mm_cvttpd_epi32(phase);
+            phase2 = _mm_add_pd(phase2, phase2);
+        }
+        __m128i integer = _mm_unpacklo_epi64(_mm_cvttpd_epi32(phase), _mm_cvttpd_epi32(phase2));
         _mm_storeu_si128((__m128i *)indices, integer);
-        __m128 signs = _mm_set_ps(0, 0, (float)chips[indices[1]], (float)chips[indices[0]]);
-        _mm_storel_pi((__m64 *)(output + n), signs);
+        __m128 signs = _mm_cvtepi32_ps(_mm_set_epi32(chips[indices[3]], chips[indices[2]],
+                                                   chips[indices[1]], chips[indices[0]]));
+        _mm_storeu_ps(output + n, signs);
     }
 #elif NG_NEON
     float64x2_t length = vdupq_n_f64((double)period);

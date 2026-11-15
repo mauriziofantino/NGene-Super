@@ -27,7 +27,9 @@ RF replay/live result is established. See [the API scope and limits](GALILEO_ACQ
 
 A first GPS/Galileo tracking loop integration now follows confirmed acquisition in CLI and service, with a replaceable tracking library, configurable multi-tap correlation and browser delay/time plots. The Channels view now follows bounded, reusable slots through waiting/acquisition/tracking, with configurable GPS/Galileo capacities and one fixed tracking pool. SIMD replica generation replaces the initial per-tap scalar wrapping loops. See [tracking scope and validation](TRACKING.md); complete Classic lock supervision, HOLDOVER and fast reacquisition remain pending.
 
-This is **not yet an end-to-end GNSS receiver**: navigation-message decoding,
+A first GPS LNAV demodulator now consumes every coherent tracking prompt, validates word parity and publishes bit synchronization, complete subframes and HOW TOW. HackRF live has produced four validated GPS12 subframes in a 30-second run. Channels is an ordered table. Full ephemeris parsing and Galileo I/NAV decoding remain pending; see WORKPLAN_CHANNELS_GALILEO_2026-11-14.md.
+
+This is **not yet an end-to-end GNSS receiver**: full navigation-message decoding,
 observables, and PVT/PNT are not integrated. SBAS acquisition and multibit
 correlation kernels are also not established as implemented capabilities. In
 particular, native SC16 Q11 transport preserves its ADC precision, but does not mean

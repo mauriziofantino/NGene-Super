@@ -52,6 +52,7 @@ struct TNgChannelDispatch {
  */
 static void Worker(void *context)
 {
+    NgThreadSchedulingPriority(1);
     TNgChannelDispatch *dispatch = context;
     uint64_t generation = 0;
     NgMutexLock(&dispatch->mutex);

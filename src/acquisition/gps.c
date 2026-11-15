@@ -299,7 +299,10 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     unsigned bin;
     (void)error;
     memset(result, 0, sizeof(*result));
-    memset(&search->space, 0, sizeof(search->space));
+    if (capture->displayPrn == prn)
+        memset(&search->space, 0, sizeof(search->space));
+    else
+        search->space.valid = 0;
     result->prn = prn;
     result->epoch = capture->origin.epoch;
     result->firstSample = capture->origin.firstSample;
@@ -324,11 +327,13 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
             return NG_END;
         Coarse(search, prn, frequency, config->squareCarrier);
         for (k = 0; k < search->size; ++k) {
-            size_t column = ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS /
-                            search->size;
-            float value = (float)(search->power[k] / threshold);
-            if (value > search->space.power[bin][column])
-                search->space.power[bin][column] = value;
+            if (capture->displayPrn == prn) {
+                size_t column = ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS /
+                                search->size;
+                float value = (float)(search->power[k] / threshold);
+                if (value > search->space.power[bin][column])
+                    search->space.power[bin][column] = value;
+            }
             if (search->power[k] > best) {
                 best = search->power[k];
                 doppler = frequency;
@@ -341,7 +346,7 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     result->codePhaseChips = fmod(phase + NG_GPS_CA_LENGTH, NG_GPS_CA_LENGTH);
     search->space.dopplerBins = 16;
     search->space.codePeriodChips = 1023;
-    search->space.valid = 1;
+    search->space.valid = capture->displayPrn == prn;
     search->space.fftSize = (unsigned)search->size;
     search->space.threshold = threshold;
     search->space.peakDopplerHz = doppler;
@@ -426,4 +431,27 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
 }
 
 /** Public strategy interface; no receiver/controller dependency. */
+/** Build a confirmed satellite's archive after publishing its seed to tracking. */
+int NgAcquisitionGpsDisplay(void *context, unsigned prn, const TNgAcquisitionConfig *config,
+                               TNgAcquisitionCancel cancel, void *cancelContext)
+{
+    TNgGpsSearch *search = context;
+    unsigned bin; size_t k;
+    memset(search->space.power,0,sizeof(search->space.power));
+    search->space.valid=0;
+    if (!(search->space.threshold>0)) return NG_END;
+    for(bin=0;bin<16;++bin) {
+        double frequency=bin == 15 ? 5000 : -5000 + (double)bin * 667;
+        if(cancel(cancelContext)) return NG_END;
+        Coarse(search,prn,frequency,config->squareCarrier);
+        for(k=0;k<search->size;++k) {
+            size_t column=((search->size-k)%search->size)*NG_ACQUISITION_CODE_BINS/search->size;
+            float value=(float)(search->power[k]/search->space.threshold);
+            if(value>search->space.power[bin][column])search->space.power[bin][column]=value;
+        }
+    }
+    search->space.valid=1;
+    return NG_OK;
+}
+
 const TNgAcquisitionStrategy ngGpsAcquisitionStrategy = {Search};

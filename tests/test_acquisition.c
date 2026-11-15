@@ -66,6 +66,7 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
     config.squareCarrier = square;
     config.xorCorrelation = xorSigns;
     CHECK(NgAcquisitionCreate(&config, &stream, &acquisition, &channel, &error) == NG_OK);
+    NgAcquisitionObserve(acquisition, 7);
     window.samples = samples;
     window.meta.count = count;
     window.meta.epoch = 3;
@@ -181,6 +182,7 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
     config.squareCarrier = square;
     config.xorCorrelation = xorSigns;
     CHECK(NgAcquisitionCreateGalileo(&config, &stream, &acquisition, &channel, &error) == NG_OK);
+    NgAcquisitionObserve(acquisition, 7);
     window.samples = wide ? (const TNgIq8 *)wideSamples : samples;
     window.format = stream.format;
     window.meta.count = count;

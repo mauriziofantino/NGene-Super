@@ -621,6 +621,7 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
  */
 static void Worker(void *context)
 {
+    NgThreadSchedulingPriority(-1);
     TNgAnalysis *a = context;
     TNgAnalysisSnapshot *s = &a->workResult;
     while (NgAtomicGet(&a->stop) == 0) {
