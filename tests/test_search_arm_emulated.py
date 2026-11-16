@@ -103,7 +103,14 @@ for n in [1,2,3,37,2049]:
 for n in [8,16,64]:
     values=[f32(random.uniform(-1,1)) for _ in range(2*n)];put(A,'f',values)
     bits=n.bit_length()-1;put(B,'Q',[int(f'{k:0{bits}b}'[::-1],2) for k in range(n)])
-    put(C,'f',[f32(v) for k in range(n//2) for v in (math.cos(2*math.pi*k/n),-math.sin(2*math.pi*k/n))])
+    # Radix-2^2 pair tables, as NgSearchFftCreate: duplicated W1 then W2 parts per pair.
+    table=[];half=8 if bits%2 else 4
+    while half<n:
+        for width in (2*half,4*half):
+            table+=[f32(math.cos(2*math.pi*k/width)) for k in range(half) for _ in (0,1)]
+            table+=[f32(-math.sin(2*math.pi*k/width)) for k in range(half) for _ in (0,1)]
+        half*=4
+    put(C,'f',table or [0.0])
     put(P,'Q',[n,B,C]);m.call('NgSearchFftExecute',P,A,0)
     actual=get(A,'f',2*n)
     for k in range(n):

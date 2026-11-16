@@ -1,6 +1,7 @@
 /** @file test_engine_scheduler.c @brief Shared-window serial and parallel engine contracts. */
 #include "ngene/receiver.h"
 #include "platform/platform.h"
+#include "core/channel_dispatch.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -280,7 +281,7 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
 }
 
 /** @brief Shared immutable channel operations; mutable state belongs to the fixture. */
-static const TNgChannelOps channelOps = {Process, 0, 0};
+static const TNgChannelOps channelOps = {Process, 0, 0, 0};
 
 /** @brief Verify that the receiver-thread hook runs only after the entire window joins.
  * @param context Borrowed synchronized fixture.
@@ -506,7 +507,7 @@ static int PriorityProcess(void *context, const TNgChannelId *id, TNgChannelStat
 
 static void TestTrackingPriority(void)
 {
-    static const TNgChannelOps ops = {PriorityProcess, 0, PriorityLoad};
+    static const TNgChannelOps ops = {PriorityProcess, 0, PriorityLoad, 0};
     size_t workers, channel;
     for (workers = 1; workers <= 3; workers += 2) {
         TNgSchedulerFixture fixture;
@@ -523,6 +524,58 @@ static void TestTrackingPriority(void)
     }
 }
 
+/** @brief Calls per registration for the idle-skip contract; guarded by idleMutex. */
+static unsigned idleCalls[4];
+static TNgMutex idleMutex;
+
+/** @brief Count calls; an idle-declared registration keeps its state. */
+static int IdleProcess(void *context, const TNgChannelId *id, TNgChannelState state,
+                       const TNgIqView *window, TNgChannelState *next, TNgError *error)
+{
+    (void)context;
+    (void)window;
+    (void)error;
+    NgMutexLock(&idleMutex);
+    ++idleCalls[id->instanceId];
+    NgMutexUnlock(&idleMutex);
+    *next = state;
+    return NG_OK;
+}
+
+/** @brief ACQUISITION-state registrations that declare no work are not woken or called;
+ * a claim order changes nothing else. */
+static void TestIdleAcquisitionSkip(void)
+{
+    static const TNgChannelOps idleOps = {IdleProcess, 0, 0, 1};
+    static const size_t order[4] = {3, 1, 0, 2};
+    TNgIq8 samples[16] = {{0}};
+    TNgIqView view = {0};
+    TNgError error = {{0}};
+    size_t workers, k;
+    CHECK(NgMutexInit(&idleMutex) == 0);
+    view.samples = samples;
+    view.meta.count = 16;
+    for (workers = 1; workers <= 2; ++workers) {
+        TNgChannel channels[4];
+        TNgChannelDispatch *dispatch = NULL;
+        memset(idleCalls, 0, sizeof(idleCalls));
+        memset(channels, 0, sizeof(channels));
+        for (k = 0; k < 4; ++k) {
+            channels[k].ops = &idleOps;
+            channels[k].id.instanceId = (unsigned)k;
+            channels[k].state = k % 2 ? NG_CHANNEL_TRACKING : NG_CHANNEL_ACQUISITION;
+        }
+        CHECK(NgChannelDispatchCreate(channels, 4, workers, &dispatch, &error) == NG_OK);
+        NgChannelDispatchSetOrder(dispatch, order);
+        for (k = 0; k < 5; ++k)
+            CHECK(NgChannelDispatchProcess(dispatch, &view, &error) == NG_OK);
+        NgChannelDispatchDestroy(dispatch);
+        CHECK(idleCalls[0] == 0 && idleCalls[2] == 0 && idleCalls[1] == 5 && idleCalls[3] == 5);
+        CHECK(channels[0].state == NG_CHANNEL_ACQUISITION && channels[1].state == NG_CHANNEL_TRACKING);
+    }
+    NgMutexDestroy(&idleMutex);
+}
+
 int main(void)
 {
     TestTrackingPriority();
@@ -530,6 +583,7 @@ int main(void)
     TestSerialCompatibility();
     TestParallelWindows();
     TestFailureBarrier();
+    TestIdleAcquisitionSkip();
     puts("PASS: serial engine compatibility; bounded parallel shared-window dispatch; "
          "ordered channel states/gaps; deterministic errors and cleanup barriers");
     return 0;

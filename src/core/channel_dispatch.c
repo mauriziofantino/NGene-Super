@@ -43,9 +43,17 @@ struct TNgChannelDispatch {
     size_t completed;
     size_t phaseJobs;
     int acquisitionPhase;
+    /** Optional borrowed claim order; NULL claims in registration order. */
+    const size_t *order;
     /** Shutdown predicate, protected by mutex and set only outside active dispatch. */
     int stopping;
 };
+
+/** Skip callbacks that declare no ACQUISITION-state work; they keep their state. */
+static int Skipped(const TNgChannel *channel)
+{
+    return channel->state == NG_CHANNEL_ACQUISITION && channel->ops->idleInAcquisition;
+}
 
 /** @brief Claim channel jobs until the current window completes, sleeping between windows.
  * @param context Run-owned dispatcher retained until every worker is joined.
@@ -65,9 +73,11 @@ static void Worker(void *context)
         }
         generation = dispatch->generation;
         while (dispatch->nextJob < dispatch->channelCount) {
-            size_t index = dispatch->nextJob++;
+            size_t claim = dispatch->nextJob++;
+            size_t index = dispatch->order ? dispatch->order[claim] : claim;
             TNgChannel *channel = &dispatch->channels[index];
-            if ((channel->state == NG_CHANNEL_ACQUISITION) != dispatch->acquisitionPhase)
+            if ((channel->state == NG_CHANNEL_ACQUISITION) != dispatch->acquisitionPhase ||
+                Skipped(channel))
                 continue;
             TNgChannelResult *result = &dispatch->results[index];
             TNgIqView window = dispatch->window;
@@ -156,12 +166,21 @@ memoryError:
 /** @brief Publish one immutable view and synchronize all workers before returning its lease. */
 int NgChannelDispatchProcess(TNgChannelDispatch *dispatch, const TNgIqView *window, TNgError *error)
 {
-    size_t k, tracking = 0;
+    size_t k, tracking = 0, skipped = 0;
     int phase;
     int result = NG_OK;
-    for (k = 0; k < dispatch->channelCount; ++k)
-        if (dispatch->channels[k].state != NG_CHANNEL_ACQUISITION)
+    for (k = 0; k < dispatch->channelCount; ++k) {
+        TNgChannel *channel = &dispatch->channels[k];
+        if (channel->state != NG_CHANNEL_ACQUISITION) {
             ++tracking;
+        } else if (Skipped(channel)) {
+            /* Declared idle: no wake-up, no barrier, state unchanged. */
+            dispatch->results[k].result = NG_OK;
+            dispatch->results[k].next = channel->state;
+            dispatch->results[k].error.message[0] = '\0';
+            ++skipped;
+        }
+    }
     for (k = 0; k < dispatch->channelCount; ++k) {
         TNgChannel *channel = &dispatch->channels[k];
         if (channel->ops->setTrackingLoad)
@@ -170,14 +189,14 @@ int NgChannelDispatchProcess(TNgChannelDispatch *dispatch, const TNgIqView *wind
     /* Finish all tracking/holdover work before dispatching acquisition. Commit states
      * only after both waves, so a transition cannot process the same window twice. */
     for (phase = 0; phase < 2; ++phase) {
-        size_t jobs = phase ? dispatch->channelCount - tracking : tracking;
+        size_t jobs = phase ? dispatch->channelCount - tracking - skipped : tracking;
         if (!jobs)
             continue;
         if (!dispatch->workerCount) {
             for (k = 0; k < dispatch->channelCount; ++k) {
                 TNgChannel *channel = &dispatch->channels[k];
                 TNgChannelResult *r = &dispatch->results[k];
-                if ((channel->state == NG_CHANNEL_ACQUISITION) != phase)
+                if ((channel->state == NG_CHANNEL_ACQUISITION) != phase || Skipped(channel))
                     continue;
                 r->next = channel->state;
                 r->error.message[0] = '\0';
@@ -218,6 +237,13 @@ int NgChannelDispatchProcess(TNgChannelDispatch *dispatch, const TNgIqView *wind
         }
     }
     return result;
+}
+
+/** @brief Install a borrowed claim order; receiver thread only, outside dispatch. */
+void NgChannelDispatchSetOrder(TNgChannelDispatch *dispatch, const size_t *order)
+{
+    if (dispatch != NULL)
+        dispatch->order = order;
 }
 
 /** @brief Join even a partially created pool before freeing its synchronization and scratch. */

@@ -45,8 +45,12 @@ typedef void (*TNgThreadFn)(void *context);
 /** Logical processors available to this process; at least one. */
 unsigned NgLogicalProcessorCount(void);
 /** Advisory current-thread scheduling: negative background, positive foreground, zero normal.
- * Windows uses normal-class thread priorities; other targets retain their OS defaults. */
+ * Windows uses normal-class thread priorities, macOS QoS classes, Linux the thread nice
+ * value (background only); other targets retain their OS defaults. */
 void NgThreadSchedulingPriority(int priority);
+/** CPU seconds consumed by the calling thread; zero where the OS cannot report it. Emulators
+ * may under-report it (Rosetta 2 was measured at about 1/40 of busy time). */
+double NgThreadCpuSeconds(void);
 /**
  * @brief Initialize a private cross-platform mutex.
  *

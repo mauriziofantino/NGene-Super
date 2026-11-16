@@ -34,6 +34,13 @@ int NgChannelDispatchCreate(TNgChannel *channels, size_t channelCount, size_t wo
 int NgChannelDispatchProcess(TNgChannelDispatch *dispatch, const TNgIqView *window,
                              TNgError *error);
 
+/** @brief Claim order for the following windows, longest jobs first.
+ * @details Receiver thread only, outside dispatch. order is a borrowed permutation of
+ * 0..channelCount-1 that the caller keeps live and unchanged during each dispatch; NULL
+ * restores registration order. Ordering never changes results, only when jobs start.
+ */
+void NgChannelDispatchSetOrder(TNgChannelDispatch *dispatch, const size_t *order);
+
 /** @brief Stop and join every worker before freeing run-owned storage.
  * @details Call only outside dispatch, after its completion barrier. NULL is accepted.
  * @param dispatch Owned pool whose callbacks have completed.

@@ -95,6 +95,9 @@ static void TestConfig(void)
         c.galileoAcquisition.firstPrn = 7;
         c.galileoAcquisition.lastPrn = 8;
         c.galileoAcquisition.xorCorrelation = 1;
+        c.galileoAcquisition.fftSize = 4096;
+        c.acquisition.cpuBudget = c.galileoAcquisition.cpuBudget = 0.5;
+        c.tracking.fastCarrier = 1;
         CHECK(profile != NULL && NgConfigWrite(profile, &c, &error) == NG_OK);
         rewind(profile);
         CHECK(NgConfigRead(profile, &loaded, &error) == NG_OK);
@@ -104,8 +107,22 @@ static void TestConfig(void)
         CHECK(loaded.galileoAcquisition.enabled == 1 && loaded.acquisition.enabled == 1);
         CHECK(loaded.galileoAcquisition.firstPrn == 7 && loaded.galileoAcquisition.lastPrn == 8);
         CHECK(loaded.galileoAcquisition.xorCorrelation == 1);
+        CHECK(loaded.galileoAcquisition.fftSize == 4096 && loaded.acquisition.fftSize == 0);
+        CHECK(loaded.acquisition.cpuBudget == 0.5 && loaded.galileoAcquisition.cpuBudget == 0.5);
+        CHECK(loaded.tracking.fastCarrier == 1);
         CHECK(fclose(profile) == 0);
     }
+    /* Scheduling budget and opt-in numerical modes: defaults, one shared budget, bounds. */
+    CHECK(Parse("", &c) == NG_OK && c.acquisition.cpuBudget == 1.0 &&
+          c.galileoAcquisition.fftSize == 0 && c.tracking.fastCarrier == 0);
+    CHECK(Parse("[acquisition]\ncpu_budget=2\n", &c) == NG_OK && c.acquisition.cpuBudget == 2 &&
+          c.galileoAcquisition.cpuBudget == 2);
+    CHECK(Parse("[acquisition]\ncpu_budget=0\n", &c) == NG_OK);
+    CHECK(Parse("[acquisition]\ncpu_budget=-1\n", &c) == NG_ERROR);
+    CHECK(Parse("[acquisition]\ncpu_budget=33\n", &c) == NG_ERROR);
+    CHECK(Parse("[galileo_acquisition]\nfft_size=8192\n", &c) == NG_OK);
+    CHECK(Parse("[galileo_acquisition]\nfft_size=2048\n", &c) == NG_ERROR);
+    CHECK(Parse("[tracking]\nfast_carrier=true\n", &c) == NG_OK && c.tracking.fastCarrier == 1);
     CHECK(Parse("[buffer]\nwindow_samples=1048576\ningress_blocks=4096\n", &c) == NG_ERROR);
     /* The same queue geometry fits the sample-storage guard only at two bytes per pair. */
     CHECK(Parse("[frontend]\ntype=bladerf\n[bladerf]\nformat=CI8\n"
@@ -460,7 +477,7 @@ static void TestEngine(void)
                                    .clockDomain = "test",
                                    .signalFrequencyHz = 1575420000}};
     TNgConditioner conditioner = NgConditionerBypass();
-    const TNgChannelOps ops = {Observe, 0, 0};
+    const TNgChannelOps ops = {Observe, 0, 0, 0};
     TNgChannel channels[2] = {{{0, 0, 1, 0}, NG_CHANNEL_ACQUISITION, &ops, &observed},
                               {{1, 0, 2, 0}, NG_CHANNEL_TRACKING, &ops, &observed}};
     NgConfigDefaults(&c);

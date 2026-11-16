@@ -30,19 +30,37 @@ typedef struct {
     int prepared;
     double meanI;
     double meanQ;
+    int wipe; /**< Classic 4096 sizing: subcarrier removed before compression, BPSK grid. */
     TNgAcquisitionSearchSpace space;
 } TNgGalileoSearch;
 
-/** Sample Classic E1-B primary code with its BOC(1,1) replica, no narrowing. */
-static void GalileoCode(float *out, size_t count, const int8_t *chips,
-                        double rate, double codeRate, double phase)
+/** Sample Classic E1-B primary code with its BOC(1,1) replica, no narrowing.
+ * Without boc, the primary code alone (grid of a subcarrier-wiped capture). */
+static void GalileoCodeMode(float *out, size_t count, const int8_t *chips, double rate,
+                            double codeRate, double phase, int boc)
 {
     size_t k;
     for (k = 0; k < count; ++k) {
         double chip = phase + (double)k * codeRate / rate;
         double wrapped = fmod(fmod(chip, 4092.0) + 4092.0, 4092.0);
-        out[k] = (float)(chips[(size_t)wrapped] * ((wrapped - floor(wrapped)) < 0.5 ? 1 : -1));
+        out[k] = (float)(chips[(size_t)wrapped] *
+                         (!boc || (wrapped - floor(wrapped)) < 0.5 ? 1 : -1));
     }
+}
+
+/** Native-rate replica: always BOC(1,1). */
+static void GalileoCode(float *out, size_t count, const int8_t *chips, double rate,
+                        double codeRate, double phase)
+{
+    GalileoCodeMode(out, count, chips, rate, codeRate, phase, 1);
+}
+
+/** Classic fixed-phase sine-BOC subcarrier sign at native sample n (wipe-off before
+ * compression); the subcarrier phase is referenced to the capture's first sample. */
+static double Subcarrier(size_t n, double rate)
+{
+    double cycles = (double)n * 1023000.0 / rate;
+    return cycles - floor(cycles) < 0.5 ? 1.0 : -1.0;
 }
 
 /** Copy the last coarse map on its owning worker. */
@@ -70,7 +88,8 @@ void NgAcquisitionGalileoFree(void *context)
 }
 
 /** Allocate all replica/FFT/correlation buffers before reception. */
-int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error)
+int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, unsigned fftSize, void **out,
+                                  TNgError *error)
 {
     TNgGalileoSearch *search;
     unsigned prn;
@@ -81,7 +100,8 @@ int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, void **out, TNgEr
     search = calloc(1, sizeof(*search));
     if (search == NULL)
         return NgFail(error, "Galileo E1-B workspace allocation failed");
-    search->size = stream->sampleRateHz >= 4096000 ? 16384 : 8192;
+    search->size = fftSize ? fftSize : stream->sampleRateHz >= 4096000 ? 16384 : 8192;
+    search->wipe = search->size == 4096;
     search->nativeCapacity = (stream->sampleRateHz * 4u + 999u) / 1000u;
     capacity = search->nativeCapacity > search->size ? search->nativeCapacity : search->size;
     search->baseband = calloc(search->size * NG_GAL_SEARCH_PERIODS, sizeof(TNgComplex));
@@ -103,8 +123,8 @@ int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, void **out, TNgEr
         TNgComplex *spectrum = search->codeFft + (prn - 1) * search->size;
         for (k = 0; k < 4092; ++k)
             search->chips[prn - 1][k] = (ngGalileoCodes[prn - 1][k / 8] & (1u << (7 - k % 8))) ? -1 : 1;
-        GalileoCode(search->code, search->size, search->chips[prn - 1],
-                     (double)search->size * 250, 1023000.0, 0);
+        GalileoCodeMode(search->code, search->size, search->chips[prn - 1],
+                        (double)search->size * 250, 1023000.0, 0, !search->wipe);
         for (k = 0; k < search->size; ++k)
             spectrum[k].i = search->code[k];
         NgSearchFftExecute(search->fft, spectrum, 0);
@@ -142,8 +162,9 @@ static int Prepare(TNgGalileoSearch *search, const TNgAcquisitionCapture *captur
         if ((k % search->size) == 0 && cancel(cancelContext))
             return NG_END;
         for (j = begin; j < end; ++j) {
-            i += capture->samples[j].i - search->meanI;
-            q += (capture->samples[j].q - search->meanQ) *
+            double sign = search->wipe ? Subcarrier(j, rate) : 1.0;
+            i += (capture->samples[j].i - search->meanI) * sign;
+            q += (capture->samples[j].q - search->meanQ) * sign *
                  (capture->stream.spectrumInverted ? -1 : 1);
         }
         search->baseband[k].i = (float)(i / (double)(end - begin));
@@ -178,8 +199,9 @@ static int Prepare(TNgGalileoSearch *search, const TNgAcquisitionCapture *captur
                 double i = 0;
                 double q = 0;
                 for (t = first; t < last; ++t) {
-                    i += search->native[t].i;
-                    q += search->native[t].q;
+                    double sign = search->wipe ? Subcarrier(begin + t, rate) : 1.0;
+                    i += search->native[t].i * sign;
+                    q += search->native[t].q * sign;
                 }
                 search->baseband[ms * search->size + j].i = (float)(i / (double)(last - first));
                 search->baseband[ms * search->size + j].q = (float)(q / (double)(last - first));
@@ -245,9 +267,9 @@ static double GridPower(TNgGalileoSearch *search, unsigned prn, unsigned startMs
     for (ms = 0; ms < NG_GAL_SUMS; ++ms) {
         double i;
         double q;
-        GalileoCode(search->code, search->size, search->chips[prn - 1],
-                     (double)search->size * 250, codeRate,
-                     phase + (startMs + ms) * codeRate / 250);
+        GalileoCodeMode(search->code, search->size, search->chips[prn - 1],
+                        (double)search->size * 250, codeRate,
+                        phase + (startMs + ms) * codeRate / 250, !search->wipe);
         NgSearchCorrelate(search->signal + ms * search->size, search->code, search->size, xorSigns,
                           &i, &q);
         power += i * i + q * q;

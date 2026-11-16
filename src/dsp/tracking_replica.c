@@ -93,3 +93,86 @@ void NgTrackingReplica(float *output, const double *phases, size_t count, const 
         output[n] = (float)sign;
     }
 }
+
+/** One replica sample with exactly NgTrackingCodePhases + NgTrackingReplica arithmetic.
+ * value receives the code position before truncation, in index units. */
+static size_t ReplicaIndex(size_t n, double base, double codeRate, double sampleRate,
+                           double offset, unsigned period, int boc, double *value)
+{
+    double phase = base + (double)n * codeRate / sampleRate;
+    phase -= offset;
+    if (phase < 0)
+        phase += period;
+    else if (phase >= period)
+        phase -= period;
+    phase = (phase + period) - period;
+    if (phase >= period)
+        phase -= period;
+    *value = boc ? 2 * phase : phase;
+    return (size_t)*value;
+}
+
+/** Exact index of sample n, compared with a level of the unwrapped code position. */
+static int SameIndex(size_t n, size_t level, double base, double codeRate, double sampleRate,
+                     double offset, unsigned period, int boc)
+{
+    double value;
+    size_t top = boc ? 2u * (size_t)period : period;
+    return ReplicaIndex(n, base, codeRate, sampleRate, offset, period, boc, &value) ==
+           level % top;
+}
+
+/** Margin, in samples, beyond which a predicted chip boundary cannot be wrong: the
+ * prediction differs from the per-sample double arithmetic by less than 1e-9 samples. */
+#define NG_RUN_MARGIN 1e-6
+
+void NgTrackingCorrelateRuns(const double *prefix, size_t count, double base, double codeRate,
+                             double sampleRate, const int8_t *chips, unsigned period,
+                             double offset, int boc, double *i, double *q)
+{
+    double first, step = codeRate / sampleRate * (boc ? 2.0 : 1.0), inverse = 1.0 / step;
+    size_t top = boc ? 2u * (size_t)period : period, start = 0, level, chip;
+    double sumI = 0, sumQ = 0, limit = (double)count;
+    *i = *q = 0;
+    if (!count)
+        return;
+    level = ReplicaIndex(0, base, codeRate, sampleRate, offset, period, boc, &first);
+    chip = level;
+    /* Unwrapped position U(n) = first + n * step; level counts the integers crossed and
+     * chip is level modulo the replica length. */
+    while (start < count) {
+        double cross = ((double)(level + 1) - first) * inverse;
+        size_t end;
+        if (cross >= limit) {
+            end = count;
+        } else {
+            double whole;
+            end = (size_t)cross; /* cross > 0: truncation, then round up */
+            whole = (double)end;
+            if (whole < cross)
+                whole = (double)++end;
+            if (end < start)
+                end = start;
+            if (whole - cross < NG_RUN_MARGIN || cross - (whole - 1.0) < NG_RUN_MARGIN) {
+                /* Too close to a sample boundary to trust: settle it per sample, exactly. */
+                while (end > start && !SameIndex(end - 1, level, base, codeRate, sampleRate,
+                                                 offset, period, boc))
+                    --end;
+                while (end < count &&
+                       SameIndex(end, level, base, codeRate, sampleRate, offset, period, boc))
+                    ++end;
+            }
+        }
+        if (end > start) {
+            double sign = (double)chips[chip];
+            sumI += sign * (prefix[2 * end] - prefix[2 * start]);
+            sumQ += sign * (prefix[2 * end + 1] - prefix[2 * start + 1]);
+            start = end;
+        }
+        ++level;
+        if (++chip == top)
+            chip = 0;
+    }
+    *i = sumI;
+    *q = sumQ;
+}

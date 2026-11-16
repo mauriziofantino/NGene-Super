@@ -10,7 +10,7 @@ typedef struct {
 } TNgComplex;
 /** Owned immutable FFT tables, shareable by independent workspaces. */
 typedef struct TNgSearchFft TNgSearchFft;
-/** Allocate radix-2 FFT tables. size is a power of two in 8..16384.
+/** Allocate radix-2^2 FFT tables. size is a power of two in 8..16384.
  * @param size Complex transform length.
  * @param out Owned plan, NULL on failure.
  * @param error Optional diagnostic.
@@ -37,4 +37,17 @@ void NgSearchMix(TNgComplex *values, const TNgComplex *carrier, size_t count);
  * Returns double accumulators to preserve coherent-sum precision. */
 void NgSearchCorrelate(const TNgComplex *values, const float *code, size_t count, int xorSigns,
                        double *i, double *q);
+/** Interleaved (I, Q) running double sums of count values; prefix has 2 * (count + 1)
+ * entries and prefix[0..1] = 0. */
+void NgSearchPrefix(double *prefix, const TNgComplex *values, size_t count);
+/** One pass equal to NgSearchCarrier(phaseCycles, square), CI8 to float with the Q sign
+ * inverted when requested, NgSearchMix and NgSearchPrefix. Mixed samples are identical to
+ * the separate kernels; only the cumulative sums are stored. */
+void NgSearchMixPrefixCi8(double *prefix, const TNgIq8 *input, size_t count, double rateHz,
+                          double frequencyHz, double phaseCycles, int square, int inverted);
+/** Throughput variant of NgSearchMixPrefixCi8: four independent double precision carrier
+ * lanes started from exact phases, sums formed four samples at a time. No tables or phase
+ * quantization; results differ from the one-lane kernel only by double rounding. */
+void NgSearchMixPrefixCi8Lanes(double *prefix, const TNgIq8 *input, size_t count, double rateHz,
+                               double frequencyHz, double phaseCycles, int square, int inverted);
 #endif

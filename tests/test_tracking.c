@@ -2,6 +2,8 @@
 #include "ngene/tracking.h"
 #include "ngene/dsp/gps_ca.h"
 #include "ngene/dsp/tracking_replica.h"
+#include "ngene/dsp/search.h"
+#include <string.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -266,6 +268,129 @@ static void ReplicaParity(void)
     }
 }
 
+/** Deterministic uniform value in [0, 1). */
+static double Uniform(uint32_t *state)
+{
+    *state = *state * 1664525u + 1013904223u;
+    return (double)(*state >> 8) / 16777216.0;
+}
+
+/** The fused one-pass front end must produce exactly the separate kernels' mixed samples. */
+static void MixPrefixParity(void)
+{
+    static TNgIq8 input[2049];
+    static TNgComplex carrier[2049], values[2049];
+    static double expected[2 * 2050], actual[2 * 2050];
+    const size_t counts[] = {1, 2, 3, 1023, 1024, 1025, 2049};
+    uint32_t state = 77;
+    unsigned c, mode;
+    size_t n;
+    for (n = 0; n < 2049; ++n) {
+        input[n].i = (int8_t)(Uniform(&state) * 255 - 127);
+        input[n].q = (int8_t)(Uniform(&state) * 255 - 127);
+    }
+    for (c = 0; c < sizeof(counts) / sizeof(counts[0]); ++c)
+        for (mode = 0; mode < 4; ++mode) {
+            int square = mode & 1, inverted = (mode >> 1) & 1;
+            size_t count = counts[c];
+            double frequency = 4130.0 + 977.0 * c - 3000.0 * mode, phase = 0.37 + 0.11 * c;
+            NgSearchCarrier(carrier, count, 16368000.0, frequency, phase, square);
+            for (n = 0; n < count; ++n) {
+                values[n].i = (float)input[n].i;
+                values[n].q = (float)input[n].q * (inverted ? -1.0f : 1.0f);
+            }
+            NgSearchMix(values, carrier, count);
+            NgSearchPrefix(expected, values, count);
+            NgSearchMixPrefixCi8(actual, input, count, 16368000.0, frequency, phase, square,
+                                 inverted);
+            CHECK(memcmp(expected, actual, sizeof(double) * 2 * (count + 1)) == 0);
+        }
+}
+
+/** Opt-in four-lane carrier: same mixed samples up to float rounding of a double carrier
+ * that differs only by double rounding; the square carrier may flip only at zero crossings. */
+static void LanesContract(void)
+{
+    static TNgIq8 input[2049];
+    static double one[2 * 2050], four[2 * 2050];
+    const size_t counts[] = {1, 3, 4, 5, 1023, 1024, 1027, 2049};
+    uint32_t state = 91;
+    unsigned c, mode;
+    size_t n;
+    for (n = 0; n < 2049; ++n) {
+        input[n].i = (int8_t)(Uniform(&state) * 255 - 127);
+        input[n].q = (int8_t)(Uniform(&state) * 255 - 127);
+    }
+    for (c = 0; c < sizeof(counts) / sizeof(counts[0]); ++c)
+        for (mode = 0; mode < 4; ++mode) {
+            int square = mode & 1, inverted = (mode >> 1) & 1;
+            size_t count = counts[c], flips = 0;
+            double frequency = -4321.5 + 1234.0 * c + 777.0 * mode, phase = 0.61 - 0.07 * c;
+            NgSearchMixPrefixCi8(one, input, count, 16368000.0, frequency, phase, square, inverted);
+            NgSearchMixPrefixCi8Lanes(four, input, count, 16368000.0, frequency, phase, square,
+                                      inverted);
+            for (n = 1; n <= count; ++n) {
+                double di = (one[2 * n] - one[2 * n - 2]) - (four[2 * n] - four[2 * n - 2]);
+                double dq = (one[2 * n + 1] - one[2 * n - 1]) - (four[2 * n + 1] - four[2 * n - 1]);
+                if (fabs(di) > 1e-4 || fabs(dq) > 1e-4)
+                    ++flips;
+            }
+            CHECK(square ? flips <= 1 : flips == 0);
+        }
+}
+
+/** Chip-run correlation against the per-sample replica oracle. Runs must follow the exact
+ * sample-to-chip assignment (a misplaced sample changes a sum by a whole sample); sums may
+ * differ only by double rounding, bounded here by 1e-12 of the summed magnitudes. */
+static void RunCorrelationContract(void)
+{
+    static TNgComplex values[2048];
+    static double phases[2048], prefix[2 * 2049];
+    static float replica[2048];
+    static int8_t primary[4092], expanded[8184];
+    const double rates[] = {2048000.0, 4092000.0, 16000000.0, 16368000.0, 20000000.0};
+    const size_t counts[] = {1, 2, 3, 37, 2048};
+    uint32_t state = 4242;
+    unsigned trial, k;
+    for (k = 0; k < 4092; ++k) {
+        primary[k] = Uniform(&state) < 0.5 ? 1 : -1;
+        expanded[2 * k] = primary[k];
+        expanded[2 * k + 1] = (int8_t)-primary[k];
+    }
+    for (k = 0; k < 2048; ++k) {
+        values[k].i = (float)((Uniform(&state) - 0.5) * 200.0);
+        values[k].q = (float)((Uniform(&state) - 0.5) * 200.0);
+    }
+    NgSearchPrefix(prefix, values, 2048);
+    for (trial = 0; trial < 4000; ++trial) {
+        int boc = (int)(trial & 1u);
+        unsigned period = boc ? 4092u : 1023u;
+        double rate = rates[(trial / 2) % 5];
+        size_t count = counts[(trial / 10) % 5], n;
+        /* Every fourth trial puts chip boundaries exactly on samples. */
+        int exact = (trial / 50) % 4 == 0;
+        double codeRate = exact ? rate / 16.0
+                                : 1023000.0 + (Uniform(&state) - 0.5) * 6000.0;
+        double span = (double)count * codeRate / rate;
+        double base = exact ? (double)(trial % 7) : Uniform(&state) * ((double)period - span);
+        double offset = exact ? ((double)(trial % 9) - 4.0) * 0.0625
+                              : (Uniform(&state) - 0.5) * 4.0;
+        double i, q, ri, rq, magnitudeI = 0, magnitudeQ = 0;
+        if (exact && span > period - base)
+            base = 0;
+        NgTrackingCodePhases(phases, count, base, codeRate, rate);
+        NgTrackingReplica(replica, phases, count, boc ? expanded : primary, period, offset, boc);
+        NgSearchCorrelate(values, replica, count, 0, &ri, &rq);
+        NgTrackingCorrelateRuns(prefix, count, base, codeRate, rate, boc ? expanded : primary,
+                                period, offset, boc, &i, &q);
+        for (n = 0; n < count; ++n) {
+            magnitudeI += fabs(values[n].i);
+            magnitudeQ += fabs(values[n].q);
+        }
+        CHECK(fabs(i - ri) <= 1e-12 * magnitudeI && fabs(q - rq) <= 1e-12 * magnitudeQ);
+    }
+}
+
 /** Compare arbitrary window splits and independent sign-XOR selection. */
 int main(void)
 {
@@ -290,6 +415,9 @@ int main(void)
     CHECK(NgTrackingValidate(&config, &error) == NG_ERROR);
     Cn0Reference();
     ReplicaParity();
+    MixPrefixParity();
+    RunCorrelationContract();
+    LanesContract();
     Convergence(1, 0, 1, 0.05, 1, 0);
     Convergence(1, 1, -1, -0.05, 1, 0);
     Convergence(2, 0, 1, 0.05, 1, 0);

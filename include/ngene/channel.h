@@ -50,6 +50,9 @@ typedef struct {
      * reacquisition registrations. Acquisition modules can reduce admitted searches;
      * tracking still receives every sample. No I/O or allocation here. */
     void (*setTrackingLoad)(void *context, size_t trackingChannels);
+    /** Optional: nonzero declares that the callback does nothing in ACQUISITION state and
+     * proposes no transition there. Dispatchers may then skip it for that window. */
+    int idleInAcquisition;
 } TNgChannelOps;
 
 /** @brief Channel identity, lifecycle and independently owned algorithm context. */

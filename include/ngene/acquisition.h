@@ -12,6 +12,15 @@ typedef struct {
     unsigned lastPrn;             /**< Last PRN, firstPrn..32. */
     int squareCarrier;            /**< Squared local sin/cos instead of sinusoidal carrier. */
     int xorCorrelation;           /**< Exact SIMD code sign XOR instead of multiplication. */
+    double cpuBudget; /**< Receiver-run search CPU (thread CPU clock), in cores per signal
+                           second; 0 disables.
+                           Scheduling only: it delays searches, never changes their decisions.
+                           A linked GPS/Galileo pool uses the GPS value. Default 1. */
+    unsigned fftSize; /**< Galileo coarse points per 4-ms period; GPS ignores it. 0 automatic:
+                           16384 (8192 below 4.096 Msps) with a BOC(1,1) replica. 4096 is the
+                           Classic sizing: the subcarrier is removed at the native rate with a
+                           fixed phase before compression, and the grid replica is the primary
+                           code only. Refinement and confirmation stay native rate. Opt-in. */
 } TNgAcquisitionConfig;
 
 /** One search outcome, referenced to the first sample of its capture. */
@@ -98,6 +107,11 @@ void NgAcquisitionObserve(TNgAcquisition *acquisition, unsigned prn);
 void NgAcquisitionSetBudget(TNgAcquisition *acquisition, unsigned yieldMilliseconds);
 /** Merge strategy subscriptions into one pool before reception; NULL operands are accepted. */
 int NgAcquisitionLink(TNgAcquisition *gps, TNgAcquisition *galileo, TNgError *error);
+/** Receiver-owned signal clock: credit the search pool with cpuBudget seconds of CPU per
+ * second of processed signal (capped). Returns the budget's stage concurrency, or zero when
+ * the budget is disabled and the caller keeps its own adaptive limits. */
+unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *acquisition, uint64_t epoch,
+                                    uint64_t endSample, double sampleRate);
 /** Receiver-owned adaptive global concurrency and per-constellation free-slot quota. */
 void NgAcquisitionSetParallelism(TNgAcquisition *acquisition, unsigned totalLimit, unsigned quota,
                                  unsigned executionLimit);

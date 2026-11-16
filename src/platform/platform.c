@@ -7,6 +7,11 @@
 #include <errno.h>
 #ifndef _WIN32
 #include <unistd.h>
+#include <time.h>
+#include <sys/resource.h>
+#endif
+#ifdef __APPLE__
+#include <pthread/qos.h>
 #endif
 /** Query the process CPU allowance without binding workers to particular processors. */
 unsigned NgLogicalProcessorCount(void)
@@ -25,14 +30,43 @@ unsigned NgLogicalProcessorCount(void)
 #endif
 }
 
-/** Give foreground GNSS work precedence over replaceable acquisition/plot work on Windows. */
+/** Give foreground GNSS work precedence over replaceable acquisition/plot work.
+ * Windows uses thread priorities, macOS quality-of-service classes and Linux the
+ * per-thread nice value. Linux raises no priority: that would need privileges. */
 void NgThreadSchedulingPriority(int priority)
 {
 #ifdef _WIN32
     (void)SetThreadPriority(GetCurrentThread(), priority > 0 ? THREAD_PRIORITY_ABOVE_NORMAL :
                            priority < 0 ? THREAD_PRIORITY_BELOW_NORMAL : THREAD_PRIORITY_NORMAL);
+#elif defined(__APPLE__)
+    (void)pthread_set_qos_class_self_np(priority > 0   ? QOS_CLASS_USER_INTERACTIVE
+                                        : priority < 0 ? QOS_CLASS_UTILITY
+                                                       : QOS_CLASS_USER_INITIATED,
+                                        0);
+#elif defined(__linux__)
+    /* NPTL keeps the nice value per thread; who = 0 names the calling thread. */
+    if (priority < 0)
+        (void)setpriority(PRIO_PROCESS, 0, 10);
 #else
     (void)priority;
+#endif
+}
+
+/** CPU time consumed by the calling thread, for signal-time CPU budgets. */
+double NgThreadCpuSeconds(void)
+{
+#ifdef _WIN32
+    FILETIME creation, exited, kernel, user;
+    if (!GetThreadTimes(GetCurrentThread(), &creation, &exited, &kernel, &user))
+        return 0;
+    return ((double)(((uint64_t)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime) +
+            (double)(((uint64_t)user.dwHighDateTime << 32) | user.dwLowDateTime)) *
+           1e-7;
+#else
+    struct timespec now;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) != 0)
+        return 0;
+    return (double)now.tv_sec + (double)now.tv_nsec * 1e-9;
 #endif
 }
 

@@ -18,6 +18,9 @@ typedef struct {
     int xorCorrelation;         /**< Exact sign XOR, independent of carrier mode. */
     unsigned tapCount;          /**< Odd count 3..33, equally spaced around prompt. */
     double spacingChips;        /**< Adjacent tap spacing; E/L are adjacent to prompt. */
+    int fastCarrier; /**< Opt-in for CI8 input: four-lane double carrier recurrence. Still
+                          precise (no tables, no phase quantization); differs from the default
+                          one-lane recurrence only by double rounding. */
 } TNgTrackingConfig;
 
 /** Completed coherent integration, in native ADC units per sample. */

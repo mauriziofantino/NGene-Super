@@ -51,8 +51,7 @@ struct TNgTracking {
     double sumI[NG_TRACKING_MAX_TAPS], sumQ[NG_TRACKING_MAX_TAPS]; /**< Coherent sums. */
     int8_t chips[8184];                                            /**< Primary code. */
     TNgComplex values[NG_TRACKING_CHUNK], carrier[NG_TRACKING_CHUNK]; /**< Block scratch. */
-    double phases[NG_TRACKING_CHUNK]; /**< Shared exact code phase geometry for all taps. */
-    float replica[NG_TRACKING_CHUNK]; /**< One tap, reused sequentially. */
+    double prefix[2 * (NG_TRACKING_CHUNK + 1)]; /**< Running (I, Q) sums of mixed samples. */
 };
 
 /** Set independent precise defaults. */
@@ -81,7 +80,8 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
         !config->workers || config->workers > 16 ||
         (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
-        (config->xorCorrelation != 0 && config->xorCorrelation != 1) || config->tapCount < 3 ||
+        (config->xorCorrelation != 0 && config->xorCorrelation != 1) ||
+        (config->fastCarrier != 0 && config->fastCarrier != 1) || config->tapCount < 3 ||
         config->tapCount > NG_TRACKING_MAX_TAPS || !(config->tapCount & 1u) ||
         !isfinite(config->spacingChips) || config->spacingChips <= 0 || config->spacingChips > 1)
         return NgFail(error, "Invalid tracking modes or multi-correlator geometry");
@@ -399,33 +399,32 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
             count = NG_TRACKING_CHUNK;
         if (count > window->meta.count - position)
             count = window->meta.count - position;
-        NgSearchCarrier(t->carrier, count, t->stream.sampleRateHz, t->carrierHz, t->carrierPhase,
-                        t->config.squareCarrier);
         if (window->format == 0 || window->format == NG_FORMAT_CI8) {
-            const TNgIq8 *input = window->samples + position;
-            float polarity = t->stream.spectrumInverted ? -1.0f : 1.0f;
-            for (n = 0; n < count; ++n) {
-                t->values[n].i = (float)input[n].i;
-                t->values[n].q = (float)input[n].q * polarity;
-            }
+            (t->config.fastCarrier ? NgSearchMixPrefixCi8Lanes : NgSearchMixPrefixCi8)(
+                t->prefix, window->samples + position, count, t->stream.sampleRateHz,
+                t->carrierHz, t->carrierPhase, t->config.squareCarrier,
+                t->stream.spectrumInverted);
         } else {
+            NgSearchCarrier(t->carrier, count, t->stream.sampleRateHz, t->carrierHz,
+                            t->carrierPhase, t->config.squareCarrier);
             for (n = 0; n < count; ++n) {
                 t->values[n].i = (float)NgIqComponent(window, position + n, 0);
                 t->values[n].q = (float)(NgIqComponent(window, position + n, 1) *
                                          (t->stream.spectrumInverted ? -1 : 1));
             }
+            NgSearchMix(t->values, t->carrier, count);
+            NgSearchPrefix(t->prefix, t->values, count);
         }
-        NgSearchMix(t->values, t->carrier, count);
-        NgTrackingCodePhases(t->phases, count, t->codePhase, t->snapshot.codeRateHz,
-                             t->stream.sampleRateHz);
+        /* Each tap and Galileo half-chip probe sums whole chip runs of the mixed samples.
+         * Runs follow the exact NgTrackingReplica sample-to-chip assignment. */
         for (tap = 0; tap < t->config.tapCount; ++tap) {
             double i, q;
             unsigned prompt = t->config.tapCount / 2;
             if (!t->observeIntegration && (tap + 1 < prompt || tap > prompt + 1))
                 continue;
-            NgTrackingReplica(t->replica, t->phases, count, t->chips, t->period,
-                              t->offsets[tap], t->system == 2);
-            NgSearchCorrelate(t->values, t->replica, count, t->config.xorCorrelation, &i, &q);
+            NgTrackingCorrelateRuns(t->prefix, count, t->codePhase, t->snapshot.codeRateHz,
+                                    t->stream.sampleRateHz, t->chips, t->period, t->offsets[tap],
+                                    t->system == 2, &i, &q);
             t->sumI[tap] += i;
             t->sumQ[tap] += q;
         }
@@ -433,9 +432,9 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
             unsigned side;
             for (side = 0; side < 2; ++side) {
                 double i, q;
-                NgTrackingReplica(t->replica, t->phases, count, t->chips, t->period,
-                                  side == 0 ? -0.5 : 0.5, 1);
-                NgSearchCorrelate(t->values, t->replica, count, t->config.xorCorrelation, &i, &q);
+                NgTrackingCorrelateRuns(t->prefix, count, t->codePhase, t->snapshot.codeRateHz,
+                                        t->stream.sampleRateHz, t->chips, t->period,
+                                        side == 0 ? -0.5 : 0.5, 1, &i, &q);
                 t->sideI[side] += i;
                 t->sideQ[side] += q;
             }

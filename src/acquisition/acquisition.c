@@ -15,7 +15,8 @@ extern const TNgAcquisitionStrategy ngGpsAcquisitionStrategy;
 void NgAcquisitionGpsSearchSpace(void *context, TNgAcquisitionSearchSpace *space);
 
 /** Galileo E1-B strategy resources (PRNs 1..32 in this increment). */
-int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error);
+int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, unsigned fftSize, void **out,
+                                  TNgError *error);
 /** Free Galileo private DSP resources. */
 void NgAcquisitionGalileoFree(void *context);
 /** Copy completed Galileo display data on its worker. */
@@ -68,6 +69,7 @@ typedef struct {
     unsigned prn, lane;            /**< PRN and exclusively claimed workspace. */
     int generation;                /**< Capture cancellation generation. */
     int permit;                    /**< Owns one cooperative DSP-stage permit. */
+    double cpuMark;                /**< Thread CPU seconds at the last charged boundary. */
 } TNgAcquisitionJob;
 
 /** All constellation jobs share this bounded set of OS workers. */
@@ -81,17 +83,23 @@ struct TNgAcquisitionPool {
     unsigned executing;                             /**< Stages currently holding a permit. */
     int stopping;                                   /**< Pool shutdown predicate. */
     TNgAcquisition *subscriptions[2]; /**< GPS/Galileo or caller strategy subscriptions. */
+    double cpuBudget;     /**< CPU seconds per signal second; zero disables the budget. */
+    double cpuCredit;     /**< Remaining CPU seconds; may go negative by one stage. */
+    int budgetActive;     /**< A receiver advances signal time for this pool. */
+    int haveSignal;       /**< signalEpoch/signalSample hold the last credited position. */
+    uint64_t signalEpoch, signalSample; /**< Last credited signal position. */
 };
 
-/** Reserve CPU allowance for ingress, with at least four logical acquisition lanes. */
+/** Unused credit is capped at this much signal time worth of budget, so an idle period
+ * cannot buy a later burst; a new budget starts with the full cap. */
+#define NG_ACQUISITION_CREDIT_SECONDS 0.25
+
+/** Four prepared search lanes. Lanes only hold workspaces and idle threads: actual CPU use
+ * is bounded by the execution limit and, under a receiver, by the signal-time CPU budget.
+ * More lanes would add memory and runnable threads that compete with tracking. */
 static unsigned Capacity(void)
 {
-    unsigned count = NgLogicalProcessorCount();
-    if (count > 1)
-        --count;
-    if (count < 4)
-        count = 4;
-    return count > NG_ACQUISITION_MAX_PARALLEL ? NG_ACQUISITION_MAX_PARALLEL : count;
+    return 4u;
 }
 
 /** Wake without retaining any subscription mutex. */
@@ -116,7 +124,11 @@ static int WorkCancelled(void *context)
     TNgAcquisitionJob *job = context;
     TNgAcquisitionPool *pool = job->acquisition->pool;
     int delay = NgAtomicGet(&job->acquisition->yieldMilliseconds);
+    double cpu = NgThreadCpuSeconds();
     NgMutexLock(&pool->mutex);
+    if (pool->budgetActive)
+        pool->cpuCredit -= cpu - job->cpuMark;
+    job->cpuMark = cpu;
     if (job->permit) {
         --pool->executing;
         job->permit = 0;
@@ -129,7 +141,8 @@ static int WorkCancelled(void *context)
         NgSleepMs((unsigned)delay);
     NgMutexLock(&pool->mutex);
     while (!pool->stopping && !Cancelled(job) &&
-           pool->executing >= (unsigned)NgAtomicGet(&pool->executionLimit))
+           (pool->executing >= (unsigned)NgAtomicGet(&pool->executionLimit) ||
+            (pool->budgetActive && pool->cpuCredit <= 0)))
         NgConditionWait(&pool->work, &pool->mutex, 20);
     int cancelled = pool->stopping || Cancelled(job);
     if (!cancelled) {
@@ -137,6 +150,8 @@ static int WorkCancelled(void *context)
         job->permit = 1;
     }
     NgMutexUnlock(&pool->mutex);
+    /* Waiting is not charged: the next stage is measured from here. */
+    job->cpuMark = NgThreadCpuSeconds();
     return cancelled;
 }
 
@@ -161,6 +176,8 @@ static void RefreshJobs(TNgAcquisition *a)
 static int Claim(TNgAcquisitionPool *pool, TNgAcquisitionJob *job)
 {
     unsigned attempt;
+    if (pool->budgetActive && pool->cpuCredit <= 0)
+        return 0;
     for (attempt = 0; attempt < 2; ++attempt) {
         unsigned system = (pool->nextSystem + attempt) % 2;
         TNgAcquisition *a = pool->subscriptions[system];
@@ -200,6 +217,7 @@ static int Claim(TNgAcquisitionPool *pool, TNgAcquisitionJob *job)
         job->prn = prn;
         job->lane = lane;
         job->permit = 0;
+        job->cpuMark = NgThreadCpuSeconds();
         pool->nextSystem = 1 - system;
         NgMutexUnlock(&a->mutex);
         return 1;
@@ -271,7 +289,10 @@ static void SearchWorker(void *context)
         }
         NgMutexUnlock(&pool->mutex);
         Execute(&job);
+        double cpu = NgThreadCpuSeconds();
         NgMutexLock(&pool->mutex);
+        if (pool->budgetActive)
+            pool->cpuCredit -= cpu - job.cpuMark;
         if (job.permit)
             --pool->executing;
         TNgAcquisition *a = job.acquisition;
@@ -335,6 +356,7 @@ static TNgAcquisitionPool *CreatePool(TNgAcquisition *a, TNgAcquisition *b, TNgE
     }
     pool->subscriptions[0] = a;
     pool->subscriptions[1] = b;
+    pool->cpuBudget = a->config.cpuBudget;
     pool->capacity = wanted < Capacity() ? wanted : Capacity();
     NgAtomicSet(&pool->limit, (int)pool->capacity);
     NgAtomicSet(&pool->executionLimit, (int)pool->capacity);
@@ -357,6 +379,7 @@ void NgAcquisitionDefaults(TNgAcquisitionConfig *config)
     config->falseAlarmProbability = 1e-9;
     config->firstPrn = 1;
     config->lastPrn = 32;
+    config->cpuBudget = 1.0;
 }
 
 /** Reject malformed module options before worker creation. */
@@ -368,6 +391,12 @@ int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error)
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1))
         return NgFail(error, "Invalid GPS acquisition PRN range or mode");
+    if (config->fftSize != 0 && config->fftSize != 4096 && config->fftSize != 8192 &&
+        config->fftSize != 16384)
+        return NgFail(error, "Galileo acquisition FFT size must be 0 (automatic), 4096, 8192 or 16384");
+    if (!isfinite(config->cpuBudget) || config->cpuBudget < 0 ||
+        config->cpuBudget > NG_ACQUISITION_MAX_PARALLEL)
+        return NgFail(error, "Acquisition CPU budget must be 0..32 cores (0 disables it)");
     return NG_OK;
 }
 
@@ -432,7 +461,7 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
 
 /** Common-ring callback, native CI8/CI16 without narrowing. */
 static const TNgChannelOps acquisitionOps = {
-    Process, (1u << NG_FORMAT_CI8) | (1u << NG_FORMAT_CI16) | (1u << NG_FORMAT_SC16_Q11), NULL};
+    Process, (1u << NG_FORMAT_CI8) | (1u << NG_FORMAT_CI16) | (1u << NG_FORMAT_SC16_Q11), NULL, 0};
 
 /** Release private workspaces; caller decides whether the supplied first context is owned. */
 static void FreeContexts(TNgAcquisition *a, unsigned first)
@@ -486,7 +515,8 @@ static int CreateWithDuration(const TNgAcquisitionConfig *config, const TNgStrea
     for (k = 1; k < wanted; ++k) {
         int result = strategy == &ngGpsAcquisitionStrategy
                          ? NgAcquisitionGpsWorkspace(stream, &a->contexts[k], error)
-                         : NgAcquisitionGalileoWorkspace(stream, &a->contexts[k], error);
+                         : NgAcquisitionGalileoWorkspace(stream, config->fftSize, &a->contexts[k],
+                                                         error);
         if (result != NG_OK) {
             FreeContexts(a, 1);
             NgMutexDestroy(&a->mutex);
@@ -553,7 +583,8 @@ int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStre
     *out = NULL;
     if (NgAcquisitionValidate(config, error) != NG_OK)
         return NG_ERROR;
-    if (config->enabled && NgAcquisitionGalileoWorkspace(stream, &workspace, error) != NG_OK)
+    if (config->enabled &&
+        NgAcquisitionGalileoWorkspace(stream, config->fftSize, &workspace, error) != NG_OK)
         return NG_ERROR;
     status = CreateWithDuration(config, stream, &ngGalileoAcquisitionStrategy, workspace, out,
                                 channel, error, 224);
@@ -658,6 +689,44 @@ void NgAcquisitionSetParallelism(TNgAcquisition *a, unsigned totalLimit, unsigne
     if (changed)
         NgConditionSignal(&pool->work);
     NgMutexUnlock(&pool->mutex);
+}
+
+/** Credit the shared pool with CPU time for newly processed signal. Linked subscriptions
+ * share one pool and one signal clock, so calling this for both is harmless. */
+unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *a, uint64_t epoch, uint64_t endSample,
+                                    double sampleRate)
+{
+    TNgAcquisitionPool *pool;
+    unsigned execution;
+    if (!a || !a->pool || !(sampleRate > 0))
+        return 0;
+    pool = a->pool;
+    if (!(pool->cpuBudget > 0))
+        return 0;
+    execution = (unsigned)ceil(pool->cpuBudget);
+    if (execution > pool->capacity)
+        execution = pool->capacity;
+    NgMutexLock(&pool->mutex);
+    double cap = NG_ACQUISITION_CREDIT_SECONDS * pool->cpuBudget;
+    if (!pool->budgetActive) {
+        pool->budgetActive = 1;
+        pool->cpuCredit = cap;
+    }
+    if (pool->haveSignal && pool->signalEpoch == epoch && endSample > pool->signalSample) {
+        int starved = pool->cpuCredit <= 0;
+        pool->cpuCredit += (double)(endSample - pool->signalSample) / sampleRate * pool->cpuBudget;
+        if (pool->cpuCredit > cap)
+            pool->cpuCredit = cap;
+        if (starved && pool->cpuCredit > 0)
+            NgConditionSignal(&pool->work);
+    }
+    if (!pool->haveSignal || pool->signalEpoch != epoch || endSample > pool->signalSample) {
+        pool->signalEpoch = epoch;
+        pool->signalSample = endSample;
+        pool->haveSignal = 1;
+    }
+    NgMutexUnlock(&pool->mutex);
+    return execution ? execution : 1u;
 }
 
 /** Publish display interest without touching search decisions or the owned capture. */

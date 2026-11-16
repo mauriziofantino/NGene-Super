@@ -12,4 +12,13 @@ void NgTrackingCodePhases(double *phases, size_t count, double base, double code
  * paths return identical replicas; no phase quantization or amplitude reduction. */
 void NgTrackingReplica(float *output, const double *phases, size_t count, const int8_t *chips,
                        unsigned period, double offset, int boc);
+/** Correlate a block with one replica tap through run sums of its cumulative samples.
+ * prefix holds count + 1 interleaved (I, Q) double sums, prefix[0..1] = 0. The replica is
+ * sample for sample the one of NgTrackingReplica on NgTrackingCodePhases(base, codeRate,
+ * sampleRate): chip boundaries are predicted, and checked with that exact arithmetic when
+ * within 1e-6 samples. Results equal the per-sample correlation up to double rounding of
+ * the prefix differences (relative error near 1e-15 of the block energy). */
+void NgTrackingCorrelateRuns(const double *prefix, size_t count, double base, double codeRate,
+                             double sampleRate, const int8_t *chips, unsigned period,
+                             double offset, int boc, double *i, double *q);
 #endif

@@ -53,6 +53,14 @@ HackRF currently has no antenna and supplies transport/load evidence only.
 See [the measurements and limits](PERFORMANCE_NAVIGATION_2026-11-15.md) and
 [the saved work state](WORKPLAN_CHANNELS_GALILEO_2026-11-14.md).
 
+Acquisition now runs under a signal-time CPU budget (`acquisition.cpu_budget`,
+default 1 core). Tracking uses a fused front end and chip-run correlation that keep
+the decisions of the previous kernels. The search FFT is radix-2^2. In a 16 Msps
+replay, process CPU fell from 3.8 to 1.25 cores with 4 workers. With 1 worker the
+receiver thread went from 81 % to 22 % busy. This is replay evidence only; HackRF
+real-time operation remains unverified. See
+[the real-time measurements](PERFORMANCE_REALTIME_2026-11-16.md).
+
 x64 SSE2 and AArch64 NEON cover tracking phases/replicas, carrier, rotation,
 product/XOR correlations and the floating search FFT. ARM64 execution was checked
 under emulation against independent arithmetic/DFT; ARM physical performance and

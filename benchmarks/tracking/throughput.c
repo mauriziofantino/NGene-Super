@@ -17,7 +17,7 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
 /** Benchmark uses the same bounded scheduler and barrier as production. */
 static const TNgChannelOps ops = {
     Process, 0,
-    NULL}; /** Measure private channels against nominal signal duration; input generation is excluded. */
+    NULL, 0}; /** Measure private channels against nominal signal duration; input generation is excluded. */
 
 int main(int argc, char **argv)
 {

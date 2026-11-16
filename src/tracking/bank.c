@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** Signal batched per tracking dispatch. Tracking accepts arbitrary window splits, so this
+ * changes only how often workers meet at the barrier (250 instead of 1000 times a second)
+ * and adds at most this latency to slot admission and PVT. */
+#define NG_BANK_BATCH_MS 4u
+
 /** Receiver-owned pool. All allocation/assignment happens outside DSP jobs. */
 typedef struct {
     TNgPvtSnapshot pvt;                   /**< Last common-epoch code/Doppler solve. */
@@ -29,9 +34,10 @@ typedef struct {
     int catchingUp;           /**< Hysteresis while foreground processing recovers. */
     TNgBlockMeta lastInput;   /**< Deduplicate GPS/Galileo subscriptions before batching. */
     int haveInput;
-    unsigned char batch[20000u * 4u]; /**< At most one native millisecond, allocated before RX. */
+    unsigned char batch[20000u * 4u * NG_BANK_BATCH_MS]; /**< One batch, allocated before RX. */
     TNgIqView pending;                /**< Owned batch geometry; no ring pointer retained. */
-    size_t batchLimit;                /**< Ceil(actual sample rate / 1000). */
+    size_t batchLimit;                /**< NG_BANK_BATCH_MS * ceil(actual sample rate / 1000). */
+    size_t order[64];                 /**< Dispatch claim order, costliest slots first. */
 } TNgChannelPool;
 
 /** A light signal subscriber points to the same shared pool after linking. */
@@ -59,7 +65,8 @@ static int Track(void *context, const TNgChannelId *id, TNgChannelState state,
 
 /** Native signed formats retain their ADC levels. */
 static const TNgChannelOps trackOps = {
-    Track, (1u << NG_FORMAT_CI8) | (1u << NG_FORMAT_CI16) | (1u << NG_FORMAT_SC16_Q11), NULL};
+    Track, (1u << NG_FORMAT_CI8) | (1u << NG_FORMAT_CI16) | (1u << NG_FORMAT_SC16_Q11), NULL,
+    1 /* An ACQUISITION-state slot holds no active tracking: nothing to do. */};
 
 /** Copy worker-owned results after the barrier, preserving stable slot identity. */
 static void Refresh(TNgChannelPool *pool)
@@ -110,16 +117,29 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
     if (pool->haveWindow &&
         (pool->epoch != window->meta.epoch || pool->expected != window->meta.firstSample ||
          (window->meta.flags & NG_BLOCK_GAP))) {
+        /* Active slots see the gap in this window and stop themselves (TRACKING to
+         * HOLDOVER); Refresh then returns them to ACQUISITION after the barrier. */
         memset(&pool->pvt, 0, sizeof(pool->pvt));
         pool->lastPvtSample = 0;
-        for (k = 0; k < pool->config.channelCount; ++k)
-            pool->jobs[k].state = NG_CHANNEL_ACQUISITION;
     }
     for (k = 0; k < pool->config.channelCount; ++k)
         if (pool->slots[k].active)
             ++active;
     for (k = 0; k < pool->config.channelCount; ++k)
         NgTrackingObserve(pool->tracking[k], pool->observedChannel == k + 1);
+    {
+        /* Galileo integrations cost more per sample: start them first so that the barrier
+         * does not wait for a long job claimed last. */
+        unsigned n = 0, pass;
+        for (pass = 0; pass < 3; ++pass)
+            for (k = 0; k < pool->config.channelCount; ++k) {
+                unsigned rank = !pool->slots[k].active ? 2u
+                                : pool->slots[k].constellation == 2 ? 0u
+                                                                    : 1u;
+                if (rank == pass)
+                    pool->order[n++] = k;
+            }
+    }
     {
         int measure;
         double started = 0;
@@ -204,11 +224,17 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         unsigned quota = 0, totalLimit = pool->config.channelCount - active;
         unsigned capacity = searches[system].parallelCapacity;
         unsigned budget = capacity;
+        /* Signal-time CPU budget: acquisition receives a fixed share of CPU per second of
+         * signal, independent of the number of cores and tracking workers. */
+        unsigned budgeted = NgAcquisitionAdvanceSignal(pool->acquisition[system], pool->epoch,
+                                                       pool->expected, pool->sampleRate);
         for (k = 0; k < pool->config.channelCount; ++k)
             if (!pool->slots[k].active &&
                 (pool->reservation[k] == 0 || pool->reservation[k] == system + 1))
                 ++quota;
-        if (active && capacity) {
+        if (budgeted)
+            budget = budgeted;
+        else if (active && capacity) {
             double headroom = 1.0 - pool->trackingLoad / 0.85;
             budget = headroom > 0 ? (unsigned)((double)capacity * headroom) : 0;
             if (headroom > 0 && !budget)
@@ -219,7 +245,7 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         if (pool->catchingUp)
             budget = totalLimit = 0;
         NgAcquisitionSetParallelism(pool->acquisition[system], totalLimit, quota, budget);
-        unsigned delay = !active                     ? 0u
+        unsigned delay = !active || budgeted         ? 0u
                          : pool->trackingLoad > 0.95 ? 20u
                          : pool->trackingLoad > 0.75 ? 4u
                          : pool->trackingLoad > 0.55 ? 1u
@@ -249,11 +275,17 @@ static int Accumulate(TNgChannelPool *pool, const TNgIqView *window, TNgError *e
         pool->lastInput.firstSample == window->meta.firstSample &&
         pool->lastInput.count == window->meta.count)
         return NG_OK;
-    if (pool->haveInput &&
-        (pool->lastInput.epoch != window->meta.epoch ||
-         pool->lastInput.firstSample + pool->lastInput.count != window->meta.firstSample ||
-         (window->meta.flags & NG_BLOCK_GAP)))
+    int discontinuity =
+        (window->meta.flags & NG_BLOCK_GAP) ||
+        (pool->haveInput && (pool->lastInput.epoch != window->meta.epoch ||
+                             pool->lastInput.firstSample + pool->lastInput.count !=
+                                 window->meta.firstSample));
+    if (discontinuity && pool->pending.meta.count) {
+        /* The batch before a discontinuity is contiguous signal: process it, then restart. */
+        if (Frame(pool, &pool->pending, error) != NG_OK)
+            return NG_ERROR;
         pool->pending.meta.count = 0;
+    }
     pool->lastInput = window->meta;
     pool->haveInput = 1;
     while (offset < window->meta.count) {
@@ -288,8 +320,9 @@ static int Accumulate(TNgChannelPool *pool, const TNgIqView *window, TNgError *e
                take * stride);
         pool->pending.meta.count += take;
         offset += take;
+        /* A discontinuity is handled at once, so slots stop on the first gap window. */
         if (pool->pending.meta.count == pool->batchLimit ||
-            (window->meta.flags & NG_BLOCK_PARTIAL)) {
+            (window->meta.flags & NG_BLOCK_PARTIAL) || discontinuity) {
             if (Frame(pool, &pool->pending, error) != NG_OK)
                 return NG_ERROR;
             pool->pending.meta.count = 0;
@@ -319,7 +352,7 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
 
 /** Shared stream subscription operations. */
 static const TNgChannelOps bankOps = {
-    Process, (1u << NG_FORMAT_CI8) | (1u << NG_FORMAT_CI16) | (1u << NG_FORMAT_SC16_Q11), NULL};
+    Process, (1u << NG_FORMAT_CI8) | (1u << NG_FORMAT_CI16) | (1u << NG_FORMAT_SC16_Q11), NULL, 0};
 
 /** Join the pool before releasing any private state. */
 static void DestroyPool(TNgChannelPool *pool)
@@ -358,7 +391,7 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
     bank->system = channel->id.constellation - 1;
     pool->config = *config;
     pool->sampleRate = stream->sampleRateHz;
-    pool->batchLimit = (stream->sampleRateHz + 999u) / 1000u;
+    pool->batchLimit = (size_t)((stream->sampleRateHz + 999u) / 1000u) * NG_BANK_BATCH_MS;
     pool->captures[bank->system] = *channel;
     pool->acquisition[bank->system] = acquisition;
     for (k = 0; k < config->channelCount; ++k) {
@@ -379,6 +412,9 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
         NgTrackingBankDestroy(bank);
         return NG_ERROR;
     }
+    for (k = 0; k < config->channelCount; ++k)
+        pool->order[k] = k;
+    NgChannelDispatchSetOrder(pool->dispatch, pool->order);
     Refresh(pool);
     channel->ops = &bankOps;
     channel->context = bank;
