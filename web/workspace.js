@@ -69,9 +69,9 @@ function pvtMarkup() {
   return heading('POSITION, VELOCITY & TIME', 'Broadcast PVT',
     'Code and Doppler measurements share one input epoch. GPS and Galileo have separate clock biases.',
     settingsButton('navigation', 'Navigation & PVT settings') + button('tracking', 'Inspect channels')) +
-    '<section class="card tracking-panel"><h2 data-pvt-state>No solution available</h2><p data-pvt-counts></p><dl data-pvt-values></dl><p data-pvt-model></p></section>' +
-    '<section class="card tracking-panel"><h2>Receiver position and track</h2><div data-pvt-map></div></section>' +
-    '<section class="card tracking-panel"><h2>Satellite skyplot</h2><p>Satellites used at the solution epoch. GPS: blue; Galileo: amber. Radius indicates elevation: horizon at the edge, zenith at the centre.</p><div data-pvt-sky></div></section>';
+    '<div class="pvt-overview"><section class="card tracking-panel"><h2 data-pvt-state>No solution available</h2><p data-pvt-counts></p><dl data-pvt-values></dl><p data-pvt-model></p></section>' +
+    '<section class="card tracking-panel pvt-sky-panel"><h2>Satellite skyplot</h2><p>GPS: blue; Galileo: amber. Edge is horizon; centre is zenith.</p><div data-pvt-sky></div></section></div>' +
+    '<section class="card tracking-panel"><h2>Receiver position and track</h2><div data-pvt-map></div></section>';
 }
 
 /** Draw only real broadcast geometry, and only while the PVT view is visible. */

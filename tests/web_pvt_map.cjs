@@ -34,6 +34,20 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   assert(Math.abs(Number(await page.locator('[data-pvt-sky] circle').nth(3).getAttribute('cy'))-80)<1e-10,'North is up');
   assert(Math.abs(Number(await page.locator('[data-pvt-sky] circle').nth(4).getAttribute('cx'))-230)<1e-10,'East is right');
   assert.match(await page.locator('[data-pvt-values]').textContent(),/GDOP2\.40HDOP1\.20VDOP1\.80/);
+  const layout=await page.evaluate(()=>{
+   const overview=document.querySelector('.pvt-overview'),summary=overview.children[0].getBoundingClientRect(),sky=overview.children[1].getBoundingClientRect();
+   return {summaryTop:summary.top,skyTop:sky.top,overviewBottom:overview.getBoundingClientRect().bottom,mapTop:document.querySelector('[data-pvt-map]').parentElement.getBoundingClientRect().top,skyplotWidth:document.querySelector('.pvt-skyplot').getBoundingClientRect().width};
+  });
+  assert(Math.abs(layout.summaryTop-layout.skyTop)<1,'Position summary and skyplot share a row');
+  assert(layout.mapTop>=layout.overviewBottom,'Map is below the summary and skyplot');
+  assert(layout.skyplotWidth<=240,'Skyplot remains compact');
+  await page.setViewportSize({width:700,height:850});
+  const narrowLayout=await page.evaluate(()=>{
+   const overview=document.querySelector('.pvt-overview'),summary=overview.children[0].getBoundingClientRect(),sky=overview.children[1].getBoundingClientRect();
+   return {summaryBottom:summary.bottom,skyTop:sky.top,skyBottom:sky.bottom,mapTop:document.querySelector('[data-pvt-map]').parentElement.getBoundingClientRect().top};
+  });
+  assert(narrowLayout.skyTop>=narrowLayout.summaryBottom&&narrowLayout.mapTop>=narrowLayout.skyBottom,'Narrow screens stack the summary, skyplot and map');
+  await page.setViewportSize({width:1100,height:850});
   await page.screenshot({path:path.resolve('build/pvt-geometry-preview.png'),fullPage:true});
   await page.evaluate(()=>{window.geometryWorkspace.setView('tracking');window.geometryWorkspace.update(window.geometrySnapshot);});
   assert.equal(await page.locator('.channel-cn0 meter').count(),2);
