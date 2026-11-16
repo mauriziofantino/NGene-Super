@@ -1,7 +1,7 @@
 # Project status and implementation principles
 
-Last reviewed: 2026-11-13
-Repository baseline: `dev` at `e59627f` (`BladeRF bug is fixed`)
+Last reviewed: 2026-11-16
+Repository baseline: `062ecdc` (`PVT test 2`), plus the current scheduling and validation changes
 
 This is the concise, current project handoff for contributors. The roadmap contains
 the accepted direction; subsystem documents contain detailed contracts and evidence.
@@ -19,29 +19,46 @@ The numerical and I/Q adaptations, limits, and validation are documented in
 [GPS_ACQUISITION.md](GPS_ACQUISITION.md). Acquisition results are not tracking locks
 or navigation fixes.
 
-Galileo E1-B acquisition for PRNs 1..32 is integrated in the controller, CLI, INI
-and browser alongside GPS, with independent enable/PRN settings and a Signal
-selector for results and synchronized search-space views. Synthetic service/browser
-validation and the shared wrong-Doppler noise policy are established; no recorded
-RF replay/live result is established. See [the API scope and limits](GALILEO_ACQUISITION.md).
+Galileo E1-B acquisition for PRNs 1..32 and GPS L1 C/A share an adaptive worker
+pool. Capacity follows available processors and free channel slots; cooperative
+stage permits also limit already running jobs. Tracking/PVT precede acquisition.
+Small source windows are grouped into an owned native millisecond for tracking,
+amortizing worker barriers without resampling or changing arithmetic. Diagnostics
+pause while foreground processing catches up, independently of OS priorities.
 
-A first GPS/Galileo tracking loop integration now follows confirmed acquisition in CLI and service, with a replaceable tracking library, configurable multi-tap correlation and browser delay/time plots. The Channels view now follows bounded, reusable slots through waiting/acquisition/tracking, with configurable GPS/Galileo capacities and one fixed tracking pool. SIMD replica generation replaces the initial per-tap scalar wrapping loops. See [tracking scope and validation](TRACKING.md); complete Classic lock supervision, HOLDOVER and fast reacquisition remain pending.
+Channels is a stable table with numeric C/N0 and horizontal bars. Total slots,
+GPS/Galileo reservations and automatic preference are configurable. Only the
+selected channel computes optional taps/current search display; confirmed maps
+are archived after seed publication. Galileo spacing is expressed in half-chip
+slots. Static module-status dots have been removed.
 
-A first GPS LNAV demodulator now consumes every coherent tracking prompt, validates word parity and publishes bit synchronization, complete subframes and HOW TOW. HackRF live has produced four validated GPS12 subframes in a 30-second run. Channels is an ordered table. Full ephemeris parsing and Galileo I/NAV decoding remain pending; see WORKPLAN_CHANNELS_GALILEO_2026-11-14.md.
+Classic GPS LNAV parity and Galileo I/NAV deinterleaving/Viterbi/CRC decoding feed
+per-satellite consistent broadcast caches. Common-epoch code/Doppler observations
+feed a double-precision C pivoted-QR broadcast least-squares PVT, with separate
+GPS/Galileo biases, Earth rotation and Hopfield troposphere. The PVT view includes
+numerical coordinates, a map, GDOP/HDOP/VDOP and an actual satellite skyplot. This
+is **partial Classic PVT integration**: full weighted/adaptive Kalman processing,
+ionosphere, smoothing and integrity/outlier qualification remain pending.
 
-This is **not yet an end-to-end GNSS receiver**: full navigation-message decoding,
-observables, and PVT/PNT are not integrated. SBAS acquisition and multibit
-correlation kernels are also not established as implemented capabilities. In
-particular, native SC16 Q11 transport preserves its ADC precision, but does not mean
-all downstream GNSS channel kernels support that format. See
-[ARCHITECTURE.md](ARCHITECTURE.md), [MULTISDR_064.md](MULTISDR_064.md), and
-[NATIVE_IQ_PERFORMANCE.md](NATIVE_IQ_PERFORMANCE.md) for precise boundaries.
+PLL power qualification and bounded loss/reacquisition now release failed slots;
+parsed broadcast data survives reacquisition, but fresh decoding must establish
+TOW. Complete Classic false-lock correction, NCO holdover and verified fast
+reacquisition remain pending. A PLL convergence flag alone is not a qualified fix.
 
-The current engineering baseline is the `dev` commit above. The next work is not
-assigned to a release: use [ROADMAP.md](ROADMAP.md) to choose and validate the next
-increment, beginning with GNSS processing beyond acquisition. The roadmap is
-directional, not evidence that planned work has started or passed hardware validation.
-The latest committed code milestone is the bladeRF RX fix in `e59627f`.
+A 65-second RTL E4000 physical recording has zero reported software gaps/drops,
+but simultaneous losses of GPS correlation also reproduce in an isolated tracker.
+The recovery replay reaches mixed PVT with six GPS and two Galileo satellites;
+continuity is not yet established, and RTL hardware-internal loss is unmeasured.
+HackRF currently has no antenna and supplies transport/load evidence only.
+See [the measurements and limits](PERFORMANCE_NAVIGATION_2026-11-15.md) and
+[the saved work state](WORKPLAN_CHANNELS_GALILEO_2026-11-14.md).
+
+x64 SSE2 and AArch64 NEON cover tracking phases/replicas, carrier, rotation,
+product/XOR correlations and the floating search FFT. ARM64 execution was checked
+under emulation against independent arithmetic/DFT; ARM physical performance and
+Linux/macOS runtime remain unverified. Separate Q14 FFT backends are unchanged.
+SBAS decoding and the remaining Classic PNT/authentication features are not implied
+by this first broadcast PVT pipeline.
 
 ## Implementation principles
 

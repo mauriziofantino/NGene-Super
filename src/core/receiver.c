@@ -103,6 +103,7 @@ int NgReceiverRunScheduled(const TNgConfig *config, TNgFrontend *frontend,
     double started = 0;
     double lastData = 0;
     double lastReport = 0;
+    double lastLoad = 0;
     size_t k;
     TNgError cleanupError = {{0}};
     if (stats == NULL || frontend == NULL || frontend->ops == NULL || conditioner == NULL ||
@@ -181,6 +182,12 @@ int NgReceiverRunScheduled(const TNgConfig *config, TNgFrontend *frontend,
         uint64_t missing = 0;
         int missingKnown = 0;
         double now = NgMonotonicSeconds();
+        if (hooks && hooks->backpressure && now - lastLoad >= 0.005 && frontend->ops->stats) {
+            TNgFrontendStats load;
+            frontend->ops->stats(frontend->context, &load);
+            hooks->backpressure(hooks->context, &load);
+            lastLoad = now;
+        }
         if (hooks != NULL && hooks->progress != NULL && now - lastReport >= 0.1) {
             stats->wallSeconds = now - started;
             stats->ringHighWater = NgRingHighWater(ring);

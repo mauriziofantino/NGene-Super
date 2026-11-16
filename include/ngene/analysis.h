@@ -302,6 +302,8 @@ void NgAnalysisInterest(TNgAnalysis *analysis, unsigned mask, double expiresSeco
  * @param out Receives complete snapshot including owned PSD and histogram arrays.
  */
 void NgAnalysisRead(TNgAnalysis *analysis, TNgAnalysisSnapshot *out);
+/** Receiver-owner scheduling gate. Pauses optional computation/copies; leases remain intact. */
+void NgAnalysisPause(TNgAnalysis *analysis, int paused);
 /**
  * @brief Calculate PSD range, mean, finite-value counts and a lightweight checksum.
  *

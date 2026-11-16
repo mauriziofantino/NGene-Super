@@ -54,6 +54,7 @@ struct TNgAnalysis {
     TNgThread thread;
     /** Atomic request for the worker/engine to stop. */
     TNgAtomicInt stop;
+    TNgAtomicInt paused; /**< Portable foreground priority, independent of OS scheduling. */
     /** Atomic count of optional submissions skipped instead of waiting. */
     TNgAtomicInt contention;
     /** Copied validated configuration; owned by this instance. */
@@ -327,7 +328,8 @@ static int32_t Shift15(int32_t x)
 /** @brief Return whether a leased observation still has an interested consumer. */
 static int BurstCurrent(TNgAnalysis *a, const TNgBurst *b)
 {
-    return NgAtomicGet(&a->stop) == 0 && NgAtomicGet(&a->generation[b->kind]) == b->generation;
+    return NgAtomicGet(&a->stop) == 0 && !NgAtomicGet(&a->paused) &&
+           NgAtomicGet(&a->generation[b->kind]) == b->generation;
 }
 
 /** @brief Cancel queued/partial work for one lane while holding its publication mutex. */
@@ -638,8 +640,9 @@ static void Worker(void *context)
             }
         }
         for (k = 0; k < 4; ++k) {
-            if (a->buffers[k].state == 2 && (a->buffers[k].revision != a->revision ||
-                                             now > a->interestUntil[a->buffers[k].kind])) {
+            if (a->buffers[k].state == 2 &&
+                (NgAtomicGet(&a->paused) || a->buffers[k].revision != a->revision ||
+                 now > a->interestUntil[a->buffers[k].kind])) {
                 a->buffers[k].state = 0;
             }
             if (a->buffers[k].state == 2 &&
@@ -888,6 +891,21 @@ void NgAnalysisInterest(TNgAnalysis *analysis, unsigned mask, double expiresSeco
  * Result: NG_OK for an offered/inactive/null/empty tap; NG_FULL when the try-lock is
  * contended. Valid nonempty views must provide sample storage.
  */
+void NgAnalysisPause(TNgAnalysis *analysis, int paused)
+{
+    if (!analysis || NgAtomicGet(&analysis->paused) == (paused != 0))
+        return;
+    if (paused)
+        NgAtomicSet(&analysis->paused, 1);
+    if (NgMutexTryLock(&analysis->mutex)) {
+        CancelLane(analysis, 0);
+        CancelLane(analysis, 1);
+        NgAtomicSet(&analysis->paused, paused != 0);
+        NgConditionSignal(&analysis->ready);
+        NgMutexUnlock(&analysis->mutex);
+    }
+}
+
 int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preConditioning)
 {
     int kind;
@@ -895,6 +913,8 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
     if (analysis == NULL || view == NULL || view->meta.count == 0) {
         return NG_OK;
     }
+    if (NgAtomicGet(&analysis->paused))
+        return NG_OK;
     if (view->samples == NULL || NgSampleBytes(view->format) == 0) {
         return NG_ERROR;
     }

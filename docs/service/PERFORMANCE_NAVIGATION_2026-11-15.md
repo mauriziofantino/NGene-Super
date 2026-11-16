@@ -141,3 +141,64 @@ helper checks were blocked by host execution policy. They are not reported as
 passed. Browser workspace/map tests and the mixed satellite-page replay have their
 individual results in the work log. Final normal configuration has
 `NGENE_TRACKING_BENCHMARK=OFF`.
+
+## Current pool, UI and recovery update � 16 November 2026
+
+The earlier HackRF RF result above predates the shared adaptive acquisition pool.
+It is historical evidence, not acceptance of the current scheduler. With that
+pool an MSVC live run reproduced ingress overflow at10.23s despite seven tracking
+channels. Native isolated twelve-channel/three-tap throughput was0.736s per signal
+second at16.3676M; admission control alone could leave already borrowed acquisition
+jobs contending with tracking. MSVC kernel timings were higher than Clang timings
+(e.g. precise carrier27.7us, one product13.1us, FFT pair54.1us).
+
+The current scheduler separately bounds admitted jobs and executing stages.
+Every existing cancellation boundary releases its permit and waits for the current
+execution allowance; reducing the budget therefore also reaches in-flight jobs.
+An independent cap allows deferred maps to finish even when no receiver slots are
+free. Generation/stop breaks all waits. A paused-budget test freezes already
+borrowed native jobs, resumes at one execution lane, and compares every search
+result exactly with serial execution. Acquisition decisions/thresholds are unchanged.
+
+A wall-progress-debt experiment was rejected by slow-source tests: waiting for
+input is not CPU overload. Final backpressure uses the actual ingress occupancy
+with75/50% hysteresis, sampled at most200Hz using the engine clock already read
+for lifecycle checks. Frontend/ring counter snapshots take existing short locks;
+no additional clock reads, DSP, GUI work or allocations occur in this callback.
+File/unavailable queues never throttle. Tracking wall-load sampling remains100Hz.
+Optional diagnostics pause under the same portable headroom; OS priorities are
+advisory. The14.1us/sec clock/EMA measurement does not include the final queue
+snapshots or all scheduler bookkeeping.
+Budget pauses preserve the PRN cursor instead of restarting at low PRNs, fixing
+Galileo starvation. Small transport windows are accumulated into a bounded native
+millisecond before tracking dispatch; no resampling, quantization or precision
+change occurs. A37-pair versus2048-pair test compares final tracking values exactly.
+
+A physical RTL E4000 calibration tested2268states: tuner29dB/IF41dB, RMS9.31%,
+no rail clipping. These gains were used only in temporary test profiles. A65.403s
+recording saved155978080CI8pairs with zero reported software gaps/drops. GPS16/18
+lose correlation together near19.1s even in the isolated replay tool; fresh
+acquisition later decodes GPS and Galileo again. This excludes the multi-worker
+scheduler as a necessary cause of that recorded loss, but does not prove a hardware
+loss: RTL hardware continuity is unmeasured. Full Classic comparison remains open.
+
+PLL power qualification now releases lost assignments after the bounded Classic
+relock deadline and restores per-satellite broadcast caches on reacquisition.
+FLL/timing reset preserves orbit/clock parts while discarding framing and TOW.
+On the recovery replay, PVT is available around51�54s with six GPS and two Galileo:
+GDOP3.801, HDOP1.275, VDOP2.303, residual RMS0.94m at the saved sample129602400.
+These are geometry/fit values, not absolute accuracy. The solution is interrupted
+again; continuous PVT and full Classic false-lock/holdover are not established.
+
+The UI removes static menu dots, fixes channel-column widths, adds numeric+bar
+C/N0, and displays real solved satellite azimuth/elevation plus DOP and the map.
+Browser fixtures verify sky orientation, DOP, no fabricated geometry, stable
+columns, meter values and map behavior with mocked tiles. Mixed GPS/Galileo channel
+pages and the workspace suite pass. Search kernels additionally have AArch64 NEON
+carrier/rotation, code, product/XOR and floating FFT paths; production execution
+under Unicorn passes independent arithmetic/DFT checks. This is not ARM performance.
+
+Optional traces live only in benchmarks/tracking/profile.c and replay.c and the
+benchmark configuration is restored OFF in both build directories. The current
+normal executable is the MSVC multi-SDR Release build. See the work log for final
+live counters and remaining platform/RF limitations.

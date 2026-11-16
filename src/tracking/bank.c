@@ -7,27 +7,31 @@
 
 /** Receiver-owned pool. All allocation/assignment happens outside DSP jobs. */
 typedef struct {
-    TNgPvtSnapshot pvt;                    /**< Last common-epoch code/Doppler solve. */
-    double sampleRate;                     /**< Actual source pairs per second. */
-    uint64_t lastPvtSample;                /**< Last periodic solver invocation. */
-    TNgTrackingConfig config;              /**< Frozen total capacity and reservations. */
-    TNgTracking *tracking[64];             /**< One reusable private workspace per receiver slot. */
-    TNgChannel jobs[64];                   /**< Stable identities independent of constellation. */
-    TNgTrackingSnapshot slots[64];         /**< Copied observation state. */
-    unsigned reservation[64];              /**< 0 shared, 1 GPS, 2 Galileo. */
-    TNgChannel captures[2];                /**< Borrowed original acquisition registrations. */
-    TNgAcquisition *acquisition[2];        /**< Borrowed workers. */
-    TNgAcquisitionResult accepted[2][32];  /**< Consumed seeds. */
-    TNgBroadcast broadcast[2][32];        /**< Classic satellite cache survives slot reacquisition. */
-    TNgChannelDispatch *dispatch;          /**< One fixed pool for all slots. */
+    TNgPvtSnapshot pvt;                   /**< Last common-epoch code/Doppler solve. */
+    double sampleRate;                    /**< Actual source pairs per second. */
+    uint64_t lastPvtSample;               /**< Last periodic solver invocation. */
+    TNgTrackingConfig config;             /**< Frozen total capacity and reservations. */
+    TNgTracking *tracking[64];            /**< One reusable private workspace per receiver slot. */
+    TNgChannel jobs[64];                  /**< Stable identities independent of constellation. */
+    TNgTrackingSnapshot slots[64];        /**< Copied observation state. */
+    unsigned reservation[64];             /**< 0 shared, 1 GPS, 2 Galileo. */
+    TNgChannel captures[2];               /**< Borrowed original acquisition registrations. */
+    TNgAcquisition *acquisition[2];       /**< Borrowed workers. */
+    TNgAcquisitionResult accepted[2][32]; /**< Consumed seeds. */
+    TNgBroadcast broadcast[2][32]; /**< Classic satellite cache survives slot reacquisition. */
+    TNgChannelDispatch *dispatch;  /**< One fixed pool for all slots. */
     uint64_t epoch, firstSample, expected; /**< Common-window identity. */
     size_t count;                          /**< Last window sample count. */
     int haveWindow;                        /**< A frame has been processed. */
     unsigned observedChannel; /**< Optional tap interest; receiver-owner writes only. */
     double trackingLoad;      /**< Signal-time EMA of mandatory dispatch wall time / window. */
     uint64_t budgetSamples;   /**< Sample timing only once per ten milliseconds of signal. */
-    double budgetTime, schedulingDebt; /**< Monotonic progress versus processed signal time. */
-    int catchingUp;                    /**< Hysteresis while foreground processing recovers. */
+    int catchingUp;           /**< Hysteresis while foreground processing recovers. */
+    TNgBlockMeta lastInput;   /**< Deduplicate GPS/Galileo subscriptions before batching. */
+    int haveInput;
+    unsigned char batch[20000u * 4u]; /**< At most one native millisecond, allocated before RX. */
+    TNgIqView pending;                /**< Owned batch geometry; no ring pointer retained. */
+    size_t batchLimit;                /**< Ceil(actual sample rate / 1000). */
 } TNgChannelPool;
 
 /** A light signal subscriber points to the same shared pool after linking. */
@@ -47,8 +51,9 @@ static int Track(void *context, const TNgChannelId *id, TNgChannelState state,
     (void)state;
     result = NgTrackingProcess(context, window, error);
     NgTrackingRead(context, &snapshot);
-    *next = snapshot.active ? NG_CHANNEL_TRACKING :
-            state == NG_CHANNEL_TRACKING ? NG_CHANNEL_HOLDOVER : state;
+    *next = snapshot.active                ? NG_CHANNEL_TRACKING
+            : state == NG_CHANNEL_TRACKING ? NG_CHANNEL_HOLDOVER
+                                           : state;
     return result;
 }
 
@@ -62,7 +67,8 @@ static void Refresh(TNgChannelPool *pool)
     unsigned k;
     for (k = 0; k < pool->config.channelCount; ++k) {
         NgTrackingRead(pool->tracking[k], &pool->slots[k]);
-        if (pool->slots[k].prn && pool->slots[k].constellation >= 1 && pool->slots[k].constellation <= 2) {
+        if (pool->slots[k].prn && pool->slots[k].constellation >= 1 &&
+            pool->slots[k].constellation <= 2) {
             const TNgBroadcast *b = &pool->slots[k].navigation.broadcast;
             if (b->subframe1Received || b->subframe2Received || b->subframe3Received)
                 pool->broadcast[pool->slots[k].constellation - 1][pool->slots[k].prn - 1] = *b;
@@ -106,8 +112,6 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
          (window->meta.flags & NG_BLOCK_GAP))) {
         memset(&pool->pvt, 0, sizeof(pool->pvt));
         pool->lastPvtSample = 0;
-        pool->budgetTime = pool->schedulingDebt = 0;
-        pool->catchingUp = 0;
         for (k = 0; k < pool->config.channelCount; ++k)
             pool->jobs[k].state = NG_CHANNEL_ACQUISITION;
     }
@@ -116,7 +120,7 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
             ++active;
     for (k = 0; k < pool->config.channelCount; ++k)
         NgTrackingObserve(pool->tracking[k], pool->observedChannel == k + 1);
-    if (active) {
+    {
         int measure;
         double started = 0;
         double duration = (double)window->meta.count / pool->sampleRate;
@@ -124,33 +128,20 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         measure = (double)pool->budgetSamples >= pool->sampleRate * 0.01;
         if (measure)
             started = NgMonotonicSeconds();
-        if (NgChannelDispatchProcess(pool->dispatch, window, error) != NG_OK)
+        if (active && NgChannelDispatchProcess(pool->dispatch, window, error) != NG_OK)
             return NG_ERROR;
         if (measure && duration > 0) {
             double finished = NgMonotonicSeconds();
-            double signalTime = (double)pool->budgetSamples / pool->sampleRate;
             double weight = (double)pool->budgetSamples / pool->sampleRate / 0.1;
             if (weight > 1)
                 weight = 1;
-            pool->trackingLoad += weight * ((finished - started) / duration - pool->trackingLoad);
-            if (pool->budgetTime > 0) {
-                pool->schedulingDebt += finished - pool->budgetTime - signalTime;
-                if (pool->schedulingDebt < 0)
-                    pool->schedulingDebt = 0;
-                if (pool->schedulingDebt > 0.25)
-                    pool->schedulingDebt = 0.25;
-                if (pool->schedulingDebt > 0.02)
-                    pool->catchingUp = 1;
-                else if (pool->schedulingDebt < 0.005)
-                    pool->catchingUp = 0;
-            }
-            pool->budgetTime = finished;
+            if (active)
+                pool->trackingLoad +=
+                    weight * ((finished - started) / duration - pool->trackingLoad);
+            else
+                pool->trackingLoad = 0;
             pool->budgetSamples = 0;
         }
-    } else {
-        pool->trackingLoad = 0;
-        pool->budgetTime = pool->schedulingDebt = 0;
-        pool->catchingUp = 0;
     }
     pool->epoch = window->meta.epoch;
     pool->firstSample = window->meta.firstSample;
@@ -198,7 +189,8 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
             NgTrackingSeed(pool->tracking[bestSlot], best, error) != NG_OK)
             return NG_ERROR;
         pool->jobs[bestSlot].state = NG_CHANNEL_TRACKING;
-        NgTrackingRestoreBroadcast(pool->tracking[bestSlot], &pool->broadcast[bestSystem][best->prn - 1]);
+        NgTrackingRestoreBroadcast(pool->tracking[bestSlot],
+                                   &pool->broadcast[bestSystem][best->prn - 1]);
         pool->accepted[bestSystem][best->prn - 1] = *best;
         mask[bestSystem] |= UINT32_C(1) << (best->prn - 1);
         Refresh(pool);
@@ -221,11 +213,11 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
             budget = headroom > 0 ? (unsigned)((double)capacity * headroom) : 0;
             if (headroom > 0 && !budget)
                 budget = 1;
-            if (pool->catchingUp)
-                budget = 0;
             if (totalLimit > budget)
                 totalLimit = budget;
         }
+        if (pool->catchingUp)
+            budget = totalLimit = 0;
         NgAcquisitionSetParallelism(pool->acquisition[system], totalLimit, quota, budget);
         unsigned delay = !active                     ? 0u
                          : pool->trackingLoad > 0.95 ? 20u
@@ -249,17 +241,75 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
     return NG_OK;
 }
 
+/** Amortize worker barriers for small source windows without changing a single sample. */
+static int Accumulate(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
+{
+    size_t offset = 0, stride = NgSampleBytes(window->format);
+    if (pool->haveInput && pool->lastInput.epoch == window->meta.epoch &&
+        pool->lastInput.firstSample == window->meta.firstSample &&
+        pool->lastInput.count == window->meta.count)
+        return NG_OK;
+    if (pool->haveInput &&
+        (pool->lastInput.epoch != window->meta.epoch ||
+         pool->lastInput.firstSample + pool->lastInput.count != window->meta.firstSample ||
+         (window->meta.flags & NG_BLOCK_GAP)))
+        pool->pending.meta.count = 0;
+    pool->lastInput = window->meta;
+    pool->haveInput = 1;
+    while (offset < window->meta.count) {
+        if (!pool->pending.meta.count && window->meta.count - offset >= pool->batchLimit) {
+            TNgIqView direct = *window;
+            direct.samples = (const TNgIq8 *)(const void *)((const unsigned char *)(const void *)
+                                                                window->samples +
+                                                            offset * stride);
+            direct.meta.firstSample += offset;
+            direct.meta.count -= offset;
+            if (offset)
+                direct.meta.flags &= ~(unsigned)NG_BLOCK_GAP;
+            if (direct.meta.flags & NG_BLOCK_HARDWARE_TIME)
+                direct.meta.hardwareTimestamp += offset;
+            return Frame(pool, &direct, error);
+        }
+        if (!pool->pending.meta.count) {
+            pool->pending = *window;
+            pool->pending.samples = (const TNgIq8 *)(const void *)pool->batch;
+            pool->pending.meta.firstSample += offset;
+            pool->pending.meta.count = 0;
+            if (offset)
+                pool->pending.meta.flags &= ~(unsigned)NG_BLOCK_GAP;
+            if (pool->pending.meta.flags & NG_BLOCK_HARDWARE_TIME)
+                pool->pending.meta.hardwareTimestamp += offset;
+        }
+        size_t take = pool->batchLimit - pool->pending.meta.count;
+        if (take > window->meta.count - offset)
+            take = window->meta.count - offset;
+        memcpy(pool->batch + pool->pending.meta.count * stride,
+               (const unsigned char *)(const void *)window->samples + offset * stride,
+               take * stride);
+        pool->pending.meta.count += take;
+        offset += take;
+        if (pool->pending.meta.count == pool->batchLimit ||
+            (window->meta.flags & NG_BLOCK_PARTIAL)) {
+            if (Frame(pool, &pool->pending, error) != NG_OK)
+                return NG_ERROR;
+            pool->pending.meta.count = 0;
+        }
+    }
+    return NG_OK;
+}
+
 /** Every signal observes one common frame, followed by its own bounded capture copy. */
 static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
                    const TNgIqView *window, TNgChannelState *next, TNgError *error)
 {
     TNgTrackingBank *bank = context;
     TNgChannel *capture = &bank->pool->captures[bank->system];
-    if (Frame(bank->pool, window, error) != NG_OK)
+    if (Accumulate(bank->pool, window, error) != NG_OK)
         return NG_ERROR;
-    if (bank->pool->pvt.epoch != bank->pool->epoch || !bank->pool->lastPvtSample ||
-        bank->pool->expected < bank->pool->lastPvtSample ||
-        (double)(bank->pool->expected - bank->pool->lastPvtSample) >= bank->pool->sampleRate) {
+    if (bank->pool->haveWindow &&
+        (bank->pool->pvt.epoch != bank->pool->epoch || !bank->pool->lastPvtSample ||
+         bank->pool->expected < bank->pool->lastPvtSample ||
+         (double)(bank->pool->expected - bank->pool->lastPvtSample) >= bank->pool->sampleRate)) {
         NgPvtCompute(bank->pool->slots, bank->pool->epoch, bank->pool->expected,
                      bank->pool->sampleRate, &bank->pool->pvt);
         bank->pool->lastPvtSample = bank->pool->expected;
@@ -308,6 +358,7 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
     bank->system = channel->id.constellation - 1;
     pool->config = *config;
     pool->sampleRate = stream->sampleRateHz;
+    pool->batchLimit = (stream->sampleRateHz + 999u) / 1000u;
     pool->captures[bank->system] = *channel;
     pool->acquisition[bank->system] = acquisition;
     for (k = 0; k < config->channelCount; ++k) {
@@ -356,6 +407,23 @@ void NgTrackingBankObserve(TNgTrackingBank *bank, unsigned channelId)
 {
     if (bank)
         bank->pool->observedChannel = channelId;
+}
+
+int NgTrackingBankBackgroundAllowed(TNgTrackingBank *bank)
+{
+    return !bank || (!bank->pool->catchingUp && bank->pool->trackingLoad < 0.85);
+}
+
+void NgTrackingBankBackpressure(TNgTrackingBank *bank, int available, double occupancyPercent)
+{
+    if (!bank)
+        return;
+    if (!available)
+        bank->pool->catchingUp = 0;
+    else if (occupancyPercent >= 75)
+        bank->pool->catchingUp = 1;
+    else if (occupancyPercent <= 50)
+        bank->pool->catchingUp = 0;
 }
 
 /** PVT snapshots contain values only and share the receiver-thread publication barrier. */

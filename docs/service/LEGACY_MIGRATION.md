@@ -64,3 +64,21 @@ NGene::Tracking library. Ring/controller composition, native I/Q arithmetic, cod
 epochs, sign conventions, extra taps and remaining supervisor migration are
 documented in [TRACKING.md](TRACKING.md). This is not a complete Classic tracking
 supervisor or RF-qualified receiver.
+
+## GPS/Galileo navigation and broadcast PVT, 16 November 2026
+
+Classic gpsTracking.c supplies transition synchronization and PLL power means;
+gpsMessageParser.c and galileoMessageParser.c supply parity, field maps and scales.
+The Galileo decoder retains deinterleaving, terminated Viterbi and CRC24Q. New
+src/navigation modules own bounded per-channel decoding and per-satellite broadcast
+values without Classic file/global side effects. Timing is sample-index based.
+
+Classic pvt orbit/clock, Earth rotation, transmit-time alignment and Hopfield
+models feed a small double C pivoted-QR solve, replacing the Eigen engine boundary.
+This is unweighted broadcast LS plus Doppler velocity; it is not the full Classic
+weighted/adaptive Kalman, smoothing, ionosphere or integrity pipeline. DOP derives
+from the same QR geometry and actual lines of sight produce the skyplot.
+
+Scheduling, optional display leases and native-millisecond batching are EVO
+resource adaptations; the single-satellite acquisition decisions are retained.
+Full false-lock/NCO holdover remains a separate incomplete migration.

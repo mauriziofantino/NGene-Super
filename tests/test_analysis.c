@@ -396,6 +396,26 @@ int main(void)
             }
         }
     }
+    /* Foreground overload pauses optional work without withdrawing its consumer lease. */
+    NgAnalysisPause(a, 1);
+    NgSleepMs(10);
+    NgAnalysisRead(a, &snapshot);
+    {
+        uint64_t previous = snapshot.sequence;
+        Submit(a, &v, 0);
+        NgSleepMs(20);
+        NgAnalysisRead(a, &snapshot);
+        CHECK(snapshot.sequence == previous);
+        NgAnalysisPause(a, 0);
+        Submit(a, &v, 0);
+        for (i = 0; i < 1000; i++) {
+            NgAnalysisRead(a, &snapshot);
+            if (snapshot.sequence > previous)
+                break;
+            NgSleepMs(1);
+        }
+        CHECK(snapshot.sequence > previous);
+    }
     /* No consumer interest: production stops, while submissions remain nonblocking. */
     NgAnalysisInterest(a, 3, 0);
     {

@@ -73,6 +73,8 @@ typedef struct {
      * @return NG_OK on success; NG_ERROR to stop on tap/recording failure.
      */
     int (*rawBlock)(void *context, const TNgIqView *view, TNgError *error);
+    /** Receiver-owner backpressure sample, at most200Hz; no GUI, DSP, I/O or allocation. */
+    void (*backpressure)(void *context, const TNgFrontendStats *stats);
 } TNgReceiverHooks;
 
 /** @brief Run the shared-stream engine with optional bounded parallel channel dispatch.

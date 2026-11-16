@@ -7,8 +7,7 @@ L1 C/A and Galileo E1-B PRNs 1..32 have independent coherent accumulators, carri
 and code NCOs, FLL/Costas PLL and power DLL. GPS integrates one primary-code period,
 Galileo four milliseconds with the same BOC(1,1) replica used by EVO acquisition.
 This is a tracking loop integration, not the complete Classic tracking supervisor:
-C/N0 qualification, bit synchronization, false-lock/BOC side-peak checks, HOLDOVER
-and verified fast reacquisition are not ported. A running PLL is not a qualified
+GPS bit synchronization, Galileo I/NAV, PLL power qualification and bounded loss/reacquisition are integrated. Complete C/N0 supervision, false-lock/BOC side-peak correction, NCO HOLDOVER and verified fast reacquisition remain pending. A running PLL is not a qualified
 lock, decoded navigation message or usable observable.
 
 ## Classic provenance and adaptations
@@ -234,3 +233,22 @@ The standalone search diagnostics workspace has been removed. Channel detail ret
 GPS coherent epochs now feed a private navigation module directly within the tracking job. Five verified sign-transition intervals at multiples of 20 ms establish bit timing, retaining Classic sample configuration and the low PLL quality criterion. Twenty native double prompt sums yield each data bit; loop integration remains 1 ms. Classic parity masks, D30 polarity correction and ten-word subframe validation yield HOW TOW telemetry. This is a partial navigation port: ephemeris decoding, Galileo I/NAV, observables and PVT are not yet integrated. Channel Navigation (TOW) text denotes message validation, not navigation eligibility for a position solution. TOW expires after a missing subframe; gaps/reassignment clear all fragments. SIMD tracking kernels remain unchanged.
 
 Deterministic tests exercise prompt-to-bit timing, both polarities, parity corruption, loss of PLL qualification and stale TOW. HackRF live: GPS12 yielded four valid subframes in 30 seconds, last ID4, HOW578544 s. No position or accuracy validation follows from these counts.
+
+## Current increment, 16 November 2026
+
+GPS uses Classic exponential PLL powers (length100), five transition intervals,
+word parity and full-subframe TOW. Galileo uses terminated K7 Viterbi, CRC24Q and
+adjacent even/odd pages. The per-satellite broadcast cache survives cold slot
+reacquisition; FLL or timing loss clears framing/TOW without erasing ephemerides.
+PLL entry/retain metrics0.8/0.4, checks100ms, FLL4s/PLL8s deadlines and a1s
+relock timeout prevent an invalid PLL flag occupying a slot forever. The complete
+Classic correction/holdover supervisor remains work; these gates are not that port.
+
+The receiver batches source fragments smaller than a native millisecond before
+the tracking worker barrier. It copies exact native bytes into bounded preallocated
+storage; larger windows remain borrowed directly. Both subscriptions deduplicate
+the same input. Epoch/gap metadata invalidates pending history, and final partial
+windows flush. Tests compare37-pair fragments with2048-pair windows bit for bit.
+
+See PERFORMANCE_NAVIGATION_2026-11-15.md for the observed RTL recovery/PVT and
+remaining stream-continuity limits. Historical sections above retain their dates.

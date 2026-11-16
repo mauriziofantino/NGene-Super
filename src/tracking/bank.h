@@ -17,6 +17,10 @@ void NgTrackingBankReadAll(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[
 void NgTrackingBankReadPvt(TNgTrackingBank *bank, TNgPvtSnapshot *snapshot);
 /** Receiver owner publishes optional correlator interest between window dispatches. */
 void NgTrackingBankObserve(TNgTrackingBank *bank, unsigned channelId);
+/** Receiver-thread headroom for optional diagnostics; no extra clock reads or DSP. */
+int NgTrackingBankBackgroundAllowed(TNgTrackingBank *bank);
+/** Receiver owner publishes measured ingress pressure; unavailable/file sources never throttle. */
+void NgTrackingBankBackpressure(TNgTrackingBank *bank, int available, double occupancyPercent);
 /** Release tracking before destroying acquisition; accepts NULL. */
 void NgTrackingBankDestroy(TNgTrackingBank *bank);
 /** Link constellation admission counters on the receiver thread before starting RX. */

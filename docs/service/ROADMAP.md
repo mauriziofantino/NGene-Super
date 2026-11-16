@@ -16,9 +16,9 @@ The engine is the sole logical consumer of the GNSS ring: all channels receive t
   and replay use separate processes. Deterministic input generation is confined to tests
   and optional documentation capture tooling.
 - Dedicated common-source worker, exact SIMD conversion to signed CI8/CI16, aligned SPSC rings, window assembly and common dispatch.
-- Channel state contract and validation; optional dispatcher with a fixed pool and dynamic jobs per window. GNSS processing beyond acquisition still needs integration.
+- Channel state contract and validation; optional dispatcher with a fixed pool and dynamic jobs per window. GPS/Galileo tracking, navigation and a first broadcast PVT are integrated with the current status limits.
 - Optional GPS L1 C/A acquisition for PRNs 1..32, retaining coarse search, Doppler/code refinement, and independent 3-of-4 confirmation; numerical adaptations and validation limits are recorded in [GPS acquisition](GPS_ACQUISITION.md). This is not tracking or a navigation fix.
-- Galileo E1-B acquisition for PRNs 1..32 with 4-ms coherent periods, eight sums and 3-of-4 confirmation; common wrong-Doppler noise policy with GPS. See [scope/limits](GALILEO_ACQUISITION.md). Independent controller/CLI/INI/GUI configuration and GPS/Galileo result/map selection are integrated; RF validation remains pending.
+- Galileo E1-B acquisition for PRNs 1..32 with 4-ms coherent periods, eight sums and 3-of-4 confirmation; common wrong-Doppler noise policy with GPS. See [scope/limits](GALILEO_ACQUISITION.md). Independent controller/CLI/INI configuration and selected-channel maps are integrated; RTL recording/recovery evidence is documented in the current performance report.
 - Recorder, segments, metadata, and overflow/EOF/stop handling.
 - Controller, dark GUI with separate configuration/observation, common-stream recording with ADC/transport provenance, and file transfers.
 - Separate DSP library for FFT, statistics, and power; common APIs with SSE2/NEON backends selected for the target. Spectrum/waterfall, histograms, and runtime configuration.
@@ -32,7 +32,7 @@ The engine is the sole logical consumer of the GNSS ring: all channels receive t
 The [frontend stream decision record](FRONTEND_STREAM_DECISIONS.md) records completed
 Windows SiGe USB checks and current stream/display contracts. The [DSP options study](DSP_OPTIONS_PLAN.md)
 defines the next kernel work; its approximate arithmetic candidates remain experiments.
-GPS/Galileo DLL/FLL/PLL, multi-correlator tracking, bounded slot allocation and a shared tracking pool are integrated with the limits in [TRACKING.md](TRACKING.md). Complete tracking supervision, navigation decoding, observables and PVT/PNT remain pending. The increments
+GPS/Galileo DLL/FLL/PLL, multi-correlator tracking, bounded slot allocation and a shared tracking pool are integrated with the limits in [TRACKING.md](TRACKING.md). GPS LNAV, Galileo I/NAV, consistent ephemeris caches, common-epoch code/Doppler and unweighted broadcast PVT are integrated. Full Classic supervision, weighted/adaptive PNT, ionosphere/smoothing and integrity qualification remain pending. The increments
 below retain their platform and RF validation requirements even where adapter or replay
 support exists.
 

@@ -1,6 +1,7 @@
 /** @file test_channel_slots.c @brief Bounded allocation and per-slot lifecycle on the common stream. */
 #include "tracking/bank.h"
 #include "platform/platform.h"
+#include "ngene/dsp/gps_ca.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +47,70 @@ static void Window(TNgChannel *channel, TNgChannel *galileo, TNgIqView *view)
     view->meta.firstSample += view->meta.count;
     view->meta.flags = 0;
     NgSleepMs(1);
+}
+
+/** Identical common samples must produce identical tracking under tiny source fragments. */
+static TNgTrackingSnapshot Batched(size_t split)
+{
+    TNgTrackingConfig config;
+    TNgAcquisitionConfig ac;
+    TNgStreamInfo stream = {0};
+    TNgAcquisition *search = NULL;
+    TNgTrackingBank *bank = NULL;
+    TNgChannel channel;
+    TNgChannelState next;
+    TNgAcquisitionSnapshot outcome;
+    TNgTrackingSnapshot slots[64];
+    TNgError error = {{0}};
+    TNgIqView view = {0};
+    const TNgAcquisitionStrategy strategy = {Search};
+    TNgIq8 *samples = calloc(56u * 2048u, sizeof(*samples));
+    int8_t chips[1023];
+    size_t n, first = 56u * 2048u;
+    CHECK(samples);
+    stream.sampleRateHz = 2048000;
+    NgAcquisitionDefaults(&ac);
+    ac.lastPrn = 1;
+    NgTrackingDefaults(&config);
+    config.channelCount = config.gpsChannels = config.workers = 1;
+    CHECK(NgAcquisitionCreateWithStrategy(&ac, &stream, &strategy, NULL, &search, &channel,
+                                          &error) == NG_OK);
+    CHECK(NgTrackingBankCreate(&config, &stream, search, &channel, &bank, &error) == NG_OK);
+    view.samples = samples;
+    view.meta.count = first;
+    CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &view, &next, &error) ==
+          NG_OK);
+    for (n = 0; n < 1000; n++) {
+        NgAcquisitionRead(search, &outcome);
+        if (outcome.searches)
+            break;
+        NgSleepMs(1);
+    }
+    CHECK(outcome.searches);
+    free(samples);
+    samples = calloc(100u * 2048u, sizeof(*samples));
+    CHECK(samples);
+    CHECK(NgGpsCaGenerate(1, chips, &error) == NG_OK);
+    for (n = 0; n < 100u * 2048u; n++)
+        samples[n].i = (int8_t)(40 * chips[(n * 1023u / 2048u) % 1023u]);
+    for (n = 0; n < 100u * 2048u;) {
+        size_t count = 100u * 2048u - n;
+        if (count > split)
+            count = split;
+        view.samples = samples + n;
+        view.meta.firstSample = first + n;
+        view.meta.count = count;
+        CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &view, &next,
+                                   &error) == NG_OK);
+        channel.state = next;
+        n += count;
+    }
+    NgTrackingBankReadAll(bank, slots);
+    CHECK(slots[0].active && slots[0].integrations > 90);
+    NgTrackingBankDestroy(bank);
+    NgAcquisitionDestroy(search);
+    free(samples);
+    return slots[0];
 }
 
 /** Faster confirmed results claim shared slots, independent of constellation order. */
@@ -173,6 +238,13 @@ int main(void)
     AutomaticPool(2, 0);
     AutomaticPool(1, 2);
     AutomaticPool(2, 1);
+    {
+        TNgTrackingSnapshot a = Batched(2048), b = Batched(37);
+        CHECK(a.endSample == b.endSample && a.integrations == b.integrations);
+        CHECK(a.codeRateHz == b.codeRateHz && a.dopplerHz == b.dopplerHz);
+        for (n = 0; n < 3; n++)
+            CHECK(a.i[n] == b.i[n] && a.q[n] == b.q[n]);
+    }
     puts("shared channel allocation, reservations and gap reuse passed");
     return 0;
 }
