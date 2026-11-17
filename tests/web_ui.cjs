@@ -368,9 +368,21 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(bootstrapAttempts,1,'An unavailable service must not cause repeated startup retries');
     assert.equal(await offlinePage.locator('#connection').textContent(),'Disconnected');
     await offlinePage.close();
+    const shutdownPage = await browser.newPage();
+    let shutdownBootstrapAttempts = 0;
+    shutdownPage.on('request', request => {
+      if (new URL(request.url()).pathname === '/api/v1/bootstrap') shutdownBootstrapAttempts++;
+    });
+    await shutdownPage.goto(base);
+    for (let i = 0; i < 100 && await shutdownPage.locator('#connection').textContent() !== 'Connected'; i++) await delay(50);
+    assert.equal(await shutdownPage.locator('#connection').textContent(),'Connected');
     await post('shutdown',{});
+    await delay(4000);
+    assert.equal(shutdownBootstrapAttempts,2,'A stopped service must not cause repeated reconnect attempts');
+    assert.equal(await shutdownPage.locator('#connection').textContent(),'Disconnected');
+    await shutdownPage.close();
     assert.equal(await exit,0);
-    console.log('PASS: receiver-side file picker (paths with spaces), per-file metadata import, single active source/no independent replay, recording deletion/active protection/token/revision/path/symlink checks, topic settings and mobile; rectangular 2D/relief waterfalls and shared history; PSD integrity/corruption, sequence skips without separator rows, slow/latest-frame GUI, 30 Hz polling, dormant producers, independent histogram, tuning axes, gain steps, bladeRF precision, no retry loop when the initial service connection fails; recording, transfer, persistence, mobile and shutdown.');
+    console.log('PASS: receiver-side file picker (paths with spaces), per-file metadata import, single active source/no independent replay, recording deletion/active protection/token/revision/path/symlink checks, topic settings and mobile; rectangular 2D/relief waterfalls and shared history; PSD integrity/corruption, sequence skips without separator rows, slow/latest-frame GUI, 30 Hz polling, dormant producers, independent histogram, tuning axes, gain steps, bladeRF precision, no repeated retries when the service is unreachable at startup or shuts down; recording, transfer, persistence, mobile and shutdown.');
   } finally {
     if (browser) await browser.close();
     if (child.exitCode === null) { child.kill('SIGTERM'); await exit; }

@@ -52,7 +52,7 @@ const fields = [
 ];
 let values = {}, savedValues = {}, revision = '1', token = '', status = null, capabilities = null;
 let dirty = false, httpBusy = false, pendingCommand = null, socket = null, reconnectTimer = null;
-let serviceWasReachable = false;
+let serviceWasReachable = false, reconnectAttempted = false;
 let calibrationBusy = false, calibrationJobId = null, calibrationRequest = null;
 let calibrationStopRequested = false;
 let calibrationPolling = false, calibrationTerminal = '';
@@ -494,11 +494,11 @@ async function connect() {
     }
     await loadConfig();
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/v1/events?token=${encodeURIComponent(token)}`);
-    socket.onopen = () => { lastResponse=-Infinity; $('connection').textContent = 'Connected'; $('connection').classList.add('online'); waiting = false; log('Connected to NGene.'); requestStatus(); refreshFiles(); };
+    socket.onopen = () => { reconnectAttempted = false; lastResponse=-Infinity; $('connection').textContent = 'Connected'; $('connection').classList.add('online'); waiting = false; log('Connected to NGene.'); requestStatus(); refreshFiles(); };
     socket.onmessage = event => { waiting=false; lastResponse=performance.now(); try { pendingTelemetry=JSON.parse(event.data); if(!renderPending){renderPending=true;requestAnimationFrame(()=>{renderPending=false;const latest=pendingTelemetry;pendingTelemetry=null;if(latest)renderStatus(latest);});} } catch(error){log(`Invalid telemetry: ${error.message}`,true);} };
-    socket.onclose = () => { waiting = false; pendingCommand = null; $('connection').textContent = quitting ? 'Service closed' : 'Disconnected'; $('connection').classList.remove('online'); controls(); if (!quitting && serviceWasReachable) { notice('Connection lost. Receiver state is unknown; reconnecting…', true); reconnectTimer = setTimeout(connect, 1500); } };
+    socket.onclose = () => { waiting = false; pendingCommand = null; $('connection').textContent = quitting ? 'Service closed' : 'Disconnected'; $('connection').classList.remove('online'); controls(); if (!quitting && serviceWasReachable && !reconnectAttempted) { reconnectAttempted = true; notice('Connection lost. Trying once to reconnect…', true); reconnectTimer = setTimeout(connect, 1500); } };
     socket.onerror = () => socket.close();
-  } catch (error) { $('connection').textContent = 'Disconnected'; notice(error.message, true); controls(); if (serviceWasReachable) reconnectTimer = setTimeout(connect, 2000); }
+  } catch (error) { $('connection').textContent = 'Disconnected'; notice(error.message, true); controls(); }
 }
 const analysisFields = [
   ['spectrum_enabled','Spectrum enabled',['true','false']],
