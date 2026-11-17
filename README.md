@@ -42,7 +42,7 @@ directory. The [operator manual](https://github.com/mauriziofantino/nav-ngene-ev
 | HackRF | CI8: signed 8-bit I and Q | Native libhackrf and a working USB driver |
 | RTL-SDR | CU8: unsigned 8-bit I and Q | Native librtlsdr and a compatible tuner/USB driver |
 | bladeRF RX0 | SC16 Q11, or CI8 when supported | Native libbladeRF and compatible device/FPGA configuration |
-| SiGe native I/Q | Marker-tagged one-bit I/Q, decoded to signed CI8 | Loaded native-I/Q firmware, VID/PID 16c0:072f and libusb; fixed Fs 8.1838 Msps and IF +38.4 kHz |
+| SiGe native I/Q | Marker-tagged one-bit I/Q, decoded to signed CI8 | Embedded FX2 firmware loads from 1781:0b39 to 16c0:072f over libusb; fixed Fs 8.1838 Msps and IF +38.4 kHz |
 | Recorded I/Q | CI8, CU8, SC16 Q11 or CI16 Q15 | Closed raw file and its stream parameters, preferably a metadata sidecar |
 
 Windows, Linux and macOS build paths are provided. Optimized FFT targets include x86-64,
@@ -62,8 +62,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -M
 ```
 
 The script configures and builds all four native input adapters and stages their DLLs.
-The first build may download pinned dependencies. USB drivers and device firmware remain
-separate setup steps. See [Getting started](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Getting-Started) for replay-only
+The first build may download pinned dependencies. USB drivers remain a separate setup
+step; the SiGe FX2 firmware is embedded and loaded into RAM when Evo opens the receiver.
+See [Getting started](https://github.com/mauriziofantino/nav-ngene-evo/wiki/Getting-Started) for replay-only
 setup and the first operating session. Additional platform build details are in the
 [Windows engineering guide](docs/service/WINDOWS.md).
 

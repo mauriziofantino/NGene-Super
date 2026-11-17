@@ -6,11 +6,31 @@
 #include <winsock2.h>
 #endif
 #include "platform/platform.h"
+#include "sige_firmware.h"
 #include <libusb.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum { TRANSFERS = 128, BYTES = 8192, VID = 0x16c0, PID = 0x072f };
+enum {
+    TRANSFERS = 128,
+    BYTES = 8192,
+    VID = 0x16c0,
+    PID = 0x072f,
+    BOOT_VID = 0x1781,
+    BOOT_PID = 0x0b39,
+    FX2_CPUCS = 0xe600,
+    FX2_RAM_REQUEST = 0xa0,
+    FX2_MAX_WRITE = 64,
+    FIRMWARE_TIMEOUT_MS = 1000,
+    REENUMERATION_TIMEOUT_MS = 5000,
+    REENUMERATION_POLL_MS = 50
+};
+
+typedef struct {
+    uint16_t address;
+    unsigned char data[255];
+    unsigned char length, type;
+} FirmwareRecord;
 
 typedef struct {
     struct libusb_transfer *transfer;
@@ -213,6 +233,243 @@ static void Destroy(void *context)
 
 static const TNgFrontendOps ops = {Start, Acquire, Release, Stop, Stats, Destroy};
 
+static int HexDigit(unsigned char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    return -1;
+}
+
+static int ReadHexByte(const unsigned char *text, unsigned char *value)
+{
+    int high = HexDigit(text[0]);
+    int low = HexDigit(text[1]);
+    if (high < 0 || low < 0) {
+        return 0;
+    }
+    *value = (unsigned char)((high << 4) | low);
+    return 1;
+}
+
+static int ReadFirmwareRecord(size_t *position, FirmwareRecord *record)
+{
+    unsigned char bytes[260];
+    size_t start, end, count, k;
+    unsigned sum = 0;
+    while (*position < ngSigeFirmwareHexLength &&
+           (ngSigeFirmwareHex[*position] == '\r' || ngSigeFirmwareHex[*position] == '\n')) {
+        (*position)++;
+    }
+    if (*position == ngSigeFirmwareHexLength) {
+        return 0;
+    }
+    start = *position;
+    if (ngSigeFirmwareHex[start++] != ':') {
+        return -1;
+    }
+    end = start;
+    while (end < ngSigeFirmwareHexLength && ngSigeFirmwareHex[end] != '\r' &&
+           ngSigeFirmwareHex[end] != '\n') {
+        end++;
+    }
+    if ((end - start) < 10 || ((end - start) & 1u) != 0) {
+        return -1;
+    }
+    count = (end - start) / 2;
+    if (count > sizeof(bytes)) {
+        return -1;
+    }
+    for (k = 0; k < count; k++) {
+        if (!ReadHexByte(&ngSigeFirmwareHex[start + 2 * k], &bytes[k])) {
+            return -1;
+        }
+        sum += bytes[k];
+    }
+    if (count != (size_t)bytes[0] + 5u || (sum & 0xffu) != 0) {
+        return -1;
+    }
+    record->length = bytes[0];
+    record->address = (uint16_t)(((uint16_t)bytes[1] << 8) | bytes[2]);
+    record->type = bytes[3];
+    if (record->length) {
+        memcpy(record->data, &bytes[4], record->length);
+    }
+    *position = end;
+    return 1;
+}
+
+static int ValidateFirmware(TNgError *error)
+{
+    size_t position = 0;
+    unsigned records = 0;
+    int ended = 0, rc;
+    FirmwareRecord record;
+    while ((rc = ReadFirmwareRecord(&position, &record)) > 0) {
+        uint32_t limit;
+        if (ended) {
+            return NgFail(error, "SiGe firmware contains records after EOF");
+        }
+        if (record.type == 0) {
+            limit = (uint32_t)record.address + record.length;
+            if (limit > 0x10000u ||
+                ((uint32_t)record.address <= FX2_CPUCS && limit > FX2_CPUCS)) {
+                return NgFail(error, "SiGe firmware contains an invalid FX2 address");
+            }
+            records++;
+        } else if (record.type == 1 && record.length == 0 && record.address == 0) {
+            ended = 1;
+        } else {
+            return NgFail(error, "SiGe firmware contains an unsupported Intel HEX record");
+        }
+    }
+    if (rc < 0) {
+        return NgFail(error, "SiGe firmware Intel HEX record is invalid");
+    }
+    if (!ended || records == 0) {
+        return NgFail(error, "SiGe firmware Intel HEX is incomplete");
+    }
+    return NG_OK;
+}
+
+static int WriteFx2(libusb_device_handle *device, uint16_t address, unsigned char *data,
+                    uint16_t length, TNgError *error)
+{
+    int rc = libusb_control_transfer(device, 0x40, FX2_RAM_REQUEST, address, 0, data, length,
+                                     FIRMWARE_TIMEOUT_MS);
+    if (rc < 0) {
+        return NgFail(error, "SiGe FX2 firmware transfer at 0x%04x: %s", address,
+                      libusb_error_name(rc));
+    }
+    if (rc != length) {
+        return NgFail(error, "SiGe FX2 firmware transfer at 0x%04x was incomplete", address);
+    }
+    return NG_OK;
+}
+
+static int UploadFirmware(libusb_device_handle *device, TNgError *error)
+{
+    size_t position = 0;
+    unsigned char reset = 1;
+    int rc;
+    FirmwareRecord record;
+    if (ValidateFirmware(error) != NG_OK) {
+        return NG_ERROR;
+    }
+    if (WriteFx2(device, FX2_CPUCS, &reset, 1, error) != NG_OK) {
+        return NG_ERROR;
+    }
+    while ((rc = ReadFirmwareRecord(&position, &record)) > 0) {
+        unsigned offset;
+        if (record.type != 0) {
+            continue;
+        }
+        for (offset = 0; offset < record.length; offset += FX2_MAX_WRITE) {
+            unsigned remaining = record.length - offset;
+            uint16_t chunk = (uint16_t)(remaining > FX2_MAX_WRITE ? FX2_MAX_WRITE : remaining);
+            uint16_t address = (uint16_t)(record.address + offset);
+            if (WriteFx2(device, address, &record.data[offset], chunk, error) != NG_OK) {
+                return NG_ERROR;
+            }
+        }
+    }
+    if (rc < 0) {
+        return NgFail(error, "SiGe firmware Intel HEX could not be read");
+    }
+    reset = 0;
+    return WriteFx2(device, FX2_CPUCS, &reset, 1, error);
+}
+
+static int HasUsbDevice(libusb_context *usb, uint16_t vendor, uint16_t product, int *present,
+                        TNgError *error)
+{
+    libusb_device **list = NULL;
+    ssize_t count, k;
+    *present = 0;
+    count = libusb_get_device_list(usb, &list);
+    if (count < 0) {
+        return NgFail(error, "Cannot enumerate SiGe USB: %s", libusb_error_name((int)count));
+    }
+    for (k = 0; k < count; k++) {
+        struct libusb_device_descriptor descriptor;
+        if (libusb_get_device_descriptor(list[k], &descriptor) == 0 &&
+            descriptor.idVendor == vendor && descriptor.idProduct == product) {
+            *present = 1;
+            break;
+        }
+    }
+    libusb_free_device_list(list, 1);
+    return NG_OK;
+}
+
+static int LoadBootFirmware(libusb_context *usb, TNgError *error)
+{
+    libusb_device **list = NULL;
+    libusb_device_handle *device = NULL;
+    ssize_t count, k;
+    int rc, present;
+    count = libusb_get_device_list(usb, &list);
+    if (count < 0) {
+        return NgFail(error, "Cannot enumerate SiGe FX2 USB: %s", libusb_error_name((int)count));
+    }
+    for (k = 0; k < count; k++) {
+        struct libusb_device_descriptor descriptor;
+        if (libusb_get_device_descriptor(list[k], &descriptor) != 0 ||
+            descriptor.idVendor != BOOT_VID || descriptor.idProduct != BOOT_PID) {
+            continue;
+        }
+        if (device) {
+            libusb_close(device);
+            device = NULL;
+            libusb_free_device_list(list, 1);
+            return NgFail(error, "Multiple SiGe FX2 boot devices are connected");
+        }
+        rc = libusb_open(list[k], &device);
+        if (rc != 0) {
+            libusb_free_device_list(list, 1);
+            return NgFail(error, "Cannot access SiGe FX2 boot device 1781:0b39: %s",
+                          libusb_error_name(rc));
+        }
+    }
+    libusb_free_device_list(list, 1);
+    if (!device) {
+        return NgFail(error,
+                      "SiGe USB device not found; expected FX2 boot device 1781:0b39 or native-IQ "
+                      "device 16c0:072f");
+    }
+    rc = UploadFirmware(device, error);
+    libusb_close(device);
+    if (rc != NG_OK) {
+        return rc;
+    }
+    for (k = 0; k < REENUMERATION_TIMEOUT_MS / REENUMERATION_POLL_MS; k++) {
+        NgSleepMs(REENUMERATION_POLL_MS);
+        if (HasUsbDevice(usb, VID, PID, &present, error) != NG_OK) {
+            return NG_ERROR;
+        }
+        if (present) {
+            return NG_OK;
+        }
+    }
+    return NgFail(error, "SiGe FX2 firmware uploaded, but native-IQ device 16c0:072f did not "
+                         "re-enumerate");
+}
+
+static int EnsureRuntimeDevice(libusb_context *usb, TNgError *error)
+{
+    int present;
+    if (HasUsbDevice(usb, VID, PID, &present, error) != NG_OK) {
+        return NG_ERROR;
+    }
+    return present ? NG_OK : LoadBootFirmware(usb, error);
+}
+
 int NgSigeList(FILE *output, TNgError *error)
 {
     libusb_context *usb = NULL;
@@ -228,10 +485,14 @@ int NgSigeList(FILE *output, TNgError *error)
     }
     for (k = 0; k < n; k++) {
         struct libusb_device_descriptor d;
-        if (libusb_get_device_descriptor(list[k], &d) == 0 && d.idVendor == VID &&
-            d.idProduct == PID) {
-            fprintf(output, "SiGe native IQ USB %u:%u (16c0:072f)\n",
-                    libusb_get_bus_number(list[k]), libusb_get_device_address(list[k]));
+        if (libusb_get_device_descriptor(list[k], &d) == 0) {
+            if (d.idVendor == VID && d.idProduct == PID) {
+                fprintf(output, "SiGe native IQ USB %u:%u (16c0:072f)\n",
+                        libusb_get_bus_number(list[k]), libusb_get_device_address(list[k]));
+            } else if (d.idVendor == BOOT_VID && d.idProduct == BOOT_PID) {
+                fprintf(output, "SiGe FX2 boot USB %u:%u (1781:0b39; firmware loads on open)\n",
+                        libusb_get_bus_number(list[k]), libusb_get_device_address(list[k]));
+            }
         }
     }
     libusb_free_device_list(list, 1);
@@ -250,6 +511,9 @@ int NgSigeOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
         return NgFail(error, "Cannot allocate SiGe source");
     }
     if (libusb_init(&s->usb) != 0) {
+        goto failed;
+    }
+    if (EnsureRuntimeDevice(s->usb, error) != NG_OK) {
         goto failed;
     }
     n = libusb_get_device_list(s->usb, &list);
@@ -287,8 +551,8 @@ int NgSigeOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
     libusb_free_device_list(list, 1);
     list = NULL;
     if (!s->device) {
-        NgFail(error,
-               "SiGe 16c0:072f not accessible; native-IQ firmware and USB driver are required");
+        NgFail(error, "SiGe runtime device 16c0:072f is not accessible; check the USB driver "
+                      "and permissions");
         goto failed;
     }
     if (libusb_get_configuration(s->device, &configuration) != 0) {

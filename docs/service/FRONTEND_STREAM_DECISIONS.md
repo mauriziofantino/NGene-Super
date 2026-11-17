@@ -137,9 +137,15 @@ counts are labelled as such, not asserted to be physical ADC clipping counts.
 
 ## Native SiGe profile and Windows USB findings
 
-This adapter supports Classic ID 1's already-loaded marker-tagged native I/Q
-firmware at VID/PID `16c0:072f`. It does not flash firmware, use legacy real-IF
-reconstruction or infer a format from the board name. I bytes have marker bit 1
+This adapter embeds the SiGe FX2 Intel HEX image and, when needed, loads it into
+volatile FX2 RAM through libusb from boot VID/PID `1781:0b39`. Evo then waits for
+the native-I/Q runtime device at VID/PID `16c0:072f` and uses the existing stream
+adapter. No EEPROM or other nonvolatile memory is written. An already-running
+native-I/Q device skips the upload. The image is validated before the FX2 is held
+in reset and uploaded; unsupported or corrupt Intel HEX records fail explicitly.
+USB driver installation and OS permissions remain host setup requirements. The
+adapter does not use legacy real-IF reconstruction or infer a format from the
+board name. I bytes have marker bit 1
 set, Q bytes do not; bit 0 selects +1/-1. An initial unmatched Q can be skipped,
 and a pending I crosses USB transfer boundaries. An invalid marker sequence after
 synchronization stops reception instead of fabricating a counterpart or silently

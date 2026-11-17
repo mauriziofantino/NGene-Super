@@ -134,7 +134,7 @@ Actual Linux 0.6.3 builds/tests are available in all four combinations, along wi
 
 The user's 0.6.2 log covers ON Release. An accessible Windows host/runner is missing for 0.6.3: the four MSVC results with smoke tests and clean clones are not yet available. Acceptance remains open; [WINDOWS_BUILD_062.md](WINDOWS_BUILD_062.md) distinguishes implementation, completed tests, and missing tests. New CI is configured, not claimed to have run.
 
-USB drivers, connected hardware, and RF validation remain tests on the receiver computer: `ngene --list-devices`. The build does not install drivers or firmware. Windows Unicode-path support remains the previous narrow-API implementation: use ASCII paths in this revision.
+USB drivers, connected hardware, and RF validation remain tests on the receiver computer: `ngene --list-devices`. The SiGe FX2 firmware image is embedded and loaded into RAM by Evo; this does not install the USB driver. Windows still needs a libusb-compatible driver for the SiGe boot and runtime USB IDs. Windows Unicode-path support remains the previous narrow-API implementation: use ASCII paths in this revision.
 
 ### Verifier: Windows PowerShell 5.1
 

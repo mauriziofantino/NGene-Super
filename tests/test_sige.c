@@ -15,6 +15,8 @@
         }                                                                                          \
     } while (0)
 static int object, initialized, claimed, allocations, enable, failStart, corrupt, disconnect;
+static int bootloader, firmwareLoaded, cpuReset;
+static unsigned firmwareBytes;
 static struct libusb_transfer *queue[4096], *allocated[128];
 static unsigned readIndex, writeIndex, cancelled[128];
 static uint64_t byteIndex;
@@ -97,8 +99,8 @@ int LIBUSB_CALL libusb_get_device_descriptor(libusb_device *dev, struct libusb_d
 {
     (void)dev;
     memset(d, 0, sizeof(*d));
-    d->idVendor = 0x16c0;
-    d->idProduct = 0x072f;
+    d->idVendor = bootloader && !firmwareLoaded ? 0x1781 : 0x16c0;
+    d->idProduct = bootloader && !firmwareLoaded ? 0x0b39 : 0x072f;
     return 0;
 }
 
@@ -225,7 +227,24 @@ int LIBUSB_CALL libusb_control_transfer(libusb_device_handle *d, uint8_t type, u
                                         uint16_t length, unsigned int timeout)
 {
     (void)d;
-    (void)data;
+    if (request == 0xa0) {
+        CHECK(type == 0x40 && index == 0 && timeout == 1000);
+        if (value == 0xe600) {
+            CHECK(length == 1);
+            if (data[0]) {
+                CHECK(!cpuReset);
+                cpuReset = 1;
+            } else {
+                CHECK(cpuReset);
+                cpuReset = 0;
+                firmwareLoaded = 1;
+            }
+            return 1;
+        }
+        CHECK(cpuReset && data && length > 0 && length <= 64);
+        firmwareBytes += length;
+        return length;
+    }
     CHECK(type == 0x40 && request == 1 && index == 0 && length == 0 && timeout == 1000);
     CHECK(value <= 1);
     enable = value;
@@ -278,6 +297,11 @@ static void Run(int mode)
     unsigned k, total = 0;
     readIndex = writeIndex = 0;
     byteIndex = 0;
+    bootloader = mode == 4;
+    firmwareLoaded = 0;
+    cpuReset = 0;
+    firmwareBytes = 0;
+    enable = 0;
     failStart = mode == 1;
     corrupt = mode == 2;
     disconnect = mode == 3;
@@ -285,13 +309,14 @@ static void Run(int mode)
     NgConfigSige(&config);
     config.windowSamples = 13;
     CHECK(NgSigeOpen(&config, &source, &error) == NG_OK);
+    CHECK(firmwareBytes == (bootloader ? 4418u : 0u));
     CHECK(source.info.sampleRateHz == 8183800 && source.info.digitalIfHz == 38500 &&
           source.info.adcBits == 1);
     if (failStart) {
         CHECK(source.ops->start(source.context, &error) == NG_ERROR);
     } else {
         CHECK(source.ops->start(source.context, &error) == NG_OK && enable);
-        if (mode) {
+        if (mode == 2 || mode == 3) {
             CHECK(source.ops->acquire(source.context, &view, 100, &error) == NG_ERROR);
         } else {
             for (k = 0; k < 40; k++) {
@@ -321,7 +346,8 @@ int main(void)
     for (k = 0; k < 4; k++) {
         Run((int)k);
     }
+    Run(4);
     puts("PASS: SiGe USB ABI, queued reads, odd native-IQ transfers, GPIF controls, "
-         "marker/disconnect failure and cancellation cleanup.");
+         "FX2 firmware upload/re-enumeration, marker/disconnect failure and cancellation cleanup.");
     return 0;
 }
