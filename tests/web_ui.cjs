@@ -19,7 +19,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const port = process.env.NGENE_TEST_PORT || '8093';
   const base = `http://127.0.0.1:${port}`;
   const child = spawn(executable, ['--web', '--port', port, '--output-dir', profile], {stdio:['ignore','pipe','inherit']});
-  let browser;
+  let browser, terminalChild, terminalExit;
   const exit = new Promise(resolve => child.once('exit', resolve));
   const errors = [];
   try {
@@ -382,10 +382,49 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(await shutdownPage.locator('#connection').textContent(),'Disconnected');
     await shutdownPage.close();
     assert.equal(await exit,0);
-    console.log('PASS: receiver-side file picker (paths with spaces), per-file metadata import, single active source/no independent replay, recording deletion/active protection/token/revision/path/symlink checks, topic settings and mobile; rectangular 2D/relief waterfalls and shared history; PSD integrity/corruption, sequence skips without separator rows, slow/latest-frame GUI, 30 Hz polling, dormant producers, independent histogram, tuning axes, gain steps, bladeRF precision, no repeated retries when the service is unreachable at startup or shuts down; recording, transfer, persistence, mobile and shutdown.');
+    if (process.platform !== 'win32') {
+      const terminalPort = String(Number(port) === 65535 ? Number(port) - 1 : Number(port) + 1);
+      const terminalBase = `http://127.0.0.1:${terminalPort}`;
+      const terminalProfile = path.join(root, 'terminal-profile');
+      fs.mkdirSync(terminalProfile, {recursive:true});
+      terminalChild = spawn(executable, ['--web', '--port', terminalPort, '--output-dir', terminalProfile], {stdio:['ignore','pipe','inherit']});
+      terminalExit = new Promise(resolve => terminalChild.once('exit', (code, signal) => resolve({code, signal})));
+      let terminalStarted = false;
+      for (let i = 0; i < 100; i++) {
+        try {
+          const response = await fetch(`${terminalBase}/api/v1/bootstrap`);
+          if (response.ok) { terminalStarted = true; break; }
+          await delay(50);
+        } catch { await delay(50); }
+      }
+      assert(terminalStarted, 'Terminal-shutdown test service did not start');
+      const terminalPage = await browser.newPage();
+      terminalPage.waitForFunction = async (predicate, argument) => {
+        const deadline = Date.now() + 30000;
+        while (Date.now() < deadline) {
+          if (await terminalPage.evaluate(predicate, argument)) return;
+          await delay(25);
+        }
+        throw new Error(`Timed out waiting for GUI condition: ${predicate}`);
+      };
+      let terminalBootstrapAttempts = 0;
+      terminalPage.on('request', request => {
+        if (new URL(request.url()).pathname === '/api/v1/bootstrap') terminalBootstrapAttempts++;
+      });
+      await terminalPage.goto(terminalBase);
+      await terminalPage.waitForFunction(() => document.getElementById('connection').textContent === 'Connected');
+      terminalChild.kill('SIGINT');
+      await terminalPage.waitForFunction(() => document.getElementById('connection').textContent === 'Suspended');
+      assert.match(await terminalPage.locator('#notice').textContent(), /console is suspended/);
+      assert.equal((await terminalExit).code, 0, 'Terminal shutdown should exit cleanly');
+      await delay(4000);
+      assert.equal(terminalBootstrapAttempts, 1, 'Terminal shutdown must suspend the UI without reconnect attempts');
+    }
+    console.log('PASS: receiver-side file picker (paths with spaces), per-file metadata import, single active source/no independent replay, recording deletion/active protection/token/revision/path/symlink checks, topic settings and mobile; rectangular 2D/relief waterfalls and shared history; PSD integrity/corruption, sequence skips without separator rows, slow/latest-frame GUI, 30 Hz polling, dormant producers, independent histogram, tuning axes, gain steps, bladeRF precision, no repeated retries when the service is unreachable at startup or shuts down, terminal shutdown notification/suspension; recording, transfer, persistence and mobile.');
   } finally {
     if (browser) await browser.close();
     if (child.exitCode === null) { child.kill('SIGTERM'); await exit; }
+    if (terminalChild && terminalChild.exitCode === null) { terminalChild.kill('SIGTERM'); await terminalExit; }
     fs.rmSync(root,{recursive:true,force:true});
   }
 })().catch(error => {console.error(error);process.exitCode=1;});

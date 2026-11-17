@@ -65,6 +65,8 @@ typedef struct {
     TNgMutex commandMutex;
     /** Atomic shutdown request polled by the service owner. */
     TNgAtomicInt quit;
+    /** Terminal stop requested; clients receive one final shutdown event before close. */
+    TNgAtomicInt terminalStopping;
     /** Number of open bounded telemetry connections. */
     unsigned websocketClients;
     /** Live diagnostic subscriptions, protected by jsonMutex and bounded to three clients. */
@@ -1567,7 +1569,7 @@ static int Handle(struct mg_connection *connection, void *context)
         if (token == NULL || strcmp(token, server->token) != 0) {
             return Failure(connection, 403, "Missing or invalid session token");
         }
-        if (NgAtomicGet(&server->quit) != 0) {
+        if (NgAtomicGet(&server->quit) != 0 || NgAtomicGet(&server->terminalStopping) != 0) {
             return Failure(connection, 409, "Service is shutting down");
         }
         if (type == NULL || strncmp(type, "application/json", 16) != 0) {
@@ -1923,7 +1925,7 @@ static int WsConnect(const struct mg_connection *connection, void *context)
         return 1;
     }
     NgMutexLock(&server->jsonMutex);
-    if (server->websocketClients >= 3) {
+    if (server->websocketClients >= 3 || NgAtomicGet(&server->terminalStopping) != 0) {
         NgMutexUnlock(&server->jsonMutex);
         free(session);
         return 1;
@@ -1995,6 +1997,14 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
     if (((bits) & (15)) != 1) {
         return 1;
     }
+    if (NgAtomicGet(&server->terminalStopping) != 0) {
+        static const char message[] = "{\"event\":\"service_stopping\",\"source\":\"terminal\"}";
+        if (mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_TEXT, message,
+                               sizeof(message) - 1) <= 0) {
+            fprintf(stderr, "NGene: failed to notify the browser before terminal shutdown\n");
+        }
+        return 0;
+    }
     if (((bits) & (128)) == 0 || (length != 6 && length != 8) || memcmp(data, "status", 6) != 0 ||
         (length == 8 && (data[6] != ':' || data[7] < '0' || data[7] > '3'))) {
         return 0;
@@ -2025,6 +2035,22 @@ static int WsData(struct mg_connection *connection, int bits, char *data, size_t
     cJSON_free(text);
     cJSON_Delete(object);
     return !NgAtomicGet(&server->quit);
+}
+
+static void WaitForTerminalWebClients(TNgWebServer *server)
+{
+    double deadline = NgMonotonicSeconds() + 3000.0 * 0.001;
+    NgAtomicSet(&server->terminalStopping, 1);
+    for (;;) {
+        unsigned clients;
+        NgMutexLock(&server->jsonMutex);
+        clients = server->websocketClients;
+        NgMutexUnlock(&server->jsonMutex);
+        if (clients == 0 || NgMonotonicSeconds() >= deadline) {
+            return;
+        }
+        NgSleepMs(20);
+    }
 }
 
 /**
@@ -2098,6 +2124,7 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     unsigned char random[32];
     size_t k;
     char listening[64];
+    int terminalStop = 0;
     const char *options[] = {"listening_ports",
                              listening,
                              "num_threads",
@@ -2159,8 +2186,15 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
            "browser; Ctrl+C closes the service.\n",
            NGENE_VERSION, server.host);
     fflush(stdout);
-    while (NgAtomicGet(&server.quit) == 0 && (stop != NULL && stop(stopContext) != 0) == 0) {
+    while (NgAtomicGet(&server.quit) == 0) {
+        if (stop != NULL && stop(stopContext) != 0) {
+            terminalStop = 1;
+            break;
+        }
         NgSleepMs(50);
+    }
+    if (terminalStop) {
+        WaitForTerminalWebClients(&server);
     }
     NgAtomicSet(&server.quit, 1);
     NgAtomicSet(&server.calibrationCancel, 1);

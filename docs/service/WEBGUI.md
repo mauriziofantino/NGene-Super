@@ -124,11 +124,17 @@ Prefix: `/api/v1`. Responses are JSON; 64-bit counters and revisions are **decim
 | GET / POST `/analysis/config` | Read or revise runtime diagnostic configuration; see [ANALYSIS.md](ANALYSIS.md) |
 | POST `/frontend/capabilities` | `{ini:"…"}`; query native device limits while the receiver is stopped |
 | POST `/shutdown` | `{}`; closes HTTP, stops the receiver, drains the recorder, and exits |
-| WebSocket `/events?token=…` | Client sends a `status` text frame; server replies with a JSON snapshot |
+| WebSocket `/events?token=…` | Client sends a `status` text frame; server replies with a JSON snapshot, or a terminal-shutdown event before closing |
 
 202 means **accepted**, not completed. Wait for `completed_command_id >= command_id` and check `command_ok`, `state`, and `message`. A 409 response indicates a state, revision, or pending-operation conflict; 400 means invalid input; 403 means invalid origin/token. Profile-save failures are returned as 409 conflicts with an explanatory message.
 
 WebSocket telemetry is client-requested, with at most one outstanding request and one latest snapshot waiting to render. The GUI provides 1/2/4/10/20/30 Hz refresh limits. Three clients are allowed; requests less than 20 ms apart close the connection to limit abuse. The `status:MASK` command updates interest in PSD (bit 1) and histograms (bit 2); `status` remains compatible and requests both. Each connection retains its own interest: disabling the final consumer immediately suspends collection, with a two-second expiry for silent clients. Responses contain empty arrays for unrequested or disabled diagnostics while retaining configuration and sequences. No raw I/Q is transmitted. JSON and networking run outside sample callbacks. Each PSD includes integrity statistics and a hash; see [ITERATION_04.md](ITERATION_04.md).
+
+When the process receives a terminal stop signal, the server sends
+`{"event":"service_stopping","source":"terminal"}` on each active status
+connection, then gives clients up to three seconds to close before tearing down
+the service. The GUI marks the console suspended and does not retry the closing
+service. API shutdown from the GUI retains its existing close behavior.
 
 Host/Origin are restricted to the local listener; the token changes on restart. The server does not send permissive CORS headers, accept arbitrary download paths, or serve static filesystem directories. This model supports local use and tunnelling, rather than a public website. A directory selected through configuration authorizes writing there with the process's permissions.
 
