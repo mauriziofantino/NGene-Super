@@ -59,6 +59,7 @@ void NgConfigDefaults(TNgConfig *config)
     NgAnalysisDefaults(&config->analysis);
     NgAcquisitionDefaults(&config->acquisition);
     NgTrackingDefaults(&config->tracking);
+    config->carrierSmoothingLength = 32;
     /* Acquisition/tracking are intrinsic receiver stages; record-only skips channel work. */
     config->acquisition.enabled = 1;
     NgAcquisitionDefaults(&config->galileoAcquisition);
@@ -233,6 +234,7 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("tracking.gps_channels", tracking.gpsChannels)
     UINT_KEY("tracking.galileo_channels", tracking.galileoChannels)
     UINT_KEY("tracking.workers", tracking.workers)
+    UINT_KEY("pvt.carrier_smoothing_length", carrierSmoothingLength)
     if (strcmp(key,"tracking.enabled")==0 || strcmp(key,"acquisition.enabled")==0 ||
         strcmp(key,"galileo_acquisition.enabled")==0) {
         int legacy;
@@ -533,7 +535,7 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
                  strcmp(section, "receiver") != 0 && strcmp(section, "recording") != 0 &&
                  strcmp(section, "replay") != 0 && strcmp(section, "analysis") != 0 &&
                  strcmp(section, "rtlsdr") != 0 && strcmp(section, "bladerf") != 0 &&
-                 strcmp(section, "tracking") != 0 && strcmp(section, "acquisition") != 0 && strcmp(section, "galileo_acquisition") != 0)) {
+                 strcmp(section, "tracking") != 0 && strcmp(section, "pvt") != 0 && strcmp(section, "acquisition") != 0 && strcmp(section, "galileo_acquisition") != 0)) {
                 return NgFail(error, "Unknown section at line %zu", number);
             }
             continue;
@@ -601,6 +603,8 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (NgAcquisitionValidate(&config->galileoAcquisition, error) != NG_OK)
         return NG_ERROR;
     if (NgTrackingValidate(&config->tracking, error) != NG_OK) return NG_ERROR;
+    if (config->carrierSmoothingLength > 1024)
+        return NgFail(error, "PVT carrier smoothing length must be 0..1024");
     if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK)
         return NG_ERROR;
     if (config->dcRemoval != 0 ||
@@ -801,6 +805,7 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             config->tracking.xorCorrelation?"true":"false",config->tracking.tapCount,
             config->tracking.spacingChips,2.0 * config->tracking.galileoSpacingChips,
             config->tracking.fastCarrier?"true":"false");
+    fprintf(output,"\n[pvt]\ncarrier_smoothing_length=%u\n",config->carrierSmoothingLength);
     fprintf(output,"\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\nsquare_carrier=%s\n"
                    "xor_correlation=%s\npfa=%.17g\ncpu_budget=%.17g\n",config->acquisition.firstPrn,
             config->acquisition.lastPrn,config->acquisition.squareCarrier?"true":"false",

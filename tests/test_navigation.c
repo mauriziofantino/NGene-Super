@@ -54,6 +54,23 @@ int main(void)
 {
     TNgNavigation n;
     unsigned inversion, k;
+    {
+        TNgBroadcast b = {0};
+        unsigned char bytes[40] = {0};
+        uint32_t words[10];
+        bytes[8] = 0x1e; /* Data ID 1, page SV ID 56. */
+        bytes[10] = 0x40; /* Alpha 0 raw coefficient +1. */
+        for (k = 0; k < 10; ++k)
+            words[k] = ((uint32_t)bytes[4 * k] << 24) |
+                       ((uint32_t)bytes[4 * k + 1] << 16) |
+                       ((uint32_t)bytes[4 * k + 2] << 8) | bytes[4 * k + 3];
+        CHECK(NgBroadcastGps(&b, words, 4) == 0 && b.ionoReceived);
+        CHECK(b.iono.alphaGps[0] > 0 && b.iono.alphaGps[0] < 1e-8);
+        bytes[8] = 0x1d; /* Different page must retain prior coefficients. */
+        words[2] = ((uint32_t)bytes[8] << 24) | ((uint32_t)bytes[9] << 16) |
+                   ((uint32_t)bytes[10] << 8) | bytes[11];
+        CHECK(NgBroadcastGps(&b, words, 4) == 0 && b.iono.alphaGps[0] > 0);
+    }
     for (inversion = 0; inversion < 2; ++inversion) {
         NgNavigationReset(&n);
         /* Already aligned bit timing isolates framing; full synchronization tested below. */

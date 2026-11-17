@@ -54,6 +54,7 @@ typedef struct {
 
     struct {
         double alphaGal[3];
+        double alphaGps[4], betaGps[4]; /**< LNAV SF4 page 18 Klobuchar coefficients. */
         int sf[5];
     } iono; /**< Galileo ionosphere telemetry. */
 

@@ -185,11 +185,78 @@ static double Troposphere(double elevation, double height)
     return (dry + wet) * 1.001 / sqrt(0.002001 + sin(elevation) * sin(elevation));
 }
 
-/** Align observations to one sample, then solve separate GPS/Galileo clock biases. */
-void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
-                  double fs, TNgPvtSnapshot *s)
+/** GPS LNAV Klobuchar L1 group delay, metres; coefficients must be parity validated. */
+static double GpsIonosphere(const TNgBroadcast *b, double latitude, double longitude,
+                            double azimuth, double elevation, double tow)
 {
-    double satellite[64][3], velocity[64][3], clocks[64], drifts[64], tx[64], doppler[64];
+    double el = elevation / NG_PI, phi = 0.0137 / (el + 0.11) - 0.022;
+    double subLat = fmax(-0.416, fmin(0.416, latitude / NG_PI + phi * cos(azimuth)));
+    double subLon = longitude / NG_PI + phi * sin(azimuth) / cos(NG_PI * subLat);
+    double magnetic = subLat + 0.064 * cos(NG_PI * (subLon - 1.617));
+    double local = fmod(tow + 43200.0 * subLon + 86400.0, 86400.0);
+    double period = b->iono.betaGps[0] + magnetic *
+                    (b->iono.betaGps[1] + magnetic *
+                     (b->iono.betaGps[2] + magnetic * b->iono.betaGps[3]));
+    double amplitude = b->iono.alphaGps[0] + magnetic *
+                       (b->iono.alphaGps[1] + magnetic *
+                        (b->iono.alphaGps[2] + magnetic * b->iono.alphaGps[3]));
+    double x, delay;
+    period = fmax(72000.0, period);
+    amplitude = fmax(0.0, amplitude);
+    x = 2 * NG_PI * (local - 50400.0) / period;
+    delay = fabs(x) >= 1.57 ? 5e-9 : 5e-9 + amplitude * (1 - x * x / 2 + x * x * x * x / 24);
+    return NG_C * (1 + 16 * pow(0.53 - el, 3)) * delay;
+}
+
+void NgPvtSmootherInit(TNgPvtSmoother *state, unsigned length)
+{
+    memset(state, 0, sizeof(*state));
+    state->length = length;
+}
+
+/* One update per common observation epoch. Carrier range change is the negative
+ * Doppler integral; satellite clock correction remains outside this filter. */
+static double SmoothCode(TNgPvtSmoother *state, unsigned system, unsigned prn,
+                         uint64_t epoch, uint64_t sample, double fs, double code,
+                         double doppler)
+{
+    TNgPvtSmoothChannel *c;
+    double dt, propagated, weight;
+    if (!state || state->length < 2 || system < 1 || system > 2 || prn < 1 || prn > 32)
+        return code;
+    c = &state->channels[system - 1][prn - 1];
+    if (!c->valid || c->epoch != epoch || sample <= c->sample) {
+        c->count = 1;
+        c->code = code;
+    } else {
+        dt = (double)(sample - c->sample) / fs;
+        propagated = c->code - 0.5 * (c->doppler + doppler) *
+                                  (NG_C / 1575420000.0) * dt;
+        /* A stale/changed navigation time or cycle slip must not pollute future epochs. */
+        if (!(dt > 0 && dt <= 2.0) || !isfinite(propagated) ||
+            fabs(code - propagated) > 300.0) {
+            c->count = 1;
+            c->code = code;
+        } else {
+            if (c->count < state->length)
+                ++c->count;
+            weight = 1.0 / (double)c->count;
+            c->code = weight * code + (1.0 - weight) * propagated;
+        }
+    }
+    c->epoch = epoch;
+    c->sample = sample;
+    c->doppler = doppler;
+    c->valid = 1;
+    return c->code;
+}
+
+/** Align observations to one sample, then solve separate GPS/Galileo clock biases. */
+void NgPvtComputeSmoothed(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
+                          double fs, TNgPvtSmoother *smoother, TNgPvtSnapshot *s)
+{
+    double satellite[64][3], velocity[64][3], clocks[64], drifts[64], tx[64], doppler[64], code[64];
+    const TNgBroadcast *broadcasts[64];
     unsigned systems[64], prns[64], n = 0, k, j, iteration, cols, gps = 0, galileo = 0;
     double nominal = 0, pos[5] = {0}, matrix[64][5], rhs[64], correction[5];
     double lat = 0, lon = 0, height = 0, residual = 0;
@@ -220,6 +287,7 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
         tx[n] = time;
         doppler[n] = t->dopplerHz;
         systems[n] = t->constellation;
+        broadcasts[n] = b;
         prns[n] = t->prn;
         if (!n || time > nominal)
             nominal = time;
@@ -237,13 +305,16 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
         return;
     nominal += 0.07;
     s->towSeconds = fmod(nominal + 604800.0, 604800.0);
+    for (k = 0; k < n; ++k)
+        code[k] = SmoothCode(smoother, systems[k], prns[k], epoch, sample, fs,
+                             NG_C * (nominal - tx[k]), doppler[k]);
     for (iteration = 0; iteration < 20; ++iteration) {
         residual = 0;
         if (iteration)
             Geodetic(pos, &lat, &lon, &height);
         memset(matrix, 0, sizeof(matrix));
         for (k = 0; k < n; ++k) {
-            double rotated[3], range, angle, elevation = 0, tropo = 0;
+            double rotated[3], range, angle, elevation = 0, tropo = 0, iono = 0;
             unsigned clockIndex = cols == 5 && systems[k] == 2 ? 4u : 3u;
             range = hypot(hypot(satellite[k][0] - pos[0], satellite[k][1] - pos[1]),
                           satellite[k][2] - pos[2]);
@@ -265,8 +336,15 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
                 elevation = asin(fmax(-1, fmin(1, up)));
                 if (elevation > 0)
                     tropo = Troposphere(elevation, height);
+                if (elevation > 0 && systems[k] == 1 && broadcasts[k]->ionoReceived) {
+                    double east = matrix[k][0] * sin(lon) - matrix[k][1] * cos(lon);
+                    double north = matrix[k][0] * sin(lat) * cos(lon) +
+                                   matrix[k][1] * sin(lat) * sin(lon) - matrix[k][2] * cos(lat);
+                    iono = GpsIonosphere(broadcasts[k], lat, lon, atan2(east, north),
+                                         elevation, tx[k]);
+                }
             }
-            rhs[k] = NG_C * (nominal - tx[k] + clocks[k]) - range - pos[clockIndex] - tropo;
+            rhs[k] = code[k] + NG_C * clocks[k] - range - pos[clockIndex] - tropo - iono;
             residual += rhs[k] * rhs[k];
         }
         if (!Solve(matrix, rhs, n, cols, correction, NULL))
@@ -360,4 +438,10 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
         s->clockDrift = correction[3];
         s->velocityAvailable = 1;
     }
+}
+
+void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
+                  double fs, TNgPvtSnapshot *solution)
+{
+    NgPvtComputeSmoothed(channels, epoch, sample, fs, NULL, solution);
 }

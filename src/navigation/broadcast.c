@@ -4,7 +4,7 @@
 #include "ngene/navigation.h"
 #include <math.h>
 #include <string.h>
-#define M_PI 3.14159265358979323846
+#define NG_BROADCAST_PI 3.14159265358979323846
 #define TRUE_FLAG 1
 #define FALSE_FLAG 0
 #define SUCCESS_RETURN 0
@@ -589,7 +589,7 @@ static int NgParseGpsSubframe2(TNgNavParser *parser)
         NgExtractTwoCompField(parser->subframe, GPS_SUBF2_CRS_FIRST_BYTE_IDX,
                               GPS_SUBF2_CRS_LAST_BYTE_IDX, GPS_SUBF2_CRS_BITS_OF_FIRST_BYTE,
                               GPS_SUBF2_CRS_BITS_OF_LAST_BYTE, GPS_SUBF2_CRS_FIELD_DIM);
-    eph->deltaN = POW_TWO_M43 * M_PI *
+    eph->deltaN = POW_TWO_M43 * NG_BROADCAST_PI *
                   NgExtractTwoCompField(parser->subframe, GPS_SUBF2_DN_FIRST_BYTE_IDX,
                                         GPS_SUBF2_DN_LAST_BYTE_IDX, GPS_SUBF2_DN_BITS_OF_FIRST_BYTE,
                                         GPS_SUBF2_DN_BITS_OF_LAST_BYTE, GPS_SUBF2_DN_FIELD_DIM);
@@ -601,7 +601,7 @@ static int NgParseGpsSubframe2(TNgNavParser *parser)
     eph->meanAnomaly0 += NgExtractField(
         parser->subframe, GPS_SUBF2_M0_LS_FIRST_BYTE_IDX, GPS_SUBF2_M0_LS_LAST_BYTE_IDX,
         GPS_SUBF2_M0_LS_BITS_OF_FIRST_BYTE, GPS_SUBF2_M0_LS_BITS_OF_LAST_BYTE);
-    eph->meanAnomaly0 *= POW_TWO_M31 * M_PI;
+    eph->meanAnomaly0 *= POW_TWO_M31 * NG_BROADCAST_PI;
     eph->capitalCuc =
         POW_TWO_M29 *
         NgExtractTwoCompField(parser->subframe, GPS_SUBF2_CUC_FIRST_BYTE_IDX,
@@ -658,7 +658,7 @@ static int NgParseGpsSubframe3(TNgNavParser *parser)
     eph->capitalOmega0 += NgExtractField(
         parser->subframe, GPS_SUBF3_OMEGA0_LS_FIRST_BYTE_IDX, GPS_SUBF3_OMEGA0_LS_LAST_BYTE_IDX,
         GPS_SUBF3_OMEGA0_LS_BITS_OF_FIRST_BYTE, GPS_SUBF3_OMEGA0_LS_BITS_OF_LAST_BYTE);
-    eph->capitalOmega0 *= POW_TWO_M31 * M_PI;
+    eph->capitalOmega0 *= POW_TWO_M31 * NG_BROADCAST_PI;
     eph->capitalCis =
         POW_TWO_M29 *
         NgExtractTwoCompField(parser->subframe, GPS_SUBF3_CIS_FIRST_BYTE_IDX,
@@ -671,7 +671,7 @@ static int NgParseGpsSubframe3(TNgNavParser *parser)
     eph->i0 += NgExtractField(parser->subframe, GPS_SUBF3_I0_LS_FIRST_BYTE_IDX,
                               GPS_SUBF3_I0_LS_LAST_BYTE_IDX, GPS_SUBF3_I0_LS_BITS_OF_FIRST_BYTE,
                               GPS_SUBF3_I0_LS_BITS_OF_LAST_BYTE);
-    eph->i0 *= POW_TWO_M31 * M_PI;
+    eph->i0 *= POW_TWO_M31 * NG_BROADCAST_PI;
     eph->capitalCrc =
         POW_TWO_M05 *
         NgExtractTwoCompField(parser->subframe, GPS_SUBF3_CRC_FIRST_BYTE_IDX,
@@ -685,9 +685,9 @@ static int NgParseGpsSubframe3(TNgNavParser *parser)
     eph->omega += NgExtractField(
         parser->subframe, GPS_SUBF3_OMEGA_LS_FIRST_BYTE_IDX, GPS_SUBF3_OMEGA_LS_LAST_BYTE_IDX,
         GPS_SUBF3_OMEGA_LS_BITS_OF_FIRST_BYTE, GPS_SUBF3_OMEGA_LS_BITS_OF_LAST_BYTE);
-    eph->omega *= POW_TWO_M31 * M_PI;
+    eph->omega *= POW_TWO_M31 * NG_BROADCAST_PI;
     eph->capitalOmegaDot =
-        POW_TWO_M43 * M_PI *
+        POW_TWO_M43 * NG_BROADCAST_PI *
         NgExtractTwoCompField(parser->subframe, GPS_SUBF3_OMEGADOT_FIRST_BYTE_IDX,
                               GPS_SUBF3_OMEGADOT_LAST_BYTE_IDX,
                               GPS_SUBF3_OMEGADOT_BITS_OF_FIRST_BYTE,
@@ -696,7 +696,7 @@ static int NgParseGpsSubframe3(TNgNavParser *parser)
         parser->subframe, GPS_SUBF3_IODE_FIRST_BYTE_IDX, GPS_SUBF3_IODE_LAST_BYTE_IDX,
         GPS_SUBF3_IODE_BITS_OF_FIRST_BYTE, GPS_SUBF3_IODE_BITS_OF_LAST_BYTE));
     eph->iDot =
-        POW_TWO_M43 * M_PI *
+        POW_TWO_M43 * NG_BROADCAST_PI *
         NgExtractTwoCompField(parser->subframe, GPS_SUBF3_IDOT_FIRST_BYTE_IDX,
                               GPS_SUBF3_IDOT_LAST_BYTE_IDX, GPS_SUBF3_IDOT_BITS_OF_FIRST_BYTE,
                               GPS_SUBF3_IDOT_BITS_OF_LAST_BYTE, GPS_SUBF3_IDOT_FIELD_DIM);
@@ -743,7 +743,7 @@ static int NgParseGalWord01(TNgNavParser *parser)
                NgExtractField(dataBytes, GAL_TYPE1_toe_FIRST_BYTE_IDX, GAL_TYPE1_toe_LAST_BYTE_IDX,
                               GAL_TYPE1_toe_BITS_OF_FIRST_BYTE, GAL_TYPE1_toe_BITS_OF_LAST_BYTE);
     eph->meanAnomaly0 =
-        POW_TWO_M31 * M_PI *
+        POW_TWO_M31 * NG_BROADCAST_PI *
         NgExtractTwoCompField(dataBytes, GAL_TYPE1_M0_FIRST_BYTE_IDX, GAL_TYPE1_M0_LAST_BYTE_IDX,
                               GAL_TYPE1_M0_BITS_OF_FIRST_BYTE, GAL_TYPE1_M0_BITS_OF_LAST_BYTE,
                               GAL_TYPE1_M0_BITS_FIELD_DIM);
@@ -769,21 +769,21 @@ static int NgParseGalWord02(TNgNavParser *parser)
         (int)(NgExtractField(dataBytes, GAL_TYPE2_IOD_FIRST_BYTE_IDX, GAL_TYPE2_IOD_LAST_BYTE_IDX,
                              GAL_TYPE2_IOD_BITS_OF_FIRST_BYTE, GAL_TYPE2_IOD_BITS_OF_LAST_BYTE));
     eph->capitalOmega0 =
-        POW_TWO_M31 * M_PI *
+        POW_TWO_M31 * NG_BROADCAST_PI *
         NgExtractTwoCompField(dataBytes, GAL_TYPE2_omega0_FIRST_BYTE_IDX,
                               GAL_TYPE2_omega0_LAST_BYTE_IDX, GAL_TYPE2_omega0_BITS_OF_FIRST_BYTE,
                               GAL_TYPE2_omega0_BITS_OF_LAST_BYTE, GAL_TYPE2_omega0_BITS_FIELD_DIM);
-    eph->i0 = POW_TWO_M31 * M_PI *
+    eph->i0 = POW_TWO_M31 * NG_BROADCAST_PI *
               NgExtractTwoCompField(dataBytes, GAL_TYPE2_i0_FIRST_BYTE_IDX,
                                     GAL_TYPE2_i0_LAST_BYTE_IDX, GAL_TYPE2_i0_BITS_OF_FIRST_BYTE,
                                     GAL_TYPE2_i0_BITS_OF_LAST_BYTE, GAL_TYPE2_i0_BITS_FIELD_DIM);
     eph->omega =
-        POW_TWO_M31 * M_PI *
+        POW_TWO_M31 * NG_BROADCAST_PI *
         NgExtractTwoCompField(dataBytes, GAL_TYPE2_omega_FIRST_BYTE_IDX,
                               GAL_TYPE2_omega_LAST_BYTE_IDX, GAL_TYPE2_omega_BITS_OF_FIRST_BYTE,
                               GAL_TYPE2_omega_BITS_OF_LAST_BYTE, GAL_TYPE2_omega_BITS_FIELD_DIM);
     eph->iDot =
-        POW_TWO_M43 * M_PI *
+        POW_TWO_M43 * NG_BROADCAST_PI *
         NgExtractTwoCompField(dataBytes, GAL_TYPE2_idot_FIRST_BYTE_IDX,
                               GAL_TYPE2_idot_LAST_BYTE_IDX, GAL_TYPE2_idot_BITS_OF_FIRST_BYTE,
                               GAL_TYPE2_idot_BITS_OF_LAST_BYTE, GAL_TYPE2_idot_BITS_FIELD_DIM);
@@ -800,14 +800,14 @@ static int NgParseGalWord03(TNgNavParser *parser)
     eph->iode3 =
         (int)(NgExtractField(dataBytes, GAL_TYPE3_IOD_FIRST_BYTE_IDX, GAL_TYPE3_IOD_LAST_BYTE_IDX,
                              GAL_TYPE3_IOD_BITS_OF_FIRST_BYTE, GAL_TYPE3_IOD_BITS_OF_LAST_BYTE));
-    eph->capitalOmegaDot = POW_TWO_M43 * M_PI *
+    eph->capitalOmegaDot = POW_TWO_M43 * NG_BROADCAST_PI *
                            NgExtractTwoCompField(dataBytes, GAL_TYPE3_omegadot_FIRST_BYTE_IDX,
                                                  GAL_TYPE3_omegadot_LAST_BYTE_IDX,
                                                  GAL_TYPE3_omegadot_BITS_OF_FIRST_BYTE,
                                                  GAL_TYPE3_omegadot_BITS_OF_LAST_BYTE,
                                                  GAL_TYPE3_omegadot_BITS_FIELD_DIM);
     eph->deltaN =
-        POW_TWO_M43 * M_PI *
+        POW_TWO_M43 * NG_BROADCAST_PI *
         NgExtractTwoCompField(dataBytes, GAL_TYPE3_deltan_FIRST_BYTE_IDX,
                               GAL_TYPE3_deltan_LAST_BYTE_IDX, GAL_TYPE3_deltan_BITS_OF_FIRST_BYTE,
                               GAL_TYPE3_deltan_BITS_OF_LAST_BYTE, GAL_TYPE3_deltan_BITS_FIELD_DIM);
@@ -974,6 +974,28 @@ static void Commit(TNgBroadcast *b, int galileo)
     }
 }
 
+/** Extract parity-validated LNAV subframe 4, page 18 ionosphere coefficients. */
+static void NgParseGpsIono(TNgNavParser *p)
+{
+    static const unsigned first[8] = {9, 10, 12, 13, 14, 16, 17, 18};
+    static const int shift[8] = {-30, -27, -24, -24, 11, 14, 16, 16};
+    TNgBroadcast *b = p->navMsg;
+    unsigned page = (unsigned)NgExtractField(p->subframe, 8, 9, 4, 2);
+    unsigned dataId = (unsigned)NgExtractField(p->subframe, 8, 8, 4, 6);
+    unsigned k;
+    if (dataId != 1 || page != 56)
+        return;
+    for (k = 0; k < 8; ++k) {
+        double value = ldexp((double)NgExtractTwoCompField(p->subframe, first[k], first[k] + 1,
+                                                            6, 2, 8), shift[k]);
+        if (k < 4)
+            b->iono.alphaGps[k] = value;
+        else
+            b->iono.betaGps[k - 4] = value;
+    }
+    b->ionoReceived = 1;
+}
+
 /** Retain Classic GPS field positions, including word parity gaps. */
 int NgBroadcastGps(TNgBroadcast *broadcast, const uint32_t words[10], unsigned id)
 {
@@ -993,6 +1015,8 @@ int NgBroadcastGps(TNgBroadcast *broadcast, const uint32_t words[10], unsigned i
         result = NgParseGpsSubframe2(&p);
     else if (id == 3)
         result = NgParseGpsSubframe3(&p);
+    else if (id == 4)
+        NgParseGpsIono(&p);
     if (!result)
         Commit(broadcast, 0);
     return result;

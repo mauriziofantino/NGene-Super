@@ -37,8 +37,9 @@ per-satellite consistent broadcast caches. Common-epoch code/Doppler observation
 feed a double-precision C pivoted-QR broadcast least-squares PVT, with separate
 GPS/Galileo biases, Earth rotation and Hopfield troposphere. The PVT view includes
 numerical coordinates, a map, GDOP/HDOP/VDOP and an actual satellite skyplot. This
-is **partial Classic PVT integration**: full weighted/adaptive Kalman processing,
-ionosphere, smoothing and integrity/outlier qualification remain pending.
+is **partial Classic PVT integration**: per-satellite carrier smoothing and GPS LNAV
+Klobuchar corrections are present; full weighted/adaptive Kalman processing,
+Galileo/EGNOS ionosphere and integrity/outlier qualification remain pending.
 
 PLL power qualification and bounded loss/reacquisition now release failed slots;
 parsed broadcast data survives reacquisition, but fresh decoding must establish
@@ -49,7 +50,8 @@ A 65-second RTL E4000 physical recording has zero reported software gaps/drops,
 but simultaneous losses of GPS correlation also reproduce in an isolated tracker.
 The recovery replay reaches mixed PVT with six GPS and two Galileo satellites;
 continuity is not yet established, and RTL hardware-internal loss is unmeasured.
-HackRF currently has no antenna and supplies transport/load evidence only.
+The user reports that HackRF is connected to the PC and an antenna (17 November
+2026). Live RF performance and navigation accuracy still require a measured run.
 See [the measurements and limits](PERFORMANCE_NAVIGATION_2026-11-15.md) and
 [the saved work state](WORKPLAN_CHANNELS_GALILEO_2026-11-14.md).
 

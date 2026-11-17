@@ -93,6 +93,17 @@
               "max": 16
             },
             {
+              "key": "tracking.fast_carrier",
+              "label": "Four-lane carrier recurrence (CI8)",
+              "type": "select",
+              "default": "false",
+              "options": [
+                { "value": "false", "label": "Disabled" },
+                { "value": "true", "label": "Enabled (double arithmetic)" }
+              ],
+              "hint": "Only affects CI8 tracking. This is not an integer carrier implementation."
+            },
+            {
               "key": "tracking.square_carrier",
               "label": "Carrier rotation",
               "type": "select",
@@ -158,6 +169,29 @@
       ]
     },
     {
+      "id": "pvt-carrier-smoothing",
+      "groups": [
+        {
+          "title": "PVT carrier smoothing",
+          "topic": "navigation",
+          "note": "Hatch smoothing uses common-epoch code and Doppler observations. State resets on RF discontinuity or a large code/carrier disagreement.",
+          "fields": [
+            {
+              "key": "pvt.carrier_smoothing_length",
+              "label": "Carrier smoothing length (epochs)",
+              "type": "number",
+              "default": 32,
+              "integer": true,
+              "min": 0,
+              "max": 1024,
+              "hint": "Zero disables smoothing; each epoch is approximately one second."
+            }
+          ]
+        }
+      ],
+      "rules": []
+    },
+    {
       "id": "gps-l1-ca-classic",
       "groups": [
         {
@@ -173,6 +207,26 @@
               "integer": true,
               "min": 1,
               "max": 32
+            },
+            {
+              "key": "acquisition.cpu_budget",
+              "label": "Acquisition CPU budget (cores per signal second)",
+              "type": "number",
+              "default": 1,
+              "min": 0,
+              "max": 32,
+              "step": 0.1,
+              "hint": "Shared by GPS and Galileo. Zero restores the previous adaptive admission policy; this changes scheduling, not search decisions."
+            },
+            {
+              "key": "acquisition.pfa",
+              "label": "GPS false alarm probability per cell",
+              "type": "number",
+              "default": 1e-9,
+              "min": 1e-15,
+              "max": 0.01,
+              "step": 1e-9,
+              "hint": "This directly changes the GPS detection threshold."
             },
             {
               "key": "acquisition.last_prn",
@@ -248,6 +302,29 @@
               "integer": true,
               "min": 1,
               "max": 32
+            },
+            {
+              "key": "galileo_acquisition.fft_size",
+              "label": "Galileo coarse FFT size",
+              "type": "select",
+              "default": "0",
+              "options": [
+                { "value": "0", "label": "Automatic" },
+                { "value": "4096", "label": "4096 (changes search algorithm)" },
+                { "value": "8192", "label": "8192" },
+                { "value": "16384", "label": "16384" }
+              ],
+              "hint": "4096 uses fixed-phase subcarrier removal and missed synthetic satellites in the profiling report."
+            },
+            {
+              "key": "galileo_acquisition.pfa",
+              "label": "Galileo false alarm probability per cell",
+              "type": "number",
+              "default": 1e-9,
+              "min": 1e-15,
+              "max": 0.01,
+              "step": 1e-9,
+              "hint": "This directly changes the Galileo detection threshold."
             },
             {
               "key": "galileo_acquisition.last_prn",
@@ -853,10 +930,10 @@
           },
           {
             "key": "CSM filter length",
-            "label": "Carrier-smoothing filter length",
+            "label": "Carrier-smoothing filter length (Classic reference only)",
             "value": "32",
             "unit": "",
-            "hint": "0 disables carrier smoothing.",
+            "hint": "Classic reference value only. Use pvt.carrier_smoothing_length above to change EVO's active PVT smoothing window.",
             "options": null
           },
           {
