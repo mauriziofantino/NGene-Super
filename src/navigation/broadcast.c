@@ -977,7 +977,7 @@ static void Commit(TNgBroadcast *b, int galileo)
 /** Extract parity-validated LNAV subframe 4, page 18 ionosphere coefficients. */
 static void NgParseGpsIono(TNgNavParser *p)
 {
-    static const unsigned first[8] = {9, 10, 12, 13, 14, 16, 17, 18};
+    static const int first[8] = {9, 10, 12, 13, 14, 16, 17, 18};
     static const int shift[8] = {-30, -27, -24, -24, 11, 14, 16, 16};
     TNgBroadcast *b = p->navMsg;
     unsigned page = (unsigned)NgExtractField(p->subframe, 8, 9, 4, 2);
