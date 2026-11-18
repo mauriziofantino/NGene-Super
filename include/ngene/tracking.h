@@ -21,6 +21,8 @@ typedef struct {
     int fastCarrier; /**< Opt-in for CI8 input: four-lane double carrier recurrence. Still
                           precise (no tables, no phase quantization); differs from the default
                           one-lane recurrence only by double rounding. */
+    unsigned mixerBits; /**< 0: precise recurrence; 8: signed-byte mixer, 16-level carrier. */
+    unsigned dopplerSmoothingMs; /**< Output Doppler filter time constant; zero disables. */
 } TNgTrackingConfig;
 
 /** Completed coherent integration, in native ADC units per sample. */

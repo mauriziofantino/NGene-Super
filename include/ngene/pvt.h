@@ -26,25 +26,6 @@ typedef struct {
     TNgPvtSatelliteView sky[64];               /**< Solution-epoch satellite sky geometry. */
 } TNgPvtSnapshot;
 
-/** Receiver-owned Hatch state, indexed by constellation and PRN. Reset on RF epoch change. */
-typedef struct {
-    uint64_t epoch, sample;
-    double code, doppler;
-    unsigned count;
-    int valid;
-} TNgPvtSmoothChannel;
-typedef struct {
-    TNgPvtSmoothChannel channels[2][32];
-    unsigned length; /**< Zero disables; one gives unsmoothed code. */
-} TNgPvtSmoother;
-
-/** Initialize a run-owned smoother; length 0..1024. */
-void NgPvtSmootherInit(TNgPvtSmoother *state, unsigned length);
-/** Solve with stateful carrier smoothing. The state belongs to one receiver run. */
-void NgPvtComputeSmoothed(const TNgTrackingSnapshot channels[64], uint64_t epoch,
-                          uint64_t sample, double sampleRate, TNgPvtSmoother *smoother,
-                          TNgPvtSnapshot *solution);
-
 /** Compute broadcast satellite ECEF, velocity, clock and drift at transmit time. */
 int NgPvtSatellite(const TNgBroadcast *broadcast, unsigned constellation, double transmitTime,
                    double position[3], double velocity[3], double *clock, double *drift);

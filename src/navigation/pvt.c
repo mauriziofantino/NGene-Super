@@ -208,52 +208,9 @@ static double GpsIonosphere(const TNgBroadcast *b, double latitude, double longi
     return NG_C * (1 + 16 * pow(0.53 - el, 3)) * delay;
 }
 
-void NgPvtSmootherInit(TNgPvtSmoother *state, unsigned length)
-{
-    memset(state, 0, sizeof(*state));
-    state->length = length;
-}
-
-/* One update per common observation epoch. Carrier range change is the negative
- * Doppler integral; satellite clock correction remains outside this filter. */
-static double SmoothCode(TNgPvtSmoother *state, unsigned system, unsigned prn,
-                         uint64_t epoch, uint64_t sample, double fs, double code,
-                         double doppler)
-{
-    TNgPvtSmoothChannel *c;
-    double dt, propagated, weight;
-    if (!state || state->length < 2 || system < 1 || system > 2 || prn < 1 || prn > 32)
-        return code;
-    c = &state->channels[system - 1][prn - 1];
-    if (!c->valid || c->epoch != epoch || sample <= c->sample) {
-        c->count = 1;
-        c->code = code;
-    } else {
-        dt = (double)(sample - c->sample) / fs;
-        propagated = c->code - 0.5 * (c->doppler + doppler) *
-                                  (NG_C / 1575420000.0) * dt;
-        /* A stale/changed navigation time or cycle slip must not pollute future epochs. */
-        if (!(dt > 0 && dt <= 2.0) || !isfinite(propagated) ||
-            fabs(code - propagated) > 300.0) {
-            c->count = 1;
-            c->code = code;
-        } else {
-            if (c->count < state->length)
-                ++c->count;
-            weight = 1.0 / (double)c->count;
-            c->code = weight * code + (1.0 - weight) * propagated;
-        }
-    }
-    c->epoch = epoch;
-    c->sample = sample;
-    c->doppler = doppler;
-    c->valid = 1;
-    return c->code;
-}
-
 /** Align observations to one sample, then solve separate GPS/Galileo clock biases. */
-void NgPvtComputeSmoothed(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
-                          double fs, TNgPvtSmoother *smoother, TNgPvtSnapshot *s)
+void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
+                  double fs, TNgPvtSnapshot *s)
 {
     double satellite[64][3], velocity[64][3], clocks[64], drifts[64], tx[64], doppler[64], code[64];
     const TNgBroadcast *broadcasts[64];
@@ -306,8 +263,7 @@ void NgPvtComputeSmoothed(const TNgTrackingSnapshot channels[64], uint64_t epoch
     nominal += 0.07;
     s->towSeconds = fmod(nominal + 604800.0, 604800.0);
     for (k = 0; k < n; ++k)
-        code[k] = SmoothCode(smoother, systems[k], prns[k], epoch, sample, fs,
-                             NG_C * (nominal - tx[k]), doppler[k]);
+        code[k] = NG_C * (nominal - tx[k]);
     for (iteration = 0; iteration < 20; ++iteration) {
         residual = 0;
         if (iteration)
@@ -440,8 +396,3 @@ void NgPvtComputeSmoothed(const TNgTrackingSnapshot channels[64], uint64_t epoch
     }
 }
 
-void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
-                  double fs, TNgPvtSnapshot *solution)
-{
-    NgPvtComputeSmoothed(channels, epoch, sample, fs, NULL, solution);
-}

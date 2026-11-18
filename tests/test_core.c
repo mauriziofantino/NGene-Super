@@ -53,8 +53,10 @@ static void TestConfig(void)
                 &c) == NG_OK);
     CHECK(c.sampleRateHz == 100000 && c.windowSamples == 1000);
     CHECK(c.galileoAcquisition.enabled == 1);
-    CHECK(Parse("[pvt]\ncarrier_smoothing_length=0\n", &c) == NG_OK &&
-          c.carrierSmoothingLength == 0);
+    CHECK(Parse("[tracking]\ndoppler_smoothing_ms=0\n", &c) == NG_OK &&
+          c.tracking.dopplerSmoothingMs == 0);
+    CHECK(Parse("[tracking]\ndoppler_smoothing_ms=10001\n", &c) == NG_ERROR);
+    CHECK(Parse("[pvt]\ncarrier_smoothing_length=32\n", &c) == NG_OK);
     CHECK(Parse("[pvt]\ncarrier_smoothing_length=1025\n", &c) == NG_ERROR);
     CHECK(Parse("[galileo_acquisition]\nfirst_prn=9\nlast_prn=7\n", &c) == NG_ERROR);
     CHECK(Parse("[galileo_acquisition]\nlast_prn=33\n", &c) == NG_ERROR);
@@ -101,14 +103,14 @@ static void TestConfig(void)
         c.galileoAcquisition.fftSize = 4096;
         c.acquisition.cpuBudget = c.galileoAcquisition.cpuBudget = 0.5;
         c.tracking.fastCarrier = 1;
-        c.carrierSmoothingLength = 48;
+        c.tracking.dopplerSmoothingMs = 480;
         CHECK(profile != NULL && NgConfigWrite(profile, &c, &error) == NG_OK);
         rewind(profile);
         CHECK(NgConfigRead(profile, &loaded, &error) == NG_OK);
         CHECK(loaded.frontend == NG_FRONTEND_HACKRF && loaded.replayPath[0] == '\0');
         CHECK(loaded.bladeFormat == NG_FORMAT_CI8);
         CHECK(loaded.rtlIfGainDb == 48);
-        CHECK(loaded.carrierSmoothingLength == 48);
+        CHECK(loaded.tracking.dopplerSmoothingMs == 480);
         CHECK(loaded.galileoAcquisition.enabled == 1 && loaded.acquisition.enabled == 1);
         CHECK(loaded.galileoAcquisition.firstPrn == 7 && loaded.galileoAcquisition.lastPrn == 8);
         CHECK(loaded.galileoAcquisition.xorCorrelation == 1);
@@ -128,6 +130,13 @@ static void TestConfig(void)
     CHECK(Parse("[galileo_acquisition]\nfft_size=8192\n", &c) == NG_OK);
     CHECK(Parse("[galileo_acquisition]\nfft_size=2048\n", &c) == NG_ERROR);
     CHECK(Parse("[tracking]\nfast_carrier=true\n", &c) == NG_OK && c.tracking.fastCarrier == 1);
+    CHECK(Parse("[dsp]\ngps_fft=integer_precise\ngalileo_fft=integer_scaled\n"
+                "spectrum_fft=float\ntracking_mixer_bits=16\n", &c) == NG_OK &&
+          c.acquisition.fftMode == NG_SEARCH_FFT_INTEGER_PRECISE &&
+          c.galileoAcquisition.fftMode == NG_SEARCH_FFT_INTEGER_SCALED &&
+          c.analysis.fftMode == NG_SEARCH_FFT_FLOAT && c.tracking.mixerBits == 16);
+    CHECK(Parse("[dsp]\ngps_fft=bogus\n", &c) == NG_ERROR);
+    CHECK(Parse("[dsp]\ntracking_mixer_bits=12\n", &c) == NG_ERROR);
     CHECK(Parse("[buffer]\nwindow_samples=1048576\ningress_blocks=4096\n", &c) == NG_ERROR);
     /* The same queue geometry fits the sample-storage guard only at two bytes per pair. */
     CHECK(Parse("[frontend]\ntype=bladerf\n[bladerf]\nformat=CI8\n"

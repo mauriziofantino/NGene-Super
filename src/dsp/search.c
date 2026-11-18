@@ -1,6 +1,7 @@
 /** @file search.c @brief Allocation-free search kernels with SSE2, AArch64 NEON and C fallback. */
 #include "ngene/dsp/search.h"
 #include "ngene/dsp/gps_ca.h"
+#include "ngene/dsp/fft.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,123 @@
 #endif
 #define NG_SEARCH_TAU 6.28318530717958647692
 
+/** Quantized byte rotation with explicit scale, preserving native ring samples. */
+void NgSearchMixPrefixCi8Arithmetic(double *prefix, const TNgIq8 *input, size_t count,
+                                    double rateHz, double frequencyHz, double phaseCycles,
+                                    int inverted, unsigned mixerBits)
+{
+    size_t k = 0;
+    double sumI = 0;
+    double sumQ = 0;
+    double angle = -NG_SEARCH_TAU * phaseCycles;
+    double step = -NG_SEARCH_TAU * frequencyHz / rateHz;
+    double ci = cos(angle), cq = sin(angle);
+    double di = cos(step), dq = sin(step);
+    prefix[0] = prefix[1] = 0;
+#if defined(NG_SEARCH_SSE) || defined(NG_SEARCH_NEON)
+    for (; k + 8 <= count; k += 8) {
+        int8_t ar[16], ai[16];
+        int16_t real[8], imag[8];
+        size_t lane;
+        for (lane = 0; lane < 8; ++lane) {
+            int8_t c = (int8_t)lround(7.0 * ci), s = (int8_t)lround(7.0 * cq);
+            double next = ci * di - cq * dq;
+            double nextQ = ci * dq + cq * di;
+            ar[2 * lane] = c;
+            ar[2 * lane + 1] = (int8_t)(inverted ? s : -s);
+            ai[2 * lane] = s;
+            ai[2 * lane + 1] = (int8_t)(inverted ? -c : c);
+            ci = next;
+            cq = nextQ;
+        }
+#ifdef NG_SEARCH_SSE
+        {
+            const __m128i zero = _mm_setzero_si128();
+            __m128i x = _mm_loadu_si128((const __m128i *)(const void *)(input + k));
+            __m128i r = _mm_loadu_si128((const __m128i *)(const void *)ar);
+            __m128i im = _mm_loadu_si128((const __m128i *)(const void *)ai);
+            __m128i xl = _mm_unpacklo_epi8(x, _mm_cmpgt_epi8(zero, x));
+            __m128i xh = _mm_unpackhi_epi8(x, _mm_cmpgt_epi8(zero, x));
+            if (mixerBits == 4) {
+                xl = _mm_srai_epi16(xl, 4);
+                xh = _mm_srai_epi16(xh, 4);
+            }
+            __m128i rl = _mm_unpacklo_epi8(r, _mm_cmpgt_epi8(zero, r));
+            __m128i rh = _mm_unpackhi_epi8(r, _mm_cmpgt_epi8(zero, r));
+            __m128i il = _mm_unpacklo_epi8(im, _mm_cmpgt_epi8(zero, im));
+            __m128i ih = _mm_unpackhi_epi8(im, _mm_cmpgt_epi8(zero, im));
+            int32_t sumR[8], sumQ8[8];
+            _mm_storeu_si128((__m128i *)(void *)sumR, _mm_madd_epi16(xl, rl));
+            _mm_storeu_si128((__m128i *)(void *)(sumR + 4), _mm_madd_epi16(xh, rh));
+            _mm_storeu_si128((__m128i *)(void *)sumQ8, _mm_madd_epi16(xl, il));
+            _mm_storeu_si128((__m128i *)(void *)(sumQ8 + 4), _mm_madd_epi16(xh, ih));
+            for (lane = 0; lane < 8; ++lane) {
+                real[lane] = (int16_t)sumR[lane];
+                imag[lane] = (int16_t)sumQ8[lane];
+            }
+        }
+#else
+        {
+            int8x8x2_t x = vld2_s8((const int8_t *)(const void *)(input + k));
+            int8x8x2_t coefficients = vld2_s8(ar), imaginary = vld2_s8(ai);
+            if (mixerBits == 4) {
+                x.val[0] = vshr_n_s8(x.val[0], 4);
+                x.val[1] = vshr_n_s8(x.val[1], 4);
+            }
+            vst1q_s16(real, vmlal_s8(vmull_s8(x.val[0], coefficients.val[0]),
+                                     x.val[1], coefficients.val[1]));
+            vst1q_s16(imag, vmlal_s8(vmull_s8(x.val[0], imaginary.val[0]),
+                                     x.val[1], imaginary.val[1]));
+        }
+#endif
+        for (lane = 0; lane < 8; ++lane) {
+            int r = real[lane], q = imag[lane];
+            if (mixerBits == 8) {
+                r = r < 0 ? -((-r + 8) / 16) : (r + 8) / 16;
+                q = q < 0 ? -((-q + 8) / 16) : (q + 8) / 16;
+            }
+            sumI += (double)r * (mixerBits == 16 ? 1.0 / 7.0 : 16.0 / 7.0);
+            sumQ += (double)q * (mixerBits == 16 ? 1.0 / 7.0 : 16.0 / 7.0);
+            prefix[2 * (k + lane) + 2] = sumI;
+            prefix[2 * (k + lane) + 3] = sumQ;
+        }
+    }
+#endif
+    for (; k < count; ++k) {
+        int c = (int)lround(7.0 * ci), s = (int)lround(7.0 * cq);
+        int i = input[k].i;
+        int q = input[k].q;
+        if (mixerBits == 4) {
+            i = i >= 0 ? i / 16 : -1 - ((-1 - i) / 16);
+            q = q >= 0 ? q / 16 : -1 - ((-1 - q) / 16);
+        }
+        q *= inverted ? -1 : 1;
+        int real = i * c - q * s;
+        int imag = i * s + q * c;
+        double next = ci * di - cq * dq;
+        /* /16 bounds complex rotation to signed-byte range, including -128.
+         * Restoring 16/7 preserves nominal native ADC amplitude. */
+        if (mixerBits == 8) {
+            real = real < 0 ? -((-real + 8) / 16) : (real + 8) / 16;
+            imag = imag < 0 ? -((-imag + 8) / 16) : (imag + 8) / 16;
+        }
+        sumI += (double)real * (mixerBits == 16 ? 1.0 / 7.0 : 16.0 / 7.0);
+        sumQ += (double)imag * (mixerBits == 16 ? 1.0 / 7.0 : 16.0 / 7.0);
+        prefix[2 * k + 2] = sumI;
+        prefix[2 * k + 3] = sumQ;
+        cq = ci * dq + cq * di;
+        ci = next;
+    }
+}
+
+void NgSearchMixPrefixCi8Quantized(double *prefix, const TNgIq8 *input, size_t count,
+                                  double rateHz, double frequencyHz, double phaseCycles,
+                                  int inverted)
+{
+    NgSearchMixPrefixCi8Arithmetic(prefix, input, count, rateHz, frequencyHz,
+                                   phaseCycles, inverted, 8);
+}
+
 /** Immutable transform geometry, twiddles and bit reversal. */
 struct TNgSearchFft {
     size_t size;
@@ -21,6 +139,13 @@ struct TNgSearchFft {
      * half-width h: W1 = exp(-j2pi k/2h) then W2 = exp(-j2pi k/4h), k < h, each stored as
      * h duplicated real parts {r0,r0,r1,r1,...} followed by h duplicated imaginary parts. */
     float *pairs;
+    TNgFftPlan *integerPlan;
+    int16_t *integerInput, *integerOutput;
+    int32_t *preciseWork, *preciseInput, *integerTwiddles;
+    int16_t *codeSpectrum16;
+    int32_t *codeSpectrum32;
+    TNgSearchFftMode codeMode;
+    int codeReady;
 };
 
 /** Half-width of the first twiddled stage pair: the trivial stages before it are one
@@ -47,7 +172,18 @@ int NgSearchFftCreate(size_t size, TNgSearchFft **out, TNgError *error)
     plan->size = size;
     plan->reverse = calloc(size, sizeof(*plan->reverse));
     plan->pairs = calloc(4 * size, sizeof(*plan->pairs));
-    if (plan->reverse == NULL || plan->pairs == NULL) {
+    plan->integerInput = calloc(2 * size, sizeof(int16_t));
+    plan->integerOutput = calloc(2 * size, sizeof(int16_t));
+    plan->preciseWork = calloc(2 * size, sizeof(int32_t));
+    plan->preciseInput = calloc(2 * size, sizeof(int32_t));
+    plan->integerTwiddles = calloc(2 * size, sizeof(int32_t));
+    plan->codeSpectrum16 = calloc(2 * size, sizeof(int16_t));
+    plan->codeSpectrum32 = calloc(2 * size, sizeof(int32_t));
+    if (plan->reverse == NULL || plan->pairs == NULL || plan->integerInput == NULL ||
+        plan->integerOutput == NULL || plan->preciseWork == NULL ||
+        plan->preciseInput == NULL ||
+        plan->integerTwiddles == NULL || plan->codeSpectrum16 == NULL ||
+        plan->codeSpectrum32 == NULL || NgFftCreate(size, &plan->integerPlan, error) != NG_OK) {
         NgSearchFftDestroy(plan);
         return NgFail(error, "Search FFT tables allocation failed");
     }
@@ -57,6 +193,17 @@ int NgSearchFftCreate(size_t size, TNgSearchFft **out, TNgError *error)
         for (bit = size; bit > 1; bit >>= 1) {
             plan->reverse[k] = (plan->reverse[k] << 1) | (value & 1);
             value >>= 1;
+        }
+    }
+    {
+        size_t width, offset = 0, j;
+        for (width = 2; width <= size; width *= 2) {
+            for (j = 0; j < width / 2; ++j) {
+                double angle = -NG_SEARCH_TAU * (double)j / (double)width;
+                plan->integerTwiddles[2 * (offset + j)] = (int32_t)llround(cos(angle) * 1073741824.0);
+                plan->integerTwiddles[2 * (offset + j) + 1] = (int32_t)llround(sin(angle) * 1073741824.0);
+            }
+            offset += width / 2;
         }
     }
     {
@@ -83,7 +230,280 @@ void NgSearchFftDestroy(TNgSearchFft *plan)
     if (plan != NULL) {
         free(plan->reverse);
         free(plan->pairs);
+        NgFftDestroy(plan->integerPlan);
+        free(plan->integerInput);
+        free(plan->integerOutput);
+        free(plan->preciseWork);
+        free(plan->preciseInput);
+        free(plan->integerTwiddles);
+        free(plan->codeSpectrum16);
+        free(plan->codeSpectrum32);
         free(plan);
+    }
+}
+
+int NgSearchFftExecuteInt32(TNgSearchFft *plan, const int32_t *input, int32_t *output,
+                           int inverse, TNgError *error)
+{
+    size_t n, k, width, offset = 0;
+    if (!plan || !input || !output || input == output || (inverse != 0 && inverse != 1))
+        return NgFail(error, "Invalid integer FFT buffers or direction");
+    n = plan->size;
+    for (k = 0; k < 2 * n; ++k)
+        if (input[k] < -16384 || input[k] > 16384)
+            return NgFail(error, "Integer FFT input exceeds safe headroom");
+    for (k = 0; k < n; ++k) {
+        size_t r = plan->reverse[k];
+        output[2 * r] = input[2 * k];
+        output[2 * r + 1] = input[2 * k + 1];
+    }
+    for (width = 2; width <= n; width *= 2) {
+        size_t base, j;
+        for (base = 0; base < n; base += width)
+            for (j = 0; j < width / 2; ++j) {
+                size_t a = 2 * (base + j), b = a + width;
+                int64_t wr = plan->integerTwiddles[2 * (offset + j)];
+                int64_t wi = plan->integerTwiddles[2 * (offset + j) + 1] *
+                             (inverse ? -1LL : 1LL);
+                int64_t r = ((int64_t)output[b] * wr - (int64_t)output[b + 1] * wi) /
+                            INT64_C(1073741824);
+                int64_t im = ((int64_t)output[b] * wi + (int64_t)output[b + 1] * wr) /
+                             INT64_C(1073741824);
+                int32_t ar = output[a], ai = output[a + 1];
+                output[a] = (int32_t)(ar + r);
+                output[a + 1] = (int32_t)(ai + im);
+                output[b] = (int32_t)(ar - r);
+                output[b + 1] = (int32_t)(ai - im);
+            }
+        offset += width / 2;
+    }
+    if (inverse)
+        for (k = 0; k < 2 * n; ++k)
+            output[k] /= (int32_t)n;
+    return NG_OK;
+}
+
+int NgSearchIntegerCode(TNgSearchFft *plan, const float *code, TNgSearchFftMode mode,
+                        TNgError *error)
+{
+    size_t k, n;
+    if (!plan || !code || mode == NG_SEARCH_FFT_FLOAT)
+        return NgFail(error, "Integer code FFT requires integer arithmetic mode");
+    n = plan->size;
+    plan->codeReady = 0;
+    if (mode == NG_SEARCH_FFT_INTEGER_SCALED) {
+        for (k = 0; k < n; ++k) {
+            if (code[k] != 1.0f && code[k] != -1.0f)
+                return NgFail(error, "Integer code FFT requires binary replica");
+            plan->integerInput[2 * k] = code[k] > 0 ? 16384 : -16384;
+            plan->integerInput[2 * k + 1] = 0;
+        }
+        if (NgFftExecute(plan->integerPlan, n, plan->integerInput,
+                         plan->codeSpectrum16, error) != NG_OK)
+            return NG_ERROR;
+    } else {
+        for (k = 0; k < n; ++k) {
+            if (code[k] != 1.0f && code[k] != -1.0f)
+                return NgFail(error, "Integer code FFT requires binary replica");
+            plan->preciseInput[2 * k] = code[k] > 0 ? 64 : -64;
+            plan->preciseInput[2 * k + 1] = 0;
+        }
+        if (NgSearchFftExecuteInt32(plan, plan->preciseInput,
+                                    plan->codeSpectrum32, 0, error) != NG_OK)
+            return NG_ERROR;
+    }
+    plan->codeMode = mode;
+    plan->codeReady = 1;
+    return NG_OK;
+}
+
+int NgSearchIntegerPcps(TNgSearchFft *plan, const int16_t *baseband,
+                        const TNgComplex *carrier, double baseScale, TNgSearchFftMode mode,
+                        double *power, TNgError *error)
+{
+    size_t k, n;
+    uint64_t maximum = 0;
+    unsigned shift = 0;
+    double restore;
+    if (!plan || !baseband || !carrier || !power || !plan->codeReady ||
+        plan->codeMode != mode || !(baseScale > 0))
+        return NgFail(error, "Integer PCPS code or input is unavailable");
+    n = plan->size;
+    for (k = 0; k < n; ++k) {
+        int32_t c = (int32_t)lround((double)carrier[k].i * 16384.0);
+        int32_t s = (int32_t)lround((double)carrier[k].q * 16384.0);
+        int32_t i = baseband[2 * k], q = baseband[2 * k + 1];
+        int32_t real = (i * c - q * s) / 16384;
+        int32_t imag = (i * s + q * c) / 16384;
+        if (real < -16384 || real > 16384 || imag < -16384 || imag > 16384)
+            return NgFail(error, "Integer carrier rotation exceeded FFT headroom");
+        if (mode == NG_SEARCH_FFT_INTEGER_SCALED) {
+            plan->integerInput[2 * k] = (int16_t)real;
+            plan->integerInput[2 * k + 1] = (int16_t)imag;
+        } else {
+            plan->preciseInput[2 * k] = real;
+            plan->preciseInput[2 * k + 1] = imag;
+        }
+    }
+    if (mode == NG_SEARCH_FFT_INTEGER_SCALED) {
+        if (NgFftExecute(plan->integerPlan, n, plan->integerInput,
+                         plan->integerOutput, error) != NG_OK)
+            return NG_ERROR;
+    } else if (NgSearchFftExecuteInt32(plan, plan->preciseInput,
+                                       plan->preciseWork, 0, error) != NG_OK)
+        return NG_ERROR;
+    for (k = 0; k < n; ++k) {
+        int64_t a = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->integerOutput[2 * k] :
+                    plan->preciseWork[2 * k];
+        int64_t b = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->integerOutput[2 * k + 1] :
+                    plan->preciseWork[2 * k + 1];
+        int64_t c = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->codeSpectrum16[2 * k] :
+                    plan->codeSpectrum32[2 * k];
+        int64_t d = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->codeSpectrum16[2 * k + 1] :
+                    plan->codeSpectrum32[2 * k + 1];
+        int64_t real = a * c + b * d, imag = b * c - a * d;
+        uint64_t ar = (uint64_t)(real < 0 ? -real : real);
+        uint64_t ai = (uint64_t)(imag < 0 ? -imag : imag);
+        if (ar > maximum) maximum = ar;
+        if (ai > maximum) maximum = ai;
+    }
+    while ((maximum >> shift) > 8192u)
+        ++shift;
+    for (k = 0; k < n; ++k) {
+        int64_t a = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->integerOutput[2 * k] :
+                    plan->preciseWork[2 * k];
+        int64_t b = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->integerOutput[2 * k + 1] :
+                    plan->preciseWork[2 * k + 1];
+        int64_t c = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->codeSpectrum16[2 * k] :
+                    plan->codeSpectrum32[2 * k];
+        int64_t d = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->codeSpectrum16[2 * k + 1] :
+                    plan->codeSpectrum32[2 * k + 1];
+        int32_t real = (int32_t)((a * c + b * d) / (INT64_C(1) << shift));
+        int32_t imag = (int32_t)((b * c - a * d) / (INT64_C(1) << shift));
+        if (mode == NG_SEARCH_FFT_INTEGER_SCALED) {
+            plan->integerInput[2 * k] = (int16_t)real;
+            plan->integerInput[2 * k + 1] = (int16_t)-imag;
+        } else {
+            plan->preciseInput[2 * k] = real;
+            plan->preciseInput[2 * k + 1] = imag;
+        }
+    }
+    if (mode == NG_SEARCH_FFT_INTEGER_SCALED) {
+        if (NgFftExecute(plan->integerPlan, n, plan->integerInput,
+                         plan->integerOutput, error) != NG_OK)
+            return NG_ERROR;
+        restore = ldexp((double)n * (double)n / (baseScale * 16384.0), shift);
+        for (k = 0; k < n; ++k) {
+            double i = plan->integerOutput[2 * k] * restore;
+            double q = plan->integerOutput[2 * k + 1] * restore;
+            power[k] += i * i + q * q;
+        }
+    } else {
+        if (NgSearchFftExecuteInt32(plan, plan->preciseInput,
+                                    plan->preciseWork, 1, error) != NG_OK)
+            return NG_ERROR;
+        restore = ldexp(1.0 / (baseScale * 64.0), shift);
+        for (k = 0; k < n; ++k) {
+            double i = plan->preciseWork[2 * k] * restore;
+            double q = plan->preciseWork[2 * k + 1] * restore;
+            power[k] += i * i + q * q;
+        }
+    }
+    return NG_OK;
+}
+
+/** Integer transforms use a per-call input scale so products never wrap. The int32
+ * mode preserves butterfly headroom; the Q14 mode halves after every stage. */
+void NgSearchFftExecuteMode(TNgSearchFft *plan, TNgComplex *values, int inverse,
+                            TNgSearchFftMode mode)
+{
+    size_t n = plan->size, k;
+    double maximum = 0, gain, restore;
+    if (mode == NG_SEARCH_FFT_FLOAT) {
+        NgSearchFftExecute(plan, values, inverse);
+        return;
+    }
+    for (k = 0; k < n; ++k) {
+        maximum = fmax(maximum, fabs(values[k].i));
+        maximum = fmax(maximum, fabs(values[k].q));
+    }
+    if (!(maximum > 0) || !isfinite(maximum)) {
+        memset(values, 0, n * sizeof(*values));
+        return;
+    }
+    gain = 16384.0 / maximum;
+    if (mode == NG_SEARCH_FFT_INTEGER_SCALED) {
+        k = 0;
+#ifdef NG_SEARCH_SSE
+        {
+            __m128 scale = _mm_set1_ps((float)gain);
+            __m128i conjugate = _mm_setr_epi32(0, INT32_MIN, 0, INT32_MIN);
+            for (; k + 4 <= n; k += 4) {
+                __m128 a = _mm_loadu_ps((const float *)(const void *)(values + k));
+                __m128 b = _mm_loadu_ps((const float *)(const void *)(values + k + 2));
+                if (inverse) {
+                    a = _mm_xor_ps(a, _mm_castsi128_ps(conjugate));
+                    b = _mm_xor_ps(b, _mm_castsi128_ps(conjugate));
+                }
+                _mm_storeu_si128((__m128i *)(void *)(plan->integerInput + 2 * k),
+                    _mm_packs_epi32(_mm_cvtps_epi32(_mm_mul_ps(a, scale)),
+                                    _mm_cvtps_epi32(_mm_mul_ps(b, scale))));
+            }
+        }
+#endif
+        for (; k < n; ++k) {
+            plan->integerInput[2 * k] = (int16_t)lround(values[k].i * gain);
+            plan->integerInput[2 * k + 1] = (int16_t)lround(values[k].q * gain *
+                                                              (inverse ? -1.0 : 1.0));
+        }
+        if (NgFftExecute(plan->integerPlan, n, plan->integerInput,
+                         plan->integerOutput, NULL) != NG_OK) {
+            memset(values, 0, n * sizeof(*values));
+            return;
+        }
+        restore = (inverse ? 1.0 : (double)n) / gain;
+        k = 0;
+#ifdef NG_SEARCH_SSE
+        {
+            __m128 scale = _mm_set1_ps((float)restore);
+            __m128i zero = _mm_setzero_si128();
+            __m128i conjugate = _mm_setr_epi32(0, INT32_MIN, 0, INT32_MIN);
+            for (; k + 4 <= n; k += 4) {
+                __m128i x = _mm_loadu_si128((const __m128i *)(const void *)
+                                             (plan->integerOutput + 2 * k));
+                __m128 a = _mm_mul_ps(_mm_cvtepi32_ps(
+                    _mm_unpacklo_epi16(x, _mm_cmpgt_epi16(zero, x))), scale);
+                __m128 b = _mm_mul_ps(_mm_cvtepi32_ps(
+                    _mm_unpackhi_epi16(x, _mm_cmpgt_epi16(zero, x))), scale);
+                if (inverse) {
+                    a = _mm_xor_ps(a, _mm_castsi128_ps(conjugate));
+                    b = _mm_xor_ps(b, _mm_castsi128_ps(conjugate));
+                }
+                _mm_storeu_ps((float *)(void *)(values + k), a);
+                _mm_storeu_ps((float *)(void *)(values + k + 2), b);
+            }
+        }
+#endif
+        for (; k < n; ++k) {
+            values[k].i = (float)(plan->integerOutput[2 * k] * restore);
+            values[k].q = (float)(plan->integerOutput[2 * k + 1] * restore *
+                                  (inverse ? -1.0 : 1.0));
+        }
+    } else {
+        for (k = 0; k < n; ++k) {
+            plan->preciseInput[2 * k] = (int32_t)lround(values[k].i * gain);
+            plan->preciseInput[2 * k + 1] = (int32_t)lround(values[k].q * gain);
+        }
+        if (NgSearchFftExecuteInt32(plan, plan->preciseInput,
+                                    plan->preciseWork, inverse, NULL) != NG_OK) {
+            memset(values, 0, n * sizeof(*values));
+            return;
+        }
+        restore = 1.0 / gain;
+        for (k = 0; k < n; ++k) {
+            values[k].i = (float)(plan->preciseWork[2 * k] * restore);
+            values[k].q = (float)(plan->preciseWork[2 * k + 1] * restore);
+        }
     }
 }
 

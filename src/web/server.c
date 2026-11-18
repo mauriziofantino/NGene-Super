@@ -387,6 +387,8 @@ static cJSON *AnalysisConfigJson(const TNgAnalysisConfig *c)
     cJSON_AddBoolToObject(o, "spectrum_enabled", c->spectrumEnabled);
     cJSON_AddBoolToObject(o, "histogram_enabled", c->histogramEnabled);
     Number(o, "fft_size", (double)c->fftSize);
+    String(o, "fft_mode", c->fftMode == NG_SEARCH_FFT_INTEGER_PRECISE ? "integer_precise" :
+                          c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED ? "integer_scaled" : "float");
     String(o, "window", NgWindowName(c->window));
     Number(o, "overlap_percent", c->overlapPercent);
     Number(o, "averages", c->averages);
@@ -575,6 +577,15 @@ static int ReadAnalysisConfig(cJSON *body, TNgAnalysisConfig *out, TNgError *err
         BOOL_FIELD("histogram_enabled", histogramEnabled)
         if (cJSON_IsString(v) == 0) {
             return NgFail(error, "Expected string: %s", key);
+        }
+        if (strcmp(key, "fft_mode") == 0) {
+            if (strcmp(v->valuestring, "float") == 0) out->fftMode = NG_SEARCH_FFT_FLOAT;
+            else if (strcmp(v->valuestring, "integer_precise") == 0)
+                out->fftMode = NG_SEARCH_FFT_INTEGER_PRECISE;
+            else if (strcmp(v->valuestring, "integer_scaled") == 0)
+                out->fftMode = NG_SEARCH_FFT_INTEGER_SCALED;
+            else return NgFail(error, "Invalid analysis FFT arithmetic");
+            continue;
         }
         if (strcmp(key, "window") == 0) {
             int w;

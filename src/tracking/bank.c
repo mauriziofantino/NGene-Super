@@ -13,7 +13,6 @@
 /** Receiver-owned pool. All allocation/assignment happens outside DSP jobs. */
 typedef struct {
     TNgPvtSnapshot pvt;                   /**< Last common-epoch code/Doppler solve. */
-    TNgPvtSmoother smoother;              /**< Run-owned per-satellite carrier smoothing. */
     double sampleRate;                    /**< Actual source pairs per second. */
     uint64_t lastPvtSample;               /**< Last periodic solver invocation. */
     TNgTrackingConfig config;             /**< Frozen total capacity and reservations. */
@@ -344,8 +343,8 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
         (bank->pool->pvt.epoch != bank->pool->epoch || !bank->pool->lastPvtSample ||
          bank->pool->expected < bank->pool->lastPvtSample ||
          (double)(bank->pool->expected - bank->pool->lastPvtSample) >= bank->pool->sampleRate)) {
-        NgPvtComputeSmoothed(bank->pool->slots, bank->pool->epoch, bank->pool->expected,
-                             bank->pool->sampleRate, &bank->pool->smoother, &bank->pool->pvt);
+        NgPvtCompute(bank->pool->slots, bank->pool->epoch, bank->pool->expected,
+                     bank->pool->sampleRate, &bank->pool->pvt);
         bank->pool->lastPvtSample = bank->pool->expected;
     }
     return capture->ops->process(capture->context, id, state, window, next, error);
@@ -469,12 +468,6 @@ void NgTrackingBankReadPvt(TNgTrackingBank *bank, TNgPvtSnapshot *snapshot)
     memset(snapshot, 0, sizeof(*snapshot));
     if (bank)
         *snapshot = bank->pool->pvt;
-}
-
-void NgTrackingBankSetSmoothing(TNgTrackingBank *bank, unsigned length)
-{
-    if (bank)
-        NgPvtSmootherInit(&bank->pool->smoother, length);
 }
 
 /** Only the owner frees shared slots; non-owner subscribers retain no resources. */

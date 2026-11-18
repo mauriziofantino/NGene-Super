@@ -105,6 +105,8 @@ struct TNgAnalysis {
     uint32_t dcEstimatePairs[2];
     /** Owned immutable FFT plan; destroyed after worker join. */
     TNgFftPlan *plan;
+    TNgSearchFft *searchPlan; /**< Worker-private float/int32 alternative FFT. */
+    size_t searchPlanSize;
     /** FFT length associated with cached window coefficients. */
     size_t cachedSize;
     /** Window family associated with cached coefficients. */
@@ -125,6 +127,8 @@ struct TNgAnalysis {
     int32_t window[NG_FFT_MAX_SIZE];
     /** Worker-owned uint64 FFT power accumulation buffer. */
     uint64_t power[NG_FFT_MAX_SIZE];
+    double alternatePower[NG_FFT_MAX_SIZE];
+    TNgComplex alternateInput[NG_FFT_MAX_SIZE];
 };
 
 /**
@@ -174,6 +178,7 @@ void NgAnalysisDefaults(TNgAnalysisConfig *config)
     config->spectrumEnabled = 1;
     config->histogramEnabled = 1;
     config->fftSize = NG_DEFAULT_SPECTRUM_FFT_SIZE;
+    config->fftMode = NG_SEARCH_FFT_INTEGER_SCALED;
     config->window = NG_WINDOW_HANN;
     config->overlapPercent = NG_DEFAULT_OVERLAP_PERCENT;
     config->averages = NG_DEFAULT_WELCH_SEGMENTS;
@@ -201,6 +206,8 @@ int NgAnalysisValidate(const TNgAnalysisConfig *config, TNgError *error)
 {
     if (config == NULL || config->fftSize < NG_SPECTRUM_MIN_FFT_SIZE ||
         config->fftSize > NG_FFT_MAX_SIZE || ((config->fftSize) & (config->fftSize - 1)) != 0 ||
+        config->fftMode < NG_SEARCH_FFT_FLOAT ||
+        config->fftMode > NG_SEARCH_FFT_INTEGER_SCALED ||
         config->window < NG_WINDOW_RECT || config->window > NG_WINDOW_BLACKMAN_HARRIS ||
         config->overlapPercent > NG_SPECTRUM_MAX_OVERLAP_PERCENT || config->averages < 1 ||
         config->averages > NG_SPECTRUM_MAX_AVERAGES || isfinite(config->updateHz) == 0 ||
@@ -475,6 +482,14 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         s->histogramSeconds = NgMonotonicSeconds();
     }
     if (b->kind == 0) {
+        if (c->fftMode != NG_SEARCH_FFT_INTEGER_SCALED && a->searchPlanSize != n) {
+            NgSearchFftDestroy(a->searchPlan);
+            a->searchPlan = NULL;
+            a->searchPlanSize = 0;
+            if (NgSearchFftCreate(n, &a->searchPlan, &error) != NG_OK)
+                return 0;
+            a->searchPlanSize = n;
+        }
         /* Offset subtraction can extend beyond the ADC range. Keep every FFT
          * component inside its Q14 contract, then restore power normalization. */
         for (k = 0; k < 2 * b->count; ++k) {
@@ -517,11 +532,13 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         }
         gain = a->cachedGain;
         memset(a->power, 0, n * sizeof(a->power[0]));
+        memset(a->alternatePower, 0, n * sizeof(a->alternatePower[0]));
         for (f = 0; f < c->averages; ++f) {
             size_t offset = f * (n * (100 - c->overlapPercent) / 100);
             if (BurstCurrent(a, b) == 0) {
                 return 0;
             }
+            if (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED)
             for (k = 0; k < n; ++k) {
                 int iValue, qValue;
                 iValue = a->centered[2 * (offset + k)];
@@ -546,10 +563,26 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             if (BurstCurrent(a, b) == 0) {
                 return 0;
             }
-            if (NgFftExecute(a->plan, n, a->input, a->output, &error) != NG_OK) {
-                return 0; /* Validated fixed workspace contract. */
+            if (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED) {
+                if (NgFftExecute(a->plan, n, a->input, a->output, &error) != NG_OK)
+                    return 0;
+                NgPowerAccumulate(a->output, a->power, n);
+            } else {
+                /* Preserve the centered/windowed input before int16 narrowing. */
+                double scale = (double)fftScale * (b->format == NG_FORMAT_CI16 ? 0.5 : 1.0) *
+                               (fftAttenuated ? 0.5 : 1.0) / 32768.0;
+                for (k = 0; k < n; ++k) {
+                    a->alternateInput[k].i = (float)((double)a->centered[2 * (offset + k)] *
+                                                      scale * a->window[k]);
+                    a->alternateInput[k].q = (float)((double)a->centered[2 * (offset + k) + 1] *
+                                                      scale * a->window[k]);
+                }
+                NgSearchFftExecuteMode(a->searchPlan, a->alternateInput, 0, c->fftMode);
+                for (k = 0; k < n; ++k) {
+                    double i = a->alternateInput[k].i, q = a->alternateInput[k].q;
+                    a->alternatePower[k] += (i * i + q * q) / ((double)n * (double)n);
+                }
             }
-            NgPowerAccumulate(a->output, a->power, n);
         }
         s->enbwHz = (double)a->sampleRate * a->cachedEnergy / ((double)n * (double)n * gain * gain);
         if (a->temporalRevision != b->revision || a->temporalEpoch != b->epoch ||
@@ -560,7 +593,9 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             a->temporalContinuity = b->continuity;
         }
         for (k = 0; k < n; ++k) {
-            double value = (double)a->power[k] * (fftAttenuated ? 4.0 : 1.0) /
+            double value = (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED ?
+                            (double)a->power[k] : a->alternatePower[k]) *
+                           (fftAttenuated ? 4.0 : 1.0) /
                            ((double)c->averages * 16384 * 16384 * gain * gain);
             if (c->density != 0) {
                 value /= s->enbwHz;
@@ -763,12 +798,15 @@ int NgAnalysisCreate(uint32_t sampleRate, const TNgAnalysisConfig *config, TNgAn
         free(a);
         return NgFail(error, "Cannot initialize analysis wakeup");
     }
-    if (NgFftCreate(16384, &a->plan, error) != NG_OK) {
+    if (NgFftCreate(16384, &a->plan, error) != NG_OK ||
+        NgSearchFftCreate(config->fftSize, &a->searchPlan, error) != NG_OK) {
+        NgFftDestroy(a->plan);
         NgConditionDestroy(&a->ready);
         NgMutexDestroy(&a->mutex);
         free(a);
         return NG_ERROR;
     }
+    a->searchPlanSize = config->fftSize;
     a->interestUntil[0] = a->interestUntil[1] = 1e100; /* Library consumers default active. */
     a->sampleRate = sampleRate;
     a->config = *config;
@@ -778,6 +816,7 @@ int NgAnalysisCreate(uint32_t sampleRate, const TNgAnalysisConfig *config, TNgAn
     a->filling[0] = a->filling[1] = -1;
     if (NgThreadStart(&a->thread, Worker, a) != 0) {
         NgFftDestroy(a->plan);
+        NgSearchFftDestroy(a->searchPlan);
         NgConditionDestroy(&a->ready);
         NgMutexDestroy(&a->mutex);
         free(a);
@@ -805,6 +844,7 @@ void NgAnalysisDestroy(TNgAnalysis *analysis)
         NgMutexUnlock(&analysis->mutex);
         NgThreadJoin(analysis->thread);
         NgFftDestroy(analysis->plan);
+        NgSearchFftDestroy(analysis->searchPlan);
         NgConditionDestroy(&analysis->ready);
         NgMutexDestroy(&analysis->mutex);
         free(analysis);

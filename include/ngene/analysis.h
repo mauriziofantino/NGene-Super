@@ -2,6 +2,7 @@
 #ifndef NGENE_ANALYSIS_H
 #define NGENE_ANALYSIS_H
 #include "ngene/types.h"
+#include "ngene/dsp/search.h"
 /** @brief Maximum telemetry PSD bins; larger FFTs are reduced for display. */
 #define NG_ANALYSIS_BINS 1024
 /** @brief All signed-int8 levels, including both saturation endpoints. */
@@ -29,6 +30,7 @@ typedef struct {
     int histogramEnabled;
     /** Discrete complex FFT length; analysis accepts 256 through 16384 powers of two. */
     size_t fftSize;
+    TNgSearchFftMode fftMode; /**< Spectrum arithmetic; independent of FFT length. */
     /** Window applied before each integer FFT. */
     TNgWindow window;
     /** Welch segment overlap in percent, from 0 through 99. */

@@ -12,6 +12,7 @@ typedef struct {
     unsigned lastPrn;             /**< Last PRN, firstPrn..32. */
     int squareCarrier;            /**< Squared local sin/cos instead of sinusoidal carrier. */
     int xorCorrelation;           /**< Exact SIMD code sign XOR instead of multiplication. */
+    TNgSearchFftMode fftMode;      /**< Coarse PCPS FFT arithmetic; refinement remains native. */
     double cpuBudget; /**< Receiver-run search CPU (thread CPU clock), in cores per signal
                            second; 0 disables.
                            Scheduling only: it delays searches, never changes their decisions.

@@ -80,6 +80,15 @@ void NgNavigationGalileoPrompt(TNgNavigation *n, double i, int pll, uint64_t end
     /* Alert pages have no operational navigation data. */
     if ((decoded[0] | n->galileo.even[0]) & 64u)
         return;
+    /* Classic ExtractGalreservedBits: odd-page bits 18..57 hold 8 HKROOT
+       and 32 MACK bits. Publish only after the page CRC has passed. */
+    n->snapshot.osnma.hkroot = (uint8_t)((decoded[2] << 2) | (decoded[3] >> 6));
+    for (k = 0; k < 4; ++k)
+        n->snapshot.osnma.mack[k] = (uint8_t)((decoded[3 + k] << 2) |
+                                                 (decoded[4 + k] >> 6));
+    n->snapshot.osnma.boundarySample = endSample;
+    n->snapshot.osnma.pages++;
+    n->snapshot.osnma.valid = 1;
     for (k = 0; k < 14; ++k)
         data[k] = (unsigned char)((n->galileo.even[k] << 2) | (n->galileo.even[k + 1] >> 6));
     for (; k < 16; ++k)

@@ -43,6 +43,7 @@ struct TNgTracking {
     double codePhase;             /**< Local code phase in chips. */
     double carrierPhase;          /**< Local carrier phase in cycles. */
     double carrierHz;             /**< IF plus estimated Doppler. */
+    double smoothedDopplerHz;     /**< Filtered output; carrier NCO stays untouched. */
     double initialCarrier;        /**< Carrier anchor for Classic loop. */
     double initialCode;           /**< Code-rate anchor for Classic loop. */
     double carrierNco, codeNco, oldCarrierError, oldDllError;      /**< Loop memories. */
@@ -67,6 +68,7 @@ void NgTrackingDefaults(TNgTrackingConfig *config)
     config->enabled = 1;
     config->tapCount = 3;
     config->spacingChips = 0.4;
+    config->dopplerSmoothingMs = 200;
 }
 
 /** Validate all configurable arithmetic boundaries. */
@@ -81,7 +83,9 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
         (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1) ||
-        (config->fastCarrier != 0 && config->fastCarrier != 1) || config->tapCount < 3 ||
+        (config->fastCarrier != 0 && config->fastCarrier != 1) ||
+        (config->mixerBits != 0 && config->mixerBits != 4 && config->mixerBits != 8 &&
+         config->mixerBits != 16) || config->dopplerSmoothingMs > 10000 || config->tapCount < 3 ||
         config->tapCount > NG_TRACKING_MAX_TAPS || !(config->tapCount & 1u) ||
         !isfinite(config->spacingChips) || config->spacingChips <= 0 || config->spacingChips > 1)
         return NgFail(error, "Invalid tracking modes or multi-correlator geometry");
@@ -101,6 +105,8 @@ int NgTrackingCreate(const TNgTrackingConfig *config, const TNgStreamInfo *strea
     if (!stream || stream->sampleRateHz < 2048000 || stream->sampleRateHz > 20000000 ||
         (constellation != 1 && constellation != 2))
         return NgFail(error, "Unsupported tracking stream or constellation");
+    if (config->mixerBits != 0 && stream->format != NG_FORMAT_CI8)
+        return NgFail(error, "Byte arithmetic requires a CI8 common stream");
     tracking = calloc(1, sizeof(*tracking));
     if (!tracking)
         return NgFail(error, "Cannot allocate tracking workspace");
@@ -152,6 +158,7 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     tracking->carrierPhase = 0;
     tracking->initialCarrier = (double)tracking->stream.digitalIfHz + result->dopplerHz;
     tracking->carrierHz = tracking->initialCarrier;
+    tracking->smoothedDopplerHz = result->dopplerHz;
     tracking->meanFrequency = tracking->initialCarrier;
     tracking->oldMean = 0;
     tracking->initialCode = 1023000.0 * (1.0 + result->dopplerHz / 1575420000.0);
@@ -345,7 +352,14 @@ static void Complete(TNgTracking *t)
     t->snapshot.codeDelayChips = delay;
     t->snapshot.firstSample = t->start;
     t->snapshot.endSample = t->expected;
-    t->snapshot.dopplerHz = t->carrierHz - (double)t->stream.digitalIfHz;
+    {
+        double rawDoppler = t->carrierHz - (double)t->stream.digitalIfHz;
+        double dt = (double)t->accumulated / t->stream.sampleRateHz;
+        double tau = (double)t->config.dopplerSmoothingMs / 1000.0;
+        t->smoothedDopplerHz = tau > 0 ? t->smoothedDopplerHz +
+            dt / (tau + dt) * (rawDoppler - t->smoothedDopplerHz) : rawDoppler;
+        t->snapshot.dopplerHz = t->smoothedDopplerHz;
+    }
     t->snapshot.dllError = dll;
     t->snapshot.carrierError = error;
     t->snapshot.tapCount = t->observeIntegration ? t->config.tapCount : 3u;
@@ -400,6 +414,11 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
         if (count > window->meta.count - position)
             count = window->meta.count - position;
         if (window->format == 0 || window->format == NG_FORMAT_CI8) {
+            if (t->config.mixerBits != 0)
+                NgSearchMixPrefixCi8Arithmetic(t->prefix, window->samples + position, count,
+                    t->stream.sampleRateHz, t->carrierHz, t->carrierPhase,
+                    t->stream.spectrumInverted, t->config.mixerBits);
+            else
             (t->config.fastCarrier ? NgSearchMixPrefixCi8Lanes : NgSearchMixPrefixCi8)(
                 t->prefix, window->samples + position, count, t->stream.sampleRateHz,
                 t->carrierHz, t->carrierPhase, t->config.squareCarrier,

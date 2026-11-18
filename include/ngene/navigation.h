@@ -6,7 +6,16 @@
 
 /** Value telemetry; TOW denotes the next subframe at the last validated boundary. */
 typedef struct {
+    uint8_t hkroot;          /**< First eight OSNMA bits on the validated odd I/NAV page. */
+    uint8_t mack[4];         /**< Following 32 OSNMA bits, MSB first. */
+    uint64_t boundarySample; /**< End sample of this CRC-validated page. */
+    uint64_t pages;          /**< Number of CRC-validated nominal OSNMA pages. */
+    int valid;               /**< Raw data present; never implies authentication. */
+} TNgOsnmaPage;
+
+typedef struct {
     TNgBroadcast broadcast;  /**< Per-satellite pending and committed broadcast values. */
+    TNgOsnmaPage osnma;      /**< Latest raw Galileo OSNMA fragment. */
     int bitSynchronized;     /**< Five verified 20-ms transition intervals. */
     int towValid;            /**< All ten words of a subframe passed parity. */
     unsigned towSeconds;     /**< GPS HOW, seconds modulo one week. */

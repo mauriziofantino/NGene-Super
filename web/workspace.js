@@ -112,7 +112,7 @@ function healthMarkup() {
   return heading('RECEIVER / SYSTEM HEALTH', 'Inspect the system behind the signal',
     'Read the connected receiver’s platform, stream capabilities and available modules. Queue and continuity measurements below come from the running service.',
     `${button('rf', 'RF observation')}${settingsButton('receiver', 'Receiver & buffers')}`) +
-    `<div class="workspace-kpis">${kpi('CONNECTION', field('connection'), field('receiverState'))}${kpi('PLATFORM', field('architecture'), field('operatingSystem'))}${kpi('RECEIVER VERSION', field('version'), field('profileState'))}${kpi('INTEGER FFT', field('fftBackend'), 'Selected by this receiver build')}</div>` +
+    `<div class="workspace-kpis">${kpi('CONNECTION', field('connection'), field('receiverState'))}${kpi('PLATFORM', field('architecture'), field('operatingSystem'))}${kpi('RECEIVER VERSION', field('version'), field('profileState'))}${kpi('FFT BACKEND', field('fftBackend'), 'Available integer backend in this receiver build')}</div>` +
     `<div class="workspace-grid">${card('Available processing modules', 'The interface keeps source processing and GNSS solution states separate.',
       `<div class="workspace-module-list">${[
         ['Native input and common signed stream', 'module-input'], ['Spectrum / waterfall / I/Q statistics', 'module-analysis'], ['Native I/Q recording and replay', 'module-recording'], ['Satellite acquisition', 'module-acquisition'], ['Channel tracking and navigation decoding', 'module-gnss'], ['PVT / integrity / authentication', 'module-gnss']

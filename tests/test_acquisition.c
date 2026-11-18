@@ -15,6 +15,7 @@
             return 1;                                                                              \
         }                                                                                          \
     } while (0)
+static TNgSearchFftMode testFftMode;
 
 /** Deterministic independent uniform noise source. */
 static double Noise(uint32_t *state)
@@ -65,6 +66,7 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
     config.lastPrn = 7;
     config.squareCarrier = square;
     config.xorCorrelation = xorSigns;
+    config.fftMode = testFftMode;
     CHECK(NgAcquisitionCreate(&config, &stream, &acquisition, &channel, &error) == NG_OK);
     NgAcquisitionObserve(acquisition, 7);
     window.samples = samples;
@@ -181,6 +183,7 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
     config.lastPrn = 7;
     config.squareCarrier = square;
     config.xorCorrelation = xorSigns;
+    config.fftMode = testFftMode;
     CHECK(NgAcquisitionCreateGalileo(&config, &stream, &acquisition, &channel, &error) == NG_OK);
     NgAcquisitionObserve(acquisition, 7);
     window.samples = wide ? (const TNgIq8 *)wideSamples : samples;
@@ -287,6 +290,14 @@ static int Kernels(void)
     double xq;
     size_t k;
     CHECK(NgSearchFftCreate(16, &fft, &error) == NG_OK);
+    {
+        int32_t input[32] = {0}, output[32] = {0};
+        input[6] = 4096;
+        CHECK(NgSearchFftExecuteInt32(fft, input, output, 0, &error) == NG_OK);
+        CHECK(output[0] == 4096 && output[1] == 0);
+        CHECK(output[16] == -4096 && output[17] == 0);
+        CHECK(NgSearchFftExecuteInt32(fft, input, input, 0, &error) == NG_ERROR);
+    }
     values[3].i = 0.37f;
     values[3].q = -0.19f;
     NgSearchFftExecute(fft, values, 0);
@@ -296,6 +307,21 @@ static int Kernels(void)
     }
     NgSearchFftExecute(fft, values, 1);
     CHECK(fabs(values[3].i - 0.37) < 1e-6);
+    for (unsigned mode = NG_SEARCH_FFT_INTEGER_PRECISE;
+         mode <= NG_SEARCH_FFT_INTEGER_SCALED; ++mode) {
+        memset(values, 0, sizeof(values));
+        values[3].i = 0.37f;
+        values[3].q = -0.19f;
+        NgSearchFftExecuteMode(fft, values, 0, (TNgSearchFftMode)mode);
+        for (k = 0; k < 16; ++k) {
+            double angle = -6.283185307179586 * (double)(3 * k) / 16;
+            CHECK(fabs(values[k].i - (0.37 * cos(angle) + 0.19 * sin(angle))) <
+                  (mode == NG_SEARCH_FFT_INTEGER_PRECISE ? 0.002 : 0.02));
+        }
+        NgSearchFftExecuteMode(fft, values, 1, (TNgSearchFftMode)mode);
+        CHECK(fabs(values[3].i - 0.37) <
+              (mode == NG_SEARCH_FFT_INTEGER_PRECISE ? 0.002 : 0.02));
+    }
     for (k = 0; k < 16; ++k)
         code[k] = k % 2 ? -1.0f : 1.0f;
     NgSearchCorrelate(values, code, 15, 0, &pi, &pq);
@@ -453,9 +479,101 @@ static int NoisePolicy(void)
     return 0;
 }
 
-/** Run RF formats/rates, sinusoidal/square mixing, noise and independent confirmation cases. */
-int main(void)
+static int BenchmarkFft(void)
 {
+    TNgSearchFft *plan = NULL;
+    TNgError error = {{0}};
+    TNgComplex *values = calloc(16384, sizeof(*values));
+    volatile double checksum = 0;
+    CHECK(values != NULL && NgSearchFftCreate(16384, &plan, &error) == NG_OK);
+    for (unsigned mode = 0; mode <= NG_SEARCH_FFT_INTEGER_SCALED; ++mode) {
+        double start = NgMonotonicSeconds();
+        for (unsigned repeat = 0; repeat < 100; ++repeat) {
+            for (size_t k = 0; k < 16384; ++k) {
+                values[k].i = (float)((int)(k * 37 % 251) - 125);
+                values[k].q = (float)((int)(k * 71 % 251) - 125);
+            }
+            NgSearchFftExecuteMode(plan, values, 0, (TNgSearchFftMode)mode);
+            checksum += values[repeat].i;
+        }
+        printf("FFT 16384 mode %u: %.3f us/transform\n", mode,
+               (NgMonotonicSeconds() - start) * 10000.0);
+    }
+    printf("FFT checksum %.3f\n", checksum);
+    NgSearchFftDestroy(plan);
+    free(values);
+    return 0;
+}
+
+static int BenchmarkIntegerPcps(void)
+{
+    const size_t n = 4096;
+    TNgSearchFft *plan = NULL;
+    TNgError error = {{0}};
+    int16_t *baseband = calloc(2 * n, sizeof(*baseband));
+    TNgComplex *carrier = calloc(n, sizeof(*carrier));
+    float *code = calloc(n, sizeof(*code));
+    double *power = calloc(n, sizeof(*power));
+    TNgComplex *floatBaseband = calloc(n, sizeof(*floatBaseband));
+    TNgComplex *floatCode = calloc(n, sizeof(*floatCode));
+    TNgComplex *floatWork = calloc(n, sizeof(*floatWork));
+    volatile double checksum = 0;
+    CHECK(baseband && carrier && code && power && floatBaseband && floatCode && floatWork &&
+          NgSearchFftCreate(n, &plan, &error) == NG_OK);
+    for (size_t k = 0; k < n; ++k) {
+        baseband[2 * k] = (int16_t)((int)(k * 37 % 251) - 125);
+        baseband[2 * k + 1] = (int16_t)((int)(k * 71 % 251) - 125);
+        code[k] = k % 2 ? -1.0f : 1.0f;
+        floatBaseband[k].i = (float)baseband[2 * k];
+        floatBaseband[k].q = (float)baseband[2 * k + 1];
+        floatCode[k].i = code[k];
+    }
+    NgSearchCarrier(carrier, n, n * 1000.0, 1234.0, 0, 0);
+    NgSearchFftExecute(plan, floatCode, 0);
+    {
+        double start = NgMonotonicSeconds();
+        for (unsigned repeat = 0; repeat < 32; ++repeat) {
+            memcpy(floatWork, floatBaseband, n * sizeof(*floatWork));
+            NgSearchMix(floatWork, carrier, n);
+            NgSearchFftExecute(plan, floatWork, 0);
+            for (size_t k = 0; k < n; ++k) {
+                TNgComplex a = floatWork[k], b = floatCode[k];
+                floatWork[k].i = a.i * b.i + a.q * b.q;
+                floatWork[k].q = a.q * b.i - a.i * b.q;
+            }
+            NgSearchFftExecute(plan, floatWork, 1);
+            checksum += floatWork[repeat].i * floatWork[repeat].i;
+        }
+        printf("PCPS 4096 float: %.3f us/period\n",
+               (NgMonotonicSeconds() - start) * 31250.0);
+    }
+    for (unsigned mode = NG_SEARCH_FFT_INTEGER_PRECISE;
+         mode <= NG_SEARCH_FFT_INTEGER_SCALED; ++mode) {
+        CHECK(NgSearchIntegerCode(plan, code, (TNgSearchFftMode)mode, &error) == NG_OK);
+        double start = NgMonotonicSeconds();
+        for (unsigned repeat = 0; repeat < 32; ++repeat) {
+            memset(power, 0, n * sizeof(*power));
+            CHECK(NgSearchIntegerPcps(plan, baseband, carrier, 1.0,
+                                      (TNgSearchFftMode)mode, power, &error) == NG_OK);
+            checksum += power[repeat];
+        }
+        printf("PCPS 4096 integer mode %u: %.3f us/period\n", mode,
+               (NgMonotonicSeconds() - start) * 31250.0);
+    }
+    printf("PCPS checksum %.3f\n", checksum);
+    NgSearchFftDestroy(plan);
+    free(baseband); free(carrier); free(code); free(power);
+    free(floatBaseband); free(floatCode); free(floatWork);
+    return 0;
+}
+
+/** Run RF formats/rates, sinusoidal/square mixing, noise and independent confirmation cases. */
+int main(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "--benchmark") == 0)
+        return BenchmarkFft();
+    if (argc == 2 && strcmp(argv[1], "--benchmark-pcps") == 0)
+        return BenchmarkIntegerPcps();
     CHECK(Kernels() == 0);
     CHECK(NoisePolicy() == 0);
     CHECK(GalileoScenario(4096000, 0, 0, 1, 1, 0, 1) == 0);
@@ -472,5 +590,11 @@ int main(void)
     CHECK(Scenario(2400000, 0, 1, 1, 1, 0) == 0);
     CHECK(Scenario(2400000, 0, 0, 0, 0, 0) == 0);
     CHECK(Scenario(2400000, 0, 0, 0, 1, 1) == 0);
+    testFftMode = NG_SEARCH_FFT_INTEGER_PRECISE;
+    CHECK(Scenario(2400000, 0, 0, 0, 1, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0) == 0);
+    testFftMode = NG_SEARCH_FFT_INTEGER_SCALED;
+    CHECK(Scenario(2400000, 0, 0, 0, 1, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0) == 0);
     return 0;
 }

@@ -17,6 +17,10 @@ typedef struct {
     size_t nativeCapacity;
     TNgSearchFft *fft;
     TNgComplex *baseband;
+    int16_t *integerBaseband;
+    double integerScale;
+    unsigned integerCodePrn;
+    TNgSearchFftMode integerCodeMode;
     TNgComplex *signal;
     TNgComplex *carrier;
     TNgComplex *work;
@@ -47,6 +51,7 @@ void NgAcquisitionGpsFree(void *context)
         return;
     NgSearchFftDestroy(search->fft);
     free(search->baseband);
+    free(search->integerBaseband);
     free(search->signal);
     free(search->carrier);
     free(search->work);
@@ -73,6 +78,7 @@ int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, void **out, TNgError 
     search->nativeCapacity = (stream->sampleRateHz + 999u) / 1000u;
     capacity = search->nativeCapacity > search->size ? search->nativeCapacity : search->size;
     search->baseband = calloc(search->size * NG_GPS_SEARCH_MS, sizeof(TNgComplex));
+    search->integerBaseband = calloc(2 * search->size * NG_GPS_SEARCH_MS, sizeof(int16_t));
     search->signal = calloc(search->size * NG_GPS_SUMS, sizeof(TNgComplex));
     search->carrier = calloc(capacity, sizeof(TNgComplex));
     search->work = calloc(search->size, sizeof(TNgComplex));
@@ -80,7 +86,8 @@ int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, void **out, TNgError 
     search->native = calloc(capacity, sizeof(TNgComplex));
     search->code = calloc(capacity, sizeof(float));
     search->power = calloc(search->size, sizeof(double));
-    if (!search->baseband || !search->signal || !search->carrier || !search->work ||
+    if (!search->baseband || !search->integerBaseband || !search->signal ||
+        !search->carrier || !search->work ||
         !search->codeFft || !search->native || !search->code || !search->power ||
         NgSearchFftCreate(search->size, &search->fft, error) != NG_OK) {
         NgAcquisitionGpsFree(search);
@@ -175,6 +182,21 @@ static int Prepare(TNgGpsSearch *search, const TNgAcquisitionCapture *capture,
                 return NG_END;
         }
     }
+    {
+        double maximum = 0;
+        for (k = 0; k < outputCount; ++k) {
+            maximum = fmax(maximum, fabs(search->baseband[k].i));
+            maximum = fmax(maximum, fabs(search->baseband[k].q));
+        }
+        search->integerScale = 4096.0 / fmax(maximum, 1.0);
+        for (k = 0; k < outputCount; ++k) {
+            search->integerBaseband[2 * k] =
+                (int16_t)lround(search->baseband[k].i * search->integerScale);
+            search->integerBaseband[2 * k + 1] =
+                (int16_t)lround(search->baseband[k].q * search->integerScale);
+        }
+    }
+    search->integerCodePrn = 0;
     search->preparedFirst = capture->origin.firstSample;
     search->preparedEpoch = capture->origin.epoch;
     search->prepared = 1;
@@ -182,30 +204,49 @@ static int Prepare(TNgGpsSearch *search, const TNgAcquisitionCapture *capture,
 }
 
 /** Coarse PCPS power over eight one-ms coherent periods. */
-static void Coarse(TNgGpsSearch *search, unsigned prn, double doppler, int square)
+static int Coarse(TNgGpsSearch *search, unsigned prn, double doppler, int square,
+                  TNgSearchFftMode fftMode)
 {
     unsigned ms;
     size_t k;
     const TNgComplex *code = search->codeFft + (prn - 1) * search->size;
     memset(search->power, 0, search->size * sizeof(*search->power));
+    if (fftMode != NG_SEARCH_FFT_FLOAT &&
+        (search->integerCodePrn != prn || search->integerCodeMode != fftMode)) {
+        NgSearchCode(search->code, search->size, search->chips[prn - 1],
+                     (double)search->size * 1000, NG_GPS_CA_RATE_HZ, 0);
+        if (NgSearchIntegerCode(search->fft, search->code, fftMode, NULL) != NG_OK)
+            return NG_ERROR;
+        search->integerCodePrn = prn;
+        search->integerCodeMode = fftMode;
+    }
     NgSearchCarrier(search->carrier, search->size, (double)search->size * 1000, doppler, 0, square);
     for (ms = 0; ms < NG_GPS_SUMS; ++ms) {
+        if (fftMode != NG_SEARCH_FFT_FLOAT) {
+            if (NgSearchIntegerPcps(search->fft,
+                    search->integerBaseband + 2 * ms * search->size,
+                    search->carrier, search->integerScale, fftMode,
+                    search->power, NULL) != NG_OK)
+                return NG_ERROR;
+            continue;
+        }
         memcpy(search->work, search->baseband + ms * search->size,
                search->size * sizeof(TNgComplex));
         NgSearchMix(search->work, search->carrier, search->size);
-        NgSearchFftExecute(search->fft, search->work, 0);
+        NgSearchFftExecuteMode(search->fft, search->work, 0, fftMode);
         for (k = 0; k < search->size; ++k) {
             TNgComplex a = search->work[k];
             search->work[k].i = a.i * code[k].i + a.q * code[k].q;
             search->work[k].q = a.q * code[k].i - a.i * code[k].q;
         }
-        NgSearchFftExecute(search->fft, search->work, 1);
+        NgSearchFftExecuteMode(search->fft, search->work, 1, fftMode);
         for (k = 0; k < search->size; ++k) {
             double i = search->work[k].i;
             double q = search->work[k].q;
             search->power[k] += i * i + q * q;
         }
     }
+    return NG_OK;
 }
 
 /** Mix eight ms from the prepared grid for Doppler refinement, phase remains continuous. */
@@ -313,7 +354,9 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
     }
     /* Classic's fake-Doppler population estimates the complex correlation variance.
      * The sum's mean is 8 * (2*variance); the gamma threshold uses single-period power. */
-    Coarse(search, prn, AcquisitionCoarseNoiseDoppler(), config->squareCarrier);
+    if (Coarse(search, prn, AcquisitionCoarseNoiseDoppler(), config->squareCarrier,
+               config->fftMode) != NG_OK)
+        return NgFail(error, "GPS integer coarse FFT failed");
     for (k = 0; k < search->size; ++k)
         noise += search->power[k];
     noise /= (double)(search->size * NG_GPS_SUMS);
@@ -325,7 +368,8 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
         double frequency = bin == 15 ? 5000 : -5000 + (double)bin * 667;
         if (cancel(cancelContext))
             return NG_END;
-        Coarse(search, prn, frequency, config->squareCarrier);
+        if (Coarse(search, prn, frequency, config->squareCarrier, config->fftMode) != NG_OK)
+            return NgFail(error, "GPS integer coarse FFT failed");
         for (k = 0; k < search->size; ++k) {
             if (capture->displayPrn == prn) {
                 size_t column = ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS /
@@ -443,7 +487,8 @@ int NgAcquisitionGpsDisplay(void *context, unsigned prn, const TNgAcquisitionCon
     for(bin=0;bin<16;++bin) {
         double frequency=bin == 15 ? 5000 : -5000 + (double)bin * 667;
         if(cancel(cancelContext)) return NG_END;
-        Coarse(search,prn,frequency,config->squareCarrier);
+        if (Coarse(search,prn,frequency,config->squareCarrier,config->fftMode) != NG_OK)
+            return NG_END;
         for(k=0;k<search->size;++k) {
             size_t column=((search->size-k)%search->size)*NG_ACQUISITION_CODE_BINS/search->size;
             float value=(float)(search->power[k]/search->space.threshold);

@@ -8,7 +8,7 @@ export function moduleParameters(schema) {
   for (const module of schema.modules) {
     if (!Array.isArray(module.groups) || !Array.isArray(module.rules)) throw new Error('Invalid module descriptor.');
     for (const group of module.groups) {
-      if (!['receiver','acquisition','tracking','navigation'].includes(group.topic) || groups.has(group.title))
+      if (!['receiver','acquisition','tracking','navigation','dsp'].includes(group.topic) || groups.has(group.title))
         throw new Error('Invalid or duplicate module group.');
       groups.set(group.title, group);
       for (const f of group.fields) {

@@ -389,7 +389,9 @@ int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error)
         config->falseAlarmProbability >= 1 || config->firstPrn < 1 || config->lastPrn > 32 ||
         config->lastPrn < config->firstPrn || (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
-        (config->xorCorrelation != 0 && config->xorCorrelation != 1))
+        (config->xorCorrelation != 0 && config->xorCorrelation != 1) ||
+        config->fftMode < NG_SEARCH_FFT_FLOAT ||
+        config->fftMode > NG_SEARCH_FFT_INTEGER_SCALED)
         return NgFail(error, "Invalid GPS acquisition PRN range or mode");
     if (config->fftSize != 0 && config->fftSize != 4096 && config->fftSize != 8192 &&
         config->fftSize != 16384)

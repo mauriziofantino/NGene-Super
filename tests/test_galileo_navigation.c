@@ -53,7 +53,7 @@ static void Half(TNgNavigation *n, const unsigned char bits[120], unsigned inver
 }
 
 /** Build an I/NAV time word and its full even/odd protected page. */
-static void Page(TNgNavigation *n, unsigned inverted, int corrupt)
+static void Page(TNgNavigation *n, unsigned inverted, int corrupt, const unsigned char osnma[5])
 {
     unsigned char data[128] = {0}, even[120] = {0}, odd[120] = {0};
     uint32_t crc = 0;
@@ -64,6 +64,9 @@ static void Page(TNgNavigation *n, unsigned inverted, int corrupt)
     memcpy(even + 2, data, 112);
     odd[0] = 1;
     memcpy(odd + 2, data + 112, 16);
+    if (osnma)
+        for (k = 0; k < 40; ++k)
+            odd[18 + k] = (unsigned char)((osnma[k / 8] >> (7 - k % 8)) & 1u);
     for (k = 0; k < 220; k++) {
         unsigned bit = k < 114 ? even[k] : k < 196 ? odd[k - 114] : 0;
         crc = (crc << 1) | bit;
@@ -81,17 +84,23 @@ static void Page(TNgNavigation *n, unsigned inverted, int corrupt)
 int main(void)
 {
     TNgNavigation n;
+    const unsigned char osnma[5] = {0xa5, 0x13, 0x42, 0xbe, 0x7c};
     unsigned inverted;
     for (inverted = 0; inverted < 2; inverted++) {
         NgNavigationReset(&n);
-        Page(&n, inverted, 0);
+        Page(&n, inverted, 0, osnma);
         CHECK(n.snapshot.validSubframes == 1 && n.snapshot.towValid);
         CHECK(n.snapshot.broadcast.wn == 1419 && n.snapshot.towSeconds == 345602);
         CHECK(n.snapshot.boundarySample == 4800000);
+        CHECK(n.snapshot.osnma.valid && n.snapshot.osnma.pages == 1);
+        CHECK(n.snapshot.osnma.hkroot == osnma[0] &&
+              memcmp(n.snapshot.osnma.mack, osnma + 1, 4) == 0);
+        CHECK(n.snapshot.osnma.boundarySample == 4800000);
     }
     NgNavigationReset(&n);
-    Page(&n, 0, 1);
+    Page(&n, 0, 1, osnma);
     CHECK(!n.snapshot.validSubframes && !n.snapshot.towValid && n.snapshot.parityErrors == 1);
+    CHECK(!n.snapshot.osnma.valid && n.snapshot.osnma.pages == 0);
     puts("Galileo convolutional FEC, deinterleaving, CRC and time boundary passed");
     return 0;
 }

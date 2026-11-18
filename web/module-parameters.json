@@ -93,49 +93,6 @@
               "max": 16
             },
             {
-              "key": "tracking.fast_carrier",
-              "label": "Four-lane carrier recurrence (CI8)",
-              "type": "select",
-              "default": "false",
-              "options": [
-                { "value": "false", "label": "Disabled" },
-                { "value": "true", "label": "Enabled (double arithmetic)" }
-              ],
-              "hint": "Only affects CI8 tracking. This is not an integer carrier implementation."
-            },
-            {
-              "key": "tracking.square_carrier",
-              "label": "Carrier rotation",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "Precise sinusoidal"
-                },
-                {
-                  "value": "true",
-                  "label": "Fast square (experimental)"
-                }
-              ]
-            },
-            {
-              "key": "tracking.xor_correlation",
-              "label": "Correlation product",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "Precise SIMD products"
-                },
-                {
-                  "value": "true",
-                  "label": "Fast exact sign XOR"
-                }
-              ]
-            },
-            {
               "key": "tracking.tap_count",
               "label": "Tap count (odd)",
               "type": "number",
@@ -169,22 +126,22 @@
       ]
     },
     {
-      "id": "pvt-carrier-smoothing",
+      "id": "tracking-doppler-smoothing",
       "groups": [
         {
-          "title": "PVT carrier smoothing",
-          "topic": "navigation",
-          "note": "Hatch smoothing uses common-epoch code and Doppler observations. State resets on RF discontinuity or a large code/carrier disagreement.",
+          "title": "Tracking Doppler smoothing",
+          "topic": "tracking",
+          "note": "The tracking output Doppler is low-pass filtered before PVT. The carrier loop itself is unchanged; reacquisition resets the filter.",
           "fields": [
             {
-              "key": "pvt.carrier_smoothing_length",
-              "label": "Carrier smoothing length (epochs)",
+              "key": "tracking.doppler_smoothing_ms",
+              "label": "Doppler smoothing time (ms)",
               "type": "number",
-              "default": 32,
+              "default": 200,
               "integer": true,
               "min": 0,
-              "max": 1024,
-              "hint": "Zero disables smoothing; each epoch is approximately one second."
+              "max": 10000,
+              "hint": "Zero disables smoothing; the setting applies to tracking observations."
             }
           ]
         }
@@ -236,39 +193,6 @@
               "integer": true,
               "min": 1,
               "max": 32
-            },
-            {
-              "key": "acquisition.square_carrier",
-              "label": "Local carrier",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "Sinusoidal"
-                },
-                {
-                  "value": "true",
-                  "label": "Squared sin/cos"
-                }
-              ]
-            },
-            {
-              "key": "acquisition.xor_correlation",
-              "label": "Code correlation",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "SIMD products"
-                },
-                {
-                  "value": "true",
-                  "label": "SIMD sign XOR"
-                }
-              ],
-              "hint": "XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."
             }
           ]
         }
@@ -309,10 +233,22 @@
               "type": "select",
               "default": "0",
               "options": [
-                { "value": "0", "label": "Automatic" },
-                { "value": "4096", "label": "4096 (changes search algorithm)" },
-                { "value": "8192", "label": "8192" },
-                { "value": "16384", "label": "16384" }
+                {
+                  "value": "0",
+                  "label": "Automatic"
+                },
+                {
+                  "value": "4096",
+                  "label": "4096 (changes search algorithm)"
+                },
+                {
+                  "value": "8192",
+                  "label": "8192"
+                },
+                {
+                  "value": "16384",
+                  "label": "16384"
+                }
               ],
               "hint": "4096 uses fixed-phase subcarrier removal and missed synthetic satellites in the profiling report."
             },
@@ -334,39 +270,6 @@
               "integer": true,
               "min": 1,
               "max": 32
-            },
-            {
-              "key": "galileo_acquisition.square_carrier",
-              "label": "Local carrier",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "Sinusoidal"
-                },
-                {
-                  "value": "true",
-                  "label": "Squared sin/cos"
-                }
-              ]
-            },
-            {
-              "key": "galileo_acquisition.xor_correlation",
-              "label": "Code correlation",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "SIMD products"
-                },
-                {
-                  "value": "true",
-                  "label": "SIMD sign XOR"
-                }
-              ],
-              "hint": "XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."
             }
           ]
         }
@@ -383,6 +286,222 @@
           "message": "First Galileo PRN must not exceed last Galileo PRN."
         }
       ]
+    },
+    {
+      "id": "dsp-arithmetic",
+      "groups": [
+        {
+          "title": "DSP Arithmetic",
+          "topic": "dsp",
+          "note": "Arithmetic choices for acquisition and tracking. Integer FFT modes restore float-domain scaling before search decisions.",
+          "fields": [
+            {
+              "key": "dsp.tracking_fast_carrier",
+              "label": "Four-lane carrier recurrence (CI8)",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Disabled"
+                },
+                {
+                  "value": "true",
+                  "label": "Enabled (double arithmetic)"
+                }
+              ],
+              "hint": "Only affects CI8 tracking. This is not an integer carrier implementation."
+            },
+            {
+              "key": "dsp.tracking_square_carrier",
+              "label": "Carrier rotation",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Precise sinusoidal"
+                },
+                {
+                  "value": "true",
+                  "label": "Fast square (experimental)"
+                }
+              ]
+            },
+            {
+              "key": "dsp.tracking_xor_correlation",
+              "label": "Correlation product",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Precise SIMD products"
+                },
+                {
+                  "value": "true",
+                  "label": "Fast exact sign XOR"
+                }
+              ]
+            },
+            {
+              "key": "dsp.gps_square_carrier",
+              "label": "Local carrier",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Sinusoidal"
+                },
+                {
+                  "value": "true",
+                  "label": "Squared sin/cos"
+                }
+              ]
+            },
+            {
+              "key": "dsp.gps_xor_correlation",
+              "label": "Code correlation",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "SIMD products"
+                },
+                {
+                  "value": "true",
+                  "label": "SIMD sign XOR"
+                }
+              ],
+              "hint": "XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."
+            },
+            {
+              "key": "dsp.galileo_square_carrier",
+              "label": "Local carrier",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Sinusoidal"
+                },
+                {
+                  "value": "true",
+                  "label": "Squared sin/cos"
+                }
+              ]
+            },
+            {
+              "key": "dsp.galileo_xor_correlation",
+              "label": "Code correlation",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "SIMD products"
+                },
+                {
+                  "value": "true",
+                  "label": "SIMD sign XOR"
+                }
+              ],
+              "hint": "XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."
+            },
+            {
+              "key": "dsp.tracking_mixer_bits",
+              "label": "Tracking mixer result width",
+              "type": "select",
+              "default": "0",
+              "options": [
+                {
+                  "value": "0",
+                  "label": "Precise floating point"
+                },
+                {
+                  "value": "16",
+                  "label": "8-bit ? 8-bit, signed 16-bit products"
+                },
+                {
+                  "value": "8",
+                  "label": "8-bit ? 8-bit, rounded 8-bit output"
+                },
+                {
+                  "value": "4",
+                  "label": "Input shifted to 4-bit, signed 8-bit products"
+                }
+              ],
+              "hint": "Byte modes require a CI8 common stream. Quantized carrier may reduce PVT accuracy."
+            },
+            {
+              "key": "dsp.gps_fft",
+              "label": "GPS coarse FFT arithmetic",
+              "type": "select",
+              "default": "float",
+              "options": [
+                {
+                  "value": "float",
+                  "label": "Float SIMD"
+                },
+                {
+                  "value": "integer_precise",
+                  "label": "Integer precise (unscaled int32)"
+                },
+                {
+                  "value": "integer_scaled",
+                  "label": "Integer Q14 (stage rescaled SIMD)"
+                }
+              ],
+              "hint": "FFT scale is restored before power and threshold calculations."
+            },
+            {
+              "key": "dsp.galileo_fft",
+              "label": "Galileo coarse FFT arithmetic",
+              "type": "select",
+              "default": "float",
+              "options": [
+                {
+                  "value": "float",
+                  "label": "Float SIMD"
+                },
+                {
+                  "value": "integer_precise",
+                  "label": "Integer precise (unscaled int32)"
+                },
+                {
+                  "value": "integer_scaled",
+                  "label": "Integer Q14 (stage rescaled SIMD)"
+                }
+              ],
+              "hint": "FFT scale is restored before power and threshold calculations."
+            },
+            {
+              "key": "dsp.spectrum_fft",
+              "label": "Spectrum FFT arithmetic",
+              "type": "select",
+              "default": "integer_scaled",
+              "options": [
+                {
+                  "value": "float",
+                  "label": "Float SIMD"
+                },
+                {
+                  "value": "integer_precise",
+                  "label": "Integer precise (unscaled int32)"
+                },
+                {
+                  "value": "integer_scaled",
+                  "label": "Integer Q14 (stage rescaled SIMD)"
+                }
+              ],
+              "hint": "Spectrum display only; does not affect acquisition or PVT."
+            }
+          ]
+        }
+      ],
+      "rules": []
     }
   ],
   "references": {
@@ -933,7 +1052,7 @@
             "label": "Carrier-smoothing filter length (Classic reference only)",
             "value": "32",
             "unit": "",
-            "hint": "Classic reference value only. Use pvt.carrier_smoothing_length above to change EVO's active PVT smoothing window.",
+            "hint": "Classic reference value; EVO configures Doppler smoothing in the tracking tab.",
             "options": null
           },
           {

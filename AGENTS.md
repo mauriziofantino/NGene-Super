@@ -1,5 +1,15 @@
 # Contributor and agent guidance
 
+## Vincolo permanente per le migrazioni da Classic
+
+Quando l'utente chiede una funzione gia presente in NGene Classic, leggere prima
+l'implementazione e i contratti pertinenti di Classic. Usarla come riferimento
+funzionale, integrandola nell'architettura e nella logica di EVO. Migliorarla dove
+serve, mantenendo esplicita la corrispondenza con il comportamento di Classic.
+Modificare esclusivamente il repository EVO: Classic e solo un riferimento in
+lettura, salvo richiesta esplicita contraria dell'utente. Non sostituire il lavoro
+richiesto con proposte e non interrompere l'esecuzione per chiedere se procedere.
+
 Before changing NGene behavior, read [the current project status](docs/service/PROJECT_STATUS.md),
 the relevant decisions in [the roadmap](docs/service/ROADMAP.md), and the technical
 documents for the subsystem being changed. For GNSS acquisition, tracking, navigation,

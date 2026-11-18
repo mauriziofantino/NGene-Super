@@ -89,7 +89,6 @@ typedef struct {
     /** Replaceable GPS L1 C/A acquisition module settings. */
     TNgAcquisitionConfig acquisition;
     TNgTrackingConfig tracking; /**< Frozen per-run tracking module settings. */
-    unsigned carrierSmoothingLength; /**< PVT Hatch window; zero disables. */
     /** Independently enabled Galileo E1-B acquisition settings. */
     TNgAcquisitionConfig galileoAcquisition;
     /** Capture filename prefix; CLI may include a path when no directory is set. */

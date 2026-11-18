@@ -168,6 +168,22 @@ function parseIni(text) {
     if (Object.hasOwn(parsed, key)) throw new Error(`Duplicate INI key: ${key}`);
     parsed[key] = line.slice(position + 1).trim();
   }
+  const legacyArithmetic = {
+    'tracking.fast_carrier':'dsp.tracking_fast_carrier',
+    'tracking.square_carrier':'dsp.tracking_square_carrier',
+    'tracking.xor_correlation':'dsp.tracking_xor_correlation',
+    'tracking.mixer_bits':'dsp.tracking_mixer_bits',
+    'acquisition.square_carrier':'dsp.gps_square_carrier',
+    'acquisition.xor_correlation':'dsp.gps_xor_correlation',
+    'galileo_acquisition.square_carrier':'dsp.galileo_square_carrier',
+    'galileo_acquisition.xor_correlation':'dsp.galileo_xor_correlation'
+  };
+  for (const [oldKey, newKey] of Object.entries(legacyArithmetic)) {
+    if (Object.hasOwn(parsed, oldKey)) {
+      if (!Object.hasOwn(parsed, newKey)) parsed[newKey] = parsed[oldKey];
+      delete parsed[oldKey];
+    }
+  }
   return parsed;
 }
 function toIni(object) {
@@ -192,7 +208,8 @@ const settingsTopics = {
   source: ['Front end', 'Choose the live SDR or recorded input, sample format, tuning and gains.', 'Before start'],
   receiver: ['Receiver & signals', 'Configure execution and common stream buffers. GNSS processing modules are unavailable.', 'Before start'],
   acquisition: ['Acquisition', 'GPS L1 C/A search, refinement and independent 3-of-4 confirmation.', 'Before start'],
-  tracking: ['Tracking', 'Configure independent carrier/product modes and multi-correlator geometry.', 'Before start'],
+  tracking: ['Tracking', 'Configure worker allocation and multi-correlator geometry.', 'Before start'],
+  dsp: ['DSP Arithmetic', 'Choose the arithmetic used by acquisition and tracking.', 'Before start'],
   navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
   recording: ['Capture to disk', 'Choose a name, receiver-side folder and pre/post capture point.', 'Before start'],
   analysis: ['Diagnostic processing', 'NGene computes PSD and histograms. Apply these settings during reception.', 'Runtime'],
@@ -717,7 +734,7 @@ function renderAnalysis(a,configRevision=null){
     histogram_i:histogramChanged?a.histogram_i:(analysisSnapshot?.histogram_i||[]),histogram_q:histogramChanged?a.histogram_q:(analysisSnapshot?.histogram_q||[])};
   const unit=a.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin';
   if(spectrumChanged){
-    $('fftBackend').textContent=a.backend||'Integer FFT';
+    $('fftBackend').textContent=`${a.config?.fft_mode || 'integer_scaled'} · ${a.backend || 'receiver backend'}`;
     if(plotEnabled('spectrum')){
     $('spectrumInfo').textContent=`${a.fft_size}-point FFT · Δf ${a.bin_hz.toFixed(2)} Hz · ENBW ${a.enbw_hz.toFixed(2)} Hz · ${a.config.window} · ${a.config.averages} Welch segments · after fixed DC removal`;
     $('spectrumPeak').textContent=`Peak ${displayFrequency(a.peak_hz).toFixed(4)} ${frequencyUnit()} · ${a.peak_dbfs.toFixed(1)} ${unit}`;

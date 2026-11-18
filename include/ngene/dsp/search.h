@@ -10,6 +10,9 @@ typedef struct {
 } TNgComplex;
 /** Owned immutable FFT tables, shareable by independent workspaces. */
 typedef struct TNgSearchFft TNgSearchFft;
+/** FFT arithmetic: float SIMD, unscaled int32 butterflies, or Q14 stage-rescaled SIMD. */
+typedef enum { NG_SEARCH_FFT_FLOAT, NG_SEARCH_FFT_INTEGER_PRECISE,
+               NG_SEARCH_FFT_INTEGER_SCALED } TNgSearchFftMode;
 /** Allocate radix-2^2 FFT tables. size is a power of two in 8..16384.
  * @param size Complex transform length.
  * @param out Owned plan, NULL on failure.
@@ -21,6 +24,24 @@ void NgSearchFftDestroy(TNgSearchFft *plan);
 /** In-place transform, no allocation. Forward is unscaled exp(-j*w); inverse includes 1/N.
  * Workspace has plan size complex elements and is exclusive to the caller. */
 void NgSearchFftExecute(const TNgSearchFft *plan, TNgComplex *values, int inverse);
+/** In-place transform with explicit arithmetic and float-domain output scale.
+ * Integer workspaces belong to plan; calls on one plan must be serialized. */
+void NgSearchFftExecuteMode(TNgSearchFft *plan, TNgComplex *values, int inverse,
+                            TNgSearchFftMode mode);
+/** Native signed-int32 FFT. Input/output contain interleaved integer I/Q, each input
+ * component must be within +/-16384. Forward output is unscaled; inverse is /N.
+ * No floating sample conversion occurs in this API. */
+int NgSearchFftExecuteInt32(TNgSearchFft *plan, const int32_t *input, int32_t *output,
+                           int inverse, TNgError *error);
+/** Prepare an integer code spectrum for the next PCPS calls on this worker-owned plan. */
+int NgSearchIntegerCode(TNgSearchFft *plan, const float *code, TNgSearchFftMode mode,
+                        TNgError *error);
+/** Integer carrier rotation, FFT, spectral product and inverse FFT. The supplied
+ * baseband is signed-int16 I/Q, scaled by baseScale relative to native ADC units.
+ * The returned power is restored to native float-PCPS units. */
+int NgSearchIntegerPcps(TNgSearchFft *plan, const int16_t *baseband,
+                        const TNgComplex *carrier, double baseScale, TNgSearchFftMode mode,
+                        double *power, TNgError *error);
 /** Generate exp(-j*phase) carrier using a recurrent oscillator, no per-sample trig.
  * phaseCycles references sample zero. square selects +/-1 cosine and sine.
  * output contains count caller-owned samples; rate/frequency must be finite and rate positive. */
@@ -50,4 +71,16 @@ void NgSearchMixPrefixCi8(double *prefix, const TNgIq8 *input, size_t count, dou
  * quantization; results differ from the one-lane kernel only by double rounding. */
 void NgSearchMixPrefixCi8Lanes(double *prefix, const TNgIq8 *input, size_t count, double rateHz,
                                double frequencyHz, double phaseCycles, int square, int inverted);
+/** Experimental byte mixer. Carrier components use signed four-bit levels -7..7;
+ * products widen before rounding to signed-byte output. Prefix is restored to native
+ * ADC units, with double accumulation. Input and prefix are disjoint, caller owned.
+ * No allocation, DC subtraction, or change of NCO phase convention. */
+void NgSearchMixPrefixCi8Quantized(double *prefix, const TNgIq8 *input, size_t count,
+                                  double rateHz, double frequencyHz, double phaseCycles,
+                                  int inverted);
+/** Byte-carrier modes: 4 input shift, 8 rounded byte output, 16 widened exact product.
+ * Integer products are accumulated before conversion back to native ADC units. */
+void NgSearchMixPrefixCi8Arithmetic(double *prefix, const TNgIq8 *input, size_t count,
+                                    double rateHz, double frequencyHz, double phaseCycles,
+                                    int inverted, unsigned mixerBits);
 #endif

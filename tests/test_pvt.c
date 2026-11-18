@@ -115,27 +115,6 @@ static void Fixture(unsigned mixed, int rollover)
         for (k = 0; k < 10; ++k)
             channels[k].navigation.broadcast.ionoReceived = 0;
     }
-    {
-        TNgPvtSmoother smoother;
-        TNgPvtSnapshot smoothed;
-        TNgTrackingSnapshot still[64];
-        memcpy(still, channels, sizeof(still));
-        for (k = 0; k < 10; ++k)
-            still[k].dopplerHz = 0;
-        NgPvtSmootherInit(&smoother, 32);
-        NgPvtComputeSmoothed(still, 7, 2400000, 2400000, &smoother, &smoothed);
-        CHECK(smoother.channels[0][0].count == 1);
-        for (k = 0; k < 10; ++k)
-            still[k].endSample += 2400000;
-        NgPvtComputeSmoothed(still, 7, 4800000, 2400000, &smoother, &smoothed);
-        CHECK(smoother.channels[0][0].count == 2);
-        NgPvtComputeSmoothed(still, 8, 4800000, 2400000, &smoother, &smoothed);
-        CHECK(smoother.channels[0][0].count == 2); /* Wrong RF epoch is excluded. */
-        for (k = 0; k < 10; ++k)
-            still[k].epoch = 8;
-        NgPvtComputeSmoothed(still, 8, 4800000, 2400000, &smoother, &smoothed);
-        CHECK(smoother.channels[0][0].count == 1);
-    }
     for (k = 0; k < solution.skyCount; k++) {
         const TNgPvtSatelliteView *sky = &solution.sky[k];
         double position[3], velocity[3], clock, drift, range = 24000000, rotated[3];
