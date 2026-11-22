@@ -208,6 +208,35 @@ if(NGENE_WITH_WEB)
     target_link_libraries(ngene PRIVATE ngene_control ngene_http)
 endif()
 if(NGENE_BUILD_TESTS)
+    if(WIN32)
+        add_executable(ngene_prepare_lab EXCLUDE_FROM_ALL
+            development/profiling/F2b/prepare_lab.c
+            development/profiling/F2b/gps_probe.c
+            development/profiling/F2b/galileo_probe.c
+            development/profiling/F2b/fft_probe.c
+            development/profiling/F2b/search_probe.c)
+        target_include_directories(ngene_prepare_lab PRIVATE src)
+        target_compile_definitions(ngene_prepare_lab PRIVATE ${fft_backend_definitions}
+            NGENE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(ngene_prepare_lab PRIVATE ngene_core psapi)
+        foreach(lab ngene_pcps_lab ngene_pcps_profile)
+            add_executable(${lab} EXCLUDE_FROM_ALL
+                development/profiling/F2b/prepare_lab.c
+                development/profiling/F2b/gps_probe.c
+                development/profiling/F2b/galileo_probe.c
+                development/profiling/F2b/fft_probe.c
+                development/profiling/F2b/search_probe.c
+                development/profiling/F3/pcps_lab.c)
+            target_include_directories(${lab} PRIVATE src development/profiling/F2b
+                development/profiling/F3)
+            target_compile_definitions(${lab} PRIVATE ${fft_backend_definitions}
+                NGENE_PCPS_LAB NGENE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+            target_link_libraries(${lab} PRIVATE ngene_core psapi)
+        endforeach()
+        target_include_directories(ngene_pcps_profile BEFORE PRIVATE
+            "${CMAKE_CURRENT_BINARY_DIR}/generated/pcps-profile")
+        target_compile_definitions(ngene_pcps_profile PRIVATE NGENE_PCPS_PROFILE)
+    endif()
     add_executable(ngene_acquisition_pool_tests tests/test_acquisition_pool.c)
     target_include_directories(ngene_acquisition_pool_tests PRIVATE src)
     target_link_libraries(ngene_acquisition_pool_tests PRIVATE ngene_core)
@@ -229,12 +258,16 @@ if(NGENE_BUILD_TESTS)
     target_compile_definitions(ngene_tracking_tests PRIVATE NGENE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(ngene_tracking_tests PRIVATE ngene_tracking)
     add_test(NAME tracking_contract COMMAND ngene_tracking_tests)
-    add_executable(ngene_acquisition_tests tests/test_acquisition.c)
+    add_executable(ngene_acquisition_tests tests/test_acquisition.c tests/acquisition_pcps_benchmark.c)
     target_include_directories(ngene_acquisition_tests PRIVATE src)
     target_compile_definitions(ngene_acquisition_tests PRIVATE NGENE_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(ngene_acquisition_tests PRIVATE ngene_core)
     add_test(NAME gps_acquisition_contract COMMAND ngene_acquisition_tests)
     set_tests_properties(gps_acquisition_contract PROPERTIES TIMEOUT 90)
+    add_test(NAME acquisition_pcps_map_contract COMMAND ngene_acquisition_tests --verify-pcps)
+    set_tests_properties(acquisition_pcps_map_contract PROPERTIES TIMEOUT 90)
+    add_test(NAME acquisition_grid_contract COMMAND ngene_acquisition_tests --verify-grid)
+    set_tests_properties(acquisition_grid_contract PROPERTIES TIMEOUT 90)
     enable_testing()
     add_executable(ngene_sdr_tests tests/test_sdr.c)
     target_include_directories(ngene_sdr_tests PRIVATE src)

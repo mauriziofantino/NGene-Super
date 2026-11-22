@@ -13,6 +13,8 @@ typedef struct TNgSearchFft TNgSearchFft;
 /** FFT arithmetic: float SIMD, unscaled int32 butterflies, or Q14 stage-rescaled SIMD. */
 typedef enum { NG_SEARCH_FFT_FLOAT, NG_SEARCH_FFT_INTEGER_PRECISE,
                NG_SEARCH_FFT_INTEGER_SCALED } TNgSearchFftMode;
+/** Return whether this size is supported without allocating an FFT plan. */
+int NgSearchFftSupportsSize(size_t size);
 /** Allocate radix-2^2 FFT tables. size is a power of two in 8..16384.
  * @param size Complex transform length.
  * @param out Owned plan, NULL on failure.

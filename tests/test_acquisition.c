@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "acquisition/grid.h"
 #include "acquisition/noise_policy.h"
 #define CHECK(condition)                                                                           \
     do {                                                                                           \
@@ -97,6 +98,7 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
         unsigned column;
         NgAcquisitionReadSearchSpace(acquisition, 7, &space);
         CHECK(space.valid);
+        CHECK(space.fftSize == (rate < 4096000 ? 2048u : 4096u));
         CHECK(space.result.prn == 7 && space.result.epoch == 3);
         CHECK(space.result.firstSample == 1000000);
         CHECK(space.result.confirmed == snapshot.results[6].confirmed);
@@ -131,7 +133,7 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
 }
 
 static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, int signal,
-                    int truncated, int wide)
+                           int truncated, int wide, unsigned fftSize)
 {
     TNgAcquisition *acquisition = NULL;
     TNgAcquisitionConfig config;
@@ -184,6 +186,7 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
     config.squareCarrier = square;
     config.xorCorrelation = xorSigns;
     config.fftMode = testFftMode;
+    config.fftSize = fftSize;
     CHECK(NgAcquisitionCreateGalileo(&config, &stream, &acquisition, &channel, &error) == NG_OK);
     NgAcquisitionObserve(acquisition, 7);
     window.samples = wide ? (const TNgIq8 *)wideSamples : samples;
@@ -215,11 +218,15 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
         unsigned column;
         NgAcquisitionReadSearchSpace(acquisition, 7, &space);
         CHECK(space.valid && space.dopplerBins == 116 && space.codePeriodChips == 4092);
+        CHECK(space.fftSize == (fftSize ? fftSize : (rate < 4096000 ? 8192u : 16384u)));
         CHECK(space.result.confirmed == snapshot.results[6].confirmed);
-        for (row = 0; row < space.dopplerBins; ++row)
-            for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column)
+        for (row = 0; row < space.dopplerBins; ++row) {
+            for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column) {
+                CHECK(isfinite(space.power[row][column]) && space.power[row][column] >= 0);
                 if (space.power[row][column] > maximum)
                     maximum = space.power[row][column];
+            }
+        }
         CHECK(fabs(maximum - snapshot.results[6].peakRatio) < 1e-5 * (1 + maximum));
     }
     if (signal && !truncated) {
@@ -505,65 +512,90 @@ static int BenchmarkFft(void)
     return 0;
 }
 
-static int BenchmarkIntegerPcps(void)
+int BenchmarkIntegerPcps(int measure);
+
+/** Cover grid geometry for current strategies and candidate dimensions without a B1C receiver. */
+static int GridGeometryContract(void)
 {
-    const size_t n = 4096;
-    TNgSearchFft *plan = NULL;
+    static const struct {
+        const char *signal;
+        unsigned periodMs;
+        uint32_t rate;
+        size_t size;
+        int valid;
+    } cases[] = {
+        {"GPS L1 C/A", 1, 1023999, 1024, 0},
+        {"GPS L1 C/A", 1, 1024000, 1024, 1},
+        {"GPS L1 C/A", 1, 2047999, 2048, 0},
+        {"GPS L1 C/A", 1, 2048000, 2048, 1},
+        {"GPS L1 C/A", 1, 4095999, 4096, 0},
+        {"GPS L1 C/A", 1, 4096000, 4096, 1},
+        {"Galileo E1-B", 4, 1023999, 4096, 0},
+        {"Galileo E1-B", 4, 1024000, 4096, 1},
+        {"Galileo E1-B", 4, 2047999, 8192, 0},
+        {"Galileo E1-B", 4, 2048000, 8192, 1},
+        {"Galileo E1-B", 4, 4095999, 16384, 0},
+        {"Galileo E1-B", 4, 4096000, 16384, 1},
+        {"BeiDou B1C", 10, 1638399, 16384, 0},
+        {"BeiDou B1C", 10, 1638400, 16384, 1},
+        {"BeiDou B1C", 10, 2048000, 16384, 1},
+        {"BeiDou B1C", 10, 8183800, 16384, 1},
+        {"BeiDou B1C", 10, 2048000, 20480, 0},
+        {"BeiDou B1C", 10, 8183800, 32768, 0},
+        {"BeiDou B1C", 10, 8183800, 81838, 0},
+        {"BeiDou B1C", 10, 8183800, 0, 0},
+        {"BeiDou B1C", 0,  8183800, 16384, 0},
+    };
+    for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); ++k) {
+        TNgError error = {{0}};
+        CHECK(NgAcquisitionValidateGrid(cases[k].signal, cases[k].rate, cases[k].periodMs,
+                                        cases[k].size, &error) ==
+              (cases[k].valid ? NG_OK : NG_ERROR));
+        if (!cases[k].valid)
+            CHECK(strstr(error.message, cases[k].signal) != NULL);
+    }
+    return 0;
+}
+
+static int NativeGridContract(void)
+{
+    static const struct {
+        uint32_t rate;
+        unsigned fftSize;
+        int valid;
+    } galileo[] = {
+        {2048000, 4096, 1}, {2048000, 8192, 1}, {2048000, 16384, 0},
+        {4095999, 16384, 0}, {4096000, 16384, 1}, {4096001, 16384, 1},
+        {2048000, 0, 1}, {4095999, 0, 1}, {4096000, 0, 1},
+    };
+    TNgAcquisitionConfig config;
+    TNgStreamInfo stream = {0};
+    TNgAcquisition *search;
+    TNgChannel channel;
     TNgError error = {{0}};
-    int16_t *baseband = calloc(2 * n, sizeof(*baseband));
-    TNgComplex *carrier = calloc(n, sizeof(*carrier));
-    float *code = calloc(n, sizeof(*code));
-    double *power = calloc(n, sizeof(*power));
-    TNgComplex *floatBaseband = calloc(n, sizeof(*floatBaseband));
-    TNgComplex *floatCode = calloc(n, sizeof(*floatCode));
-    TNgComplex *floatWork = calloc(n, sizeof(*floatWork));
-    volatile double checksum = 0;
-    CHECK(baseband && carrier && code && power && floatBaseband && floatCode && floatWork &&
-          NgSearchFftCreate(n, &plan, &error) == NG_OK);
-    for (size_t k = 0; k < n; ++k) {
-        baseband[2 * k] = (int16_t)((int)(k * 37 % 251) - 125);
-        baseband[2 * k + 1] = (int16_t)((int)(k * 71 % 251) - 125);
-        code[k] = k % 2 ? -1.0f : 1.0f;
-        floatBaseband[k].i = (float)baseband[2 * k];
-        floatBaseband[k].q = (float)baseband[2 * k + 1];
-        floatCode[k].i = code[k];
-    }
-    NgSearchCarrier(carrier, n, n * 1000.0, 1234.0, 0, 0);
-    NgSearchFftExecute(plan, floatCode, 0);
-    {
-        double start = NgMonotonicSeconds();
-        for (unsigned repeat = 0; repeat < 32; ++repeat) {
-            memcpy(floatWork, floatBaseband, n * sizeof(*floatWork));
-            NgSearchMix(floatWork, carrier, n);
-            NgSearchFftExecute(plan, floatWork, 0);
-            for (size_t k = 0; k < n; ++k) {
-                TNgComplex a = floatWork[k], b = floatCode[k];
-                floatWork[k].i = a.i * b.i + a.q * b.q;
-                floatWork[k].q = a.q * b.i - a.i * b.q;
-            }
-            NgSearchFftExecute(plan, floatWork, 1);
-            checksum += floatWork[repeat].i * floatWork[repeat].i;
+
+    NgAcquisitionDefaults(&config);
+    config.firstPrn = config.lastPrn = 7;
+    for (size_t k = 0; k < sizeof(galileo) / sizeof(galileo[0]); ++k) {
+        stream.sampleRateHz = galileo[k].rate;
+        stream.format = k % 2 == 0 ? NG_FORMAT_CI8 : NG_FORMAT_CI16;
+        stream.digitalIfHz = k % 2 == 0 ? 0 : 38500;
+        config.fftSize = galileo[k].fftSize;
+        int status = NgAcquisitionCreateGalileo(&config, &stream, &search, &channel, &error);
+        if (galileo[k].valid) {
+            CHECK(status == NG_OK && search != NULL);
+            NgAcquisitionDestroy(search);
+        } else {
+            CHECK(status == NG_ERROR && search == NULL);
+            CHECK(strstr(error.message, "Galileo E1-B") != NULL);
+            CHECK(strstr(error.message, "16384") != NULL);
+            CHECK(strstr(error.message, "4096000") != NULL);
         }
-        printf("PCPS 4096 float: %.3f us/period\n",
-               (NgMonotonicSeconds() - start) * 31250.0);
     }
-    for (unsigned mode = NG_SEARCH_FFT_INTEGER_PRECISE;
-         mode <= NG_SEARCH_FFT_INTEGER_SCALED; ++mode) {
-        CHECK(NgSearchIntegerCode(plan, code, (TNgSearchFftMode)mode, &error) == NG_OK);
-        double start = NgMonotonicSeconds();
-        for (unsigned repeat = 0; repeat < 32; ++repeat) {
-            memset(power, 0, n * sizeof(*power));
-            CHECK(NgSearchIntegerPcps(plan, baseband, carrier, 1.0,
-                                      (TNgSearchFftMode)mode, power, &error) == NG_OK);
-            checksum += power[repeat];
-        }
-        printf("PCPS 4096 integer mode %u: %.3f us/period\n", mode,
-               (NgMonotonicSeconds() - start) * 31250.0);
-    }
-    printf("PCPS checksum %.3f\n", checksum);
-    NgSearchFftDestroy(plan);
-    free(baseband); free(carrier); free(code); free(power);
-    free(floatBaseband); free(floatCode); free(floatWork);
+    /* Exercise both compression branches on compatible manually sized grids. */
+    CHECK(GalileoScenario(2048000, -38500, 0, 1, 1, 0, 1, 8192) == 0);
+    CHECK(GalileoScenario(2048000, 0, 0, 0, 0, 0, 0, 4096) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0, 16384) == 0);
     return 0;
 }
 
@@ -573,15 +605,21 @@ int main(int argc, char **argv)
     if (argc == 2 && strcmp(argv[1], "--benchmark") == 0)
         return BenchmarkFft();
     if (argc == 2 && strcmp(argv[1], "--benchmark-pcps") == 0)
-        return BenchmarkIntegerPcps();
+        return BenchmarkIntegerPcps(1);
+    if (argc == 2 && strcmp(argv[1], "--verify-pcps") == 0)
+        return BenchmarkIntegerPcps(0);
+    if (argc == 2 && strcmp(argv[1], "--verify-grid") == 0) {
+        CHECK(GridGeometryContract() == 0);
+        return NativeGridContract();
+    }
     CHECK(Kernels() == 0);
     CHECK(NoisePolicy() == 0);
-    CHECK(GalileoScenario(4096000, 0, 0, 1, 1, 0, 1) == 0);
-    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0) == 0);
-    CHECK(GalileoScenario(2400000, 0, 0, 1, 1, 0, 0) == 0);
-    CHECK(GalileoScenario(8183800, 38500, 0, 1, 1, 0, 0) == 0);
-    CHECK(GalileoScenario(4096000, 0, 0, 0, 0, 0, 0) == 0);
-    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 1, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 1, 1, 0, 1, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0, 0) == 0);
+    CHECK(GalileoScenario(2400000, 0, 0, 1, 1, 0, 0, 0) == 0);
+    CHECK(GalileoScenario(8183800, 38500, 0, 1, 1, 0, 0, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 0, 0, 0, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 1, 0, 0) == 0);
     CHECK(Ownership() == 0);
     CHECK(Scenario(2400000, 0, 0, 0, 1, 0) == 0);
     CHECK(Scenario(16000000, 0, 0, 1, 1, 0) == 0);
@@ -592,9 +630,9 @@ int main(int argc, char **argv)
     CHECK(Scenario(2400000, 0, 0, 0, 1, 1) == 0);
     testFftMode = NG_SEARCH_FFT_INTEGER_PRECISE;
     CHECK(Scenario(2400000, 0, 0, 0, 1, 0) == 0);
-    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0, 0) == 0);
     testFftMode = NG_SEARCH_FFT_INTEGER_SCALED;
     CHECK(Scenario(2400000, 0, 0, 0, 1, 0) == 0);
-    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0) == 0);
+    CHECK(GalileoScenario(4096000, 0, 0, 0, 1, 0, 0, 0) == 0);
     return 0;
 }

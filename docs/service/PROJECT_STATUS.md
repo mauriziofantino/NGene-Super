@@ -26,6 +26,23 @@ Small source windows are grouped into an owned native millisecond for tracking,
 amortizing worker barriers without resampling or changing arithmetic. Diagnostics
 pause while foreground processing catches up, independently of OS priorities.
 
+Native acquisition checks the coarse FFT grid against the opened stream
+before workspace allocation. Galileo FFT size 16384 requires at least
+4.096 Msps, including rates supplied by replay metadata.
+[F2a verification](../../development/profiling/F2a/README.md).
+
+GPS and Galileo compress each capture once and allocate FFT scratch for the
+selected arithmetic. Float mode skips integer baseband quantization. The
+Windows benchmark measured lower preparation time for the tested float
+profiles and lower memory for all arithmetic modes.
+[F2b verification](../../development/profiling/F2b/README.md).
+
+Integer PCPS uses magnitude shifts for spectrum packing while preserving
+signed truncation. Windows Q14 searches were faster at one worker and
+matched the previous decisions within each tested mode. F4 will profile
+the FFT stages that dominate the float and int32 coarse rows.
+[F3 verification](../../development/profiling/F3/README.md).
+
 Channels is a stable table with numeric C/N0 and horizontal bars. Total slots,
 GPS/Galileo reservations and automatic preference are configurable. Only the
 selected channel computes optional taps/current search display; confirmed maps

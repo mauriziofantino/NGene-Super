@@ -186,6 +186,54 @@ static void CheckMetadata(const char *path)
     CHECK(remove(sidecar) == 0);
 }
 
+/** Verify acquisition uses sidecar-derived stream geometry after the common adapter. */
+static void CheckAcquisitionGrid(const char *path)
+{
+    TNgCaptureMetadata metadata = {0};
+    TNgConfig config;
+    TNgFrontend frontend;
+    TNgAcquisition *search = NULL;
+    TNgChannel channel;
+    TNgError error = {{0}};
+    char sidecar[640];
+    FILE *file;
+
+    CHECK(snprintf(sidecar, sizeof(sidecar), "%s.meta.ini", path) > 0);
+    file = NgFopenExclusive(sidecar);
+    CHECK(file != NULL);
+    CHECK(fprintf(file,
+                  "[capture]\nversion=2\nformat=CI8\nlayout=I,Q interleaved\n"
+                  "component_bits=8\ncomponent_signed=true\n"
+                  "sample_rate_hz=2048000\ncenter_frequency_hz=1575381500\n"
+                  "signal_frequency_hz=1575420000\ndigital_if_hz=38500\n"
+                  "spectrum_inverted=1\nconditioning=bypass\nrecording_point=post_conditioning\n"
+                  "data_file=%s\n[result]\ncomplete=true\nwritten_samples=%d\n", path,
+                  NG_TEST_PAIRS) > 0);
+    CHECK(fclose(file) == 0);
+
+    NgConfigDefaults(&config);
+    config.sampleRateHz = 4096000;
+    config.streamFormat = NG_FORMAT_CI16;
+    config.galileoAcquisition.enabled = 1;
+    config.galileoAcquisition.firstPrn = config.galileoAcquisition.lastPrn = 7;
+    config.galileoAcquisition.fftSize = 16384;
+    CHECK(NgReplayConfigure(path, &config, &metadata, &error) == NG_OK);
+    CHECK(metadata.available && config.sampleRateHz == 2048000);
+    CHECK(NgFrontendOpen(&config, &frontend, &error) == NG_OK);
+    CHECK(frontend.info.sampleRateHz == 2048000 && frontend.info.digitalIfHz == 38500);
+    CHECK(frontend.info.nativeFormat == NG_FORMAT_CI8 && frontend.info.format == NG_FORMAT_CI16);
+    CHECK(frontend.info.spectrumInverted == 1);
+    CHECK(NgAcquisitionCreateGalileo(&config.galileoAcquisition, &frontend.info, &search, &channel,
+                                     &error) == NG_ERROR && search == NULL);
+    CHECK(strstr(error.message, "Effective rate is 2048000") != NULL);
+    config.galileoAcquisition.fftSize = 0;
+    CHECK(NgAcquisitionCreateGalileo(&config.galileoAcquisition, &frontend.info, &search, &channel,
+                                     &error) == NG_OK && search != NULL);
+    NgAcquisitionDestroy(search);
+    NgFrontendDestroy(&frontend);
+    CHECK(remove(sidecar) == 0);
+}
+
 /** @brief Run file-source contract tests and release all temporary fixtures.
  * @details No SDR or GUI is required; process failure reports the first violated contract.
  * @return EXIT_SUCCESS after ownership, range, signedness and format checks pass.
@@ -197,6 +245,7 @@ int main(void)
                    (unsigned long long)(NgMonotonicSeconds() * 1000000.0)) > 0);
     WriteFixture(path);
     CheckMetadata(path);
+    CheckAcquisitionGrid(path);
     CheckIndependentSources(path);
     CheckLoopAndValidation(path);
     CHECK(remove(path) == 0);

@@ -250,7 +250,7 @@
                   "label": "16384"
                 }
               ],
-              "hint": "4096 uses fixed-phase subcarrier removal and missed synthetic satellites in the profiling report."
+              "hint": "16384 requires an effective stream rate of at least 4.096 Msps, including replay metadata. Automatic uses 8192 below that rate. 4096 uses fixed-phase subcarrier removal and missed synthetic satellites in the profiling report."
             },
             {
               "key": "galileo_acquisition.pfa",

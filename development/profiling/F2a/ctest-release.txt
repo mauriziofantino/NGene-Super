@@ -1,0 +1,65 @@
+Test project C:/Users/MaurizioFantino/Downloads/Projects/nav-ngene-evo/build/msvc-x64-multisdr
+      Start  5: channel_slot_lifecycle
+      Start  6: tracking_contract
+      Start  1: acquisition_pool_contract
+      Start  9: acquisition_grid_contract
+ 1/30 Test  #9: acquisition_grid_contract ..........   Passed    1.17 sec
+      Start  7: gps_acquisition_contract
+ 2/30 Test  #1: acquisition_pool_contract ..........   Passed    3.93 sec
+      Start  8: acquisition_pcps_map_contract
+ 3/30 Test  #8: acquisition_pcps_map_contract ......   Passed    0.70 sec
+      Start 11: build_dependency_contract
+ 4/30 Test  #5: channel_slot_lifecycle .............   Passed    9.19 sec
+      Start 22: core_contracts
+ 5/30 Test #11: build_dependency_contract ..........   Passed    5.41 sec
+      Start 14: windows_developer_entry_contract
+ 6/30 Test  #7: gps_acquisition_contract ...........   Passed    9.68 sec
+      Start 20: gain_calibration_contract
+ 7/30 Test #20: gain_calibration_contract ..........   Passed    3.35 sec
+      Start 10: native_iq_ingress_and_pipeline
+ 8/30 Test  #6: tracking_contract ..................   Passed   14.46 sec
+      Start 13: windows_verifier_helper_contract
+ 9/30 Test #14: windows_developer_entry_contract ...   Passed    4.89 sec
+      Start 21: common_frontend_stream
+10/30 Test #21: common_frontend_stream .............   Passed    0.67 sec
+      Start 17: analysis_worker_contract
+11/30 Test #10: native_iq_ingress_and_pipeline .....   Passed    2.22 sec
+      Start 26: controller_lifecycle
+12/30 Test #17: analysis_worker_contract ...........   Passed    1.05 sec
+      Start  4: navigation_demodulation
+13/30 Test  #4: navigation_demodulation ............   Passed    0.02 sec
+      Start 12: source_patch_contract
+14/30 Test #13: windows_verifier_helper_contract ...   Passed    2.31 sec
+      Start 28: native_bladerf_adapter_contract
+15/30 Test #12: source_patch_contract ..............   Passed    0.30 sec
+      Start  3: galileo_navigation
+16/30 Test  #3: galileo_navigation .................   Passed    0.04 sec
+      Start 16: sample_math_native
+17/30 Test #26: controller_lifecycle ...............   Passed    0.75 sec
+      Start 18: fft_integer_contract
+18/30 Test #16: sample_math_native .................   Passed    0.28 sec
+      Start 27: native_rtlsdr_adapter_contract
+19/30 Test #28: native_bladerf_adapter_contract ....   Passed    0.63 sec
+      Start  2: broadcast_pvt
+20/30 Test  #2: broadcast_pvt ......................   Passed    0.01 sec
+      Start 29: native_sige_contract
+21/30 Test #29: native_sige_contract ...............   Passed    0.13 sec
+      Start 15: file_replay_contract
+22/30 Test #18: fft_integer_contract ...............   Passed    0.39 sec
+      Start 19: engine_channel_scheduler
+23/30 Test #15: file_replay_contract ...............   Passed    0.16 sec
+      Start 30: native_hackrf_contract
+24/30 Test #19: engine_channel_scheduler ...........   Passed    0.12 sec
+      Start 23: cli_help
+25/30 Test #27: native_rtlsdr_adapter_contract .....   Passed    0.52 sec
+26/30 Test #30: native_hackrf_contract .............   Passed    0.13 sec
+      Start 25: cli_hackrf_devices
+      Start 24: cli_version
+27/30 Test #23: cli_help ...........................   Passed    0.09 sec
+28/30 Test #24: cli_version ........................   Passed    0.02 sec
+29/30 Test #25: cli_hackrf_devices .................   Passed    0.11 sec
+30/30 Test #22: core_contracts .....................   Passed   13.54 sec
+
+100% tests passed, 0 tests failed out of 30
+
+Total Test time (real) =  22.74 sec

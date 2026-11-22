@@ -1,7 +1,9 @@
 /** @file galileo.c @brief Classic-derived Galileo E1-B coarse, Doppler/code refinement and 3-of-4 search.
  * Numerical adaptation: native complex samples, floating PCPS, no legacy FFT gain constants.
  * FalseAlarm's integer-shape gamma survival law and Galileo E1-B Pfa=1e-9 are retained. */
-#include "ngene/acquisition.h"
+#include "acquisition/workspace.h"
+#include "dsp/search_plan.h"
+#include "acquisition/grid.h"
 #include "galileo_codes.h"
 #include <math.h>
 #include <stdlib.h>
@@ -15,6 +17,7 @@
 typedef struct {
     size_t size;
     size_t nativeCapacity;
+    TNgSearchFftMode fftMode;
     TNgSearchFft *fft;
     TNgComplex *baseband;
     int16_t *integerBaseband;
@@ -93,43 +96,53 @@ void NgAcquisitionGalileoFree(void *context)
 }
 
 /** Allocate all replica/FFT/correlation buffers before reception. */
-int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, unsigned fftSize, void **out,
-                                  TNgError *error)
+int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, unsigned fftSize,
+                                  TNgSearchFftMode mode, void **out, TNgError *error)
 {
     TNgGalileoSearch *search;
     unsigned prn;
     size_t capacity;
     *out = NULL;
-    if (stream->sampleRateHz < 2048000 || stream->sampleRateHz > 20000000)
+    if (stream == NULL || stream->sampleRateHz < 2048000 || stream->sampleRateHz > 20000000)
         return NgFail(error, "Galileo E1-B acquisition rate must be 2.048..20 Msps");
+    size_t size = fftSize != 0 ? fftSize : (stream->sampleRateHz >= 4096000 ? 16384 : 8192);
+    if (NgAcquisitionValidateGrid("Galileo E1-B", stream->sampleRateHz, 4, size, error) != NG_OK)
+        return NG_ERROR;
     search = calloc(1, sizeof(*search));
     if (search == NULL)
         return NgFail(error, "Galileo E1-B workspace allocation failed");
-    search->size = fftSize ? fftSize : stream->sampleRateHz >= 4096000 ? 16384 : 8192;
+    search->size = size;
+    search->fftMode = mode;
     search->wipe = search->size == 4096;
     search->nativeCapacity = (stream->sampleRateHz * 4u + 999u) / 1000u;
     capacity = search->nativeCapacity > search->size ? search->nativeCapacity : search->size;
     search->baseband = calloc(search->size * NG_GAL_SEARCH_PERIODS, sizeof(TNgComplex));
-    search->integerBaseband = calloc(2 * search->size * NG_GAL_SEARCH_PERIODS, sizeof(int16_t));
+    if (mode != NG_SEARCH_FFT_FLOAT)
+        search->integerBaseband = calloc(2 * search->size * NG_GAL_SEARCH_PERIODS, sizeof(int16_t));
     search->signal = calloc(search->size * NG_GAL_SUMS, sizeof(TNgComplex));
     search->carrier = calloc(capacity, sizeof(TNgComplex));
-    search->work = calloc(search->size, sizeof(TNgComplex));
-    search->codeFft = calloc(32 * search->size, sizeof(TNgComplex));
+    if (mode == NG_SEARCH_FFT_FLOAT) {
+        search->work = calloc(search->size, sizeof(TNgComplex));
+        search->codeFft = calloc(32 * search->size, sizeof(TNgComplex));
+    }
     search->native = calloc(capacity, sizeof(TNgComplex));
     search->code = calloc(capacity, sizeof(float));
     search->power = calloc(search->size, sizeof(double));
-    if (!search->baseband || !search->integerBaseband || !search->signal ||
-        !search->carrier || !search->work ||
-        !search->codeFft || !search->native || !search->code || !search->power ||
-        NgSearchFftCreate(search->size, &search->fft, error) != NG_OK) {
+    if (!search->baseband || !search->signal || !search->carrier || !search->native ||
+        !search->code || !search->power ||
+        (mode == NG_SEARCH_FFT_FLOAT ? (!search->work || !search->codeFft)
+                                     : !search->integerBaseband) ||
+        NgSearchFftCreateForMode(search->size, mode, &search->fft, error) != NG_OK) {
         NgAcquisitionGalileoFree(search);
         return NgFail(error, "Galileo E1-B DSP workspace allocation failed");
     }
     for (prn = 1; prn <= 32; ++prn) {
         size_t k;
-        TNgComplex *spectrum = search->codeFft + (prn - 1) * search->size;
         for (k = 0; k < 4092; ++k)
             search->chips[prn - 1][k] = (ngGalileoCodes[prn - 1][k / 8] & (1u << (7 - k % 8))) ? -1 : 1;
+        if (mode != NG_SEARCH_FFT_FLOAT)
+            continue;
+        TNgComplex *spectrum = search->codeFft + (prn - 1) * search->size;
         GalileoCodeMode(search->code, search->size, search->chips[prn - 1],
                         (double)search->size * 250, 1023000.0, 0, !search->wipe);
         for (k = 0; k < search->size; ++k)
@@ -149,6 +162,7 @@ static int Prepare(TNgGalileoSearch *search, const TNgAcquisitionCapture *captur
     size_t k;
     size_t outputCount = search->size * NG_GAL_SEARCH_PERIODS;
     double rate = (double)capture->stream.sampleRateHz;
+    search->prepared = 0;
     search->meanI = 0;
     search->meanQ = 0;
     for (k = 0; k < capture->count; ++k) {
@@ -157,29 +171,30 @@ static int Prepare(TNgGalileoSearch *search, const TNgAcquisitionCapture *captur
     }
     search->meanI /= (double)capture->count;
     search->meanQ /= (double)capture->count;
-    for (k = 0; k < outputCount; ++k) {
-        size_t begin =
-            (size_t)((uint64_t)k * capture->stream.sampleRateHz / ((uint64_t)search->size * 250u));
-        size_t end = (size_t)((uint64_t)(k + 1) * capture->stream.sampleRateHz /
-                              ((uint64_t)search->size * 250u));
-        size_t j;
-        double i = 0;
-        double q = 0;
-        /* Carrier recurrence is generated in native-ms batches below. */
-        if ((k % search->size) == 0 && cancel(cancelContext))
-            return NG_END;
-        for (j = begin; j < end; ++j) {
-            double sign = search->wipe ? Subcarrier(j, rate) : 1.0;
-            i += (capture->samples[j].i - search->meanI) * sign;
-            q += (capture->samples[j].q - search->meanQ) * sign *
-                 (capture->stream.spectrumInverted ? -1 : 1);
+    if (capture->stream.digitalIfHz == 0) {
+        for (k = 0; k < outputCount; ++k) {
+            size_t begin =
+                (size_t)((uint64_t)k * capture->stream.sampleRateHz / ((uint64_t)search->size * 250u));
+            size_t end = (size_t)((uint64_t)(k + 1) * capture->stream.sampleRateHz /
+                                  ((uint64_t)search->size * 250u));
+            size_t j;
+            double i = 0;
+            double q = 0;
+            if ((k % search->size) == 0 && cancel(cancelContext))
+                return NG_END;
+            for (j = begin; j < end; ++j) {
+                double sign = search->wipe ? Subcarrier(j, rate) : 1.0;
+                i += (capture->samples[j].i - search->meanI) * sign;
+                q += (capture->samples[j].q - search->meanQ) * sign *
+                     (capture->stream.spectrumInverted ? -1 : 1);
+            }
+            search->baseband[k].i = (float)(i / (double)(end - begin));
+            search->baseband[k].q = (float)(q / (double)(end - begin));
         }
-        search->baseband[k].i = (float)(i / (double)(end - begin));
-        search->baseband[k].q = (float)(q / (double)(end - begin));
-    }
-    /* IF must be removed before compression. Recompute only when IF is nonzero. */
-    if (capture->stream.digitalIfHz != 0) {
+    } else {
         unsigned ms;
+        if (cancel(cancelContext))
+            return NG_END;
         for (ms = 0; ms < NG_GAL_SEARCH_PERIODS; ++ms) {
             size_t begin = (size_t)((uint64_t)ms * 4u * capture->stream.sampleRateHz / 1000u);
             size_t end = (size_t)((uint64_t)(ms + 1) * 4u * capture->stream.sampleRateHz / 1000u);
@@ -217,7 +232,7 @@ static int Prepare(TNgGalileoSearch *search, const TNgAcquisitionCapture *captur
                 return NG_END;
         }
     }
-    {
+    if (search->fftMode != NG_SEARCH_FFT_FLOAT) {
         double maximum = 0;
         for (k = 0; k < outputCount; ++k) {
             maximum = fmax(maximum, fabs(search->baseband[k].i));
@@ -244,7 +259,11 @@ static int Coarse(TNgGalileoSearch *search, unsigned prn, double doppler, int sq
 {
     unsigned ms;
     size_t k;
-    const TNgComplex *code = search->codeFft + (prn - 1) * search->size;
+    if (fftMode != search->fftMode)
+        return NG_ERROR;
+    const TNgComplex *code = fftMode == NG_SEARCH_FFT_FLOAT
+                                ? search->codeFft + (prn - 1) * search->size
+                                : NULL;
     memset(search->power, 0, search->size * sizeof(*search->power));
     if (fftMode != NG_SEARCH_FFT_FLOAT &&
         (search->integerCodePrn != prn || search->integerCodeMode != fftMode)) {
@@ -268,13 +287,13 @@ static int Coarse(TNgGalileoSearch *search, unsigned prn, double doppler, int sq
         memcpy(search->work, search->baseband + ms * search->size,
                search->size * sizeof(TNgComplex));
         NgSearchMix(search->work, search->carrier, search->size);
-        NgSearchFftExecuteMode(search->fft, search->work, 0, fftMode);
+        NgSearchFftExecute(search->fft, search->work, 0);
         for (k = 0; k < search->size; ++k) {
             TNgComplex a = search->work[k];
             search->work[k].i = a.i * code[k].i + a.q * code[k].q;
             search->work[k].q = a.q * code[k].i - a.i * code[k].q;
         }
-        NgSearchFftExecuteMode(search->fft, search->work, 1, fftMode);
+        NgSearchFftExecute(search->fft, search->work, 1);
         for (k = 0; k < search->size; ++k) {
             double i = search->work[k].i;
             double q = search->work[k].q;

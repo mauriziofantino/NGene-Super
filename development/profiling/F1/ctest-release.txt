@@ -1,0 +1,149 @@
+Test project C:/Users/MaurizioFantino/Downloads/Projects/nav-ngene-evo/build/msvc-x64-multisdr
+      Start  1: acquisition_pool_contract
+ 1/29 Test  #1: acquisition_pool_contract ..........   Passed    4.65 sec
+      Start  2: broadcast_pvt
+ 2/29 Test  #2: broadcast_pvt ......................   Passed    0.06 sec
+      Start  3: galileo_navigation
+ 3/29 Test  #3: galileo_navigation .................   Passed    0.06 sec
+      Start  4: navigation_demodulation
+ 4/29 Test  #4: navigation_demodulation ............   Passed    0.10 sec
+      Start  5: channel_slot_lifecycle
+ 5/29 Test  #5: channel_slot_lifecycle .............   Passed   11.35 sec
+      Start  6: tracking_contract
+ 6/29 Test  #6: tracking_contract ..................   Passed   13.10 sec
+      Start  7: gps_acquisition_contract
+ 7/29 Test  #7: gps_acquisition_contract ...........   Passed    8.12 sec
+      Start  8: acquisition_pcps_map_contract
+ 8/29 Test  #8: acquisition_pcps_map_contract ......   Passed    0.68 sec
+      Start  9: native_iq_ingress_and_pipeline
+ 9/29 Test  #9: native_iq_ingress_and_pipeline .....   Passed    5.28 sec
+      Start 10: build_dependency_contract
+10/29 Test #10: build_dependency_contract ..........***Failed    0.40 sec
+-- PASS: manifest pin, source hash and immutable DLL import header
+-- PASS: pre-project Windows target selection, discovery and manifest cache repair
+-- Compiler fixtures: C:/Users/MAURIZ~1/AppData/Local/Temp/ngt-576678406d5e (retained on failure)
+CMake Error at C:/Users/MaurizioFantino/Downloads/Projects/nav-ngene-evo/tests/build_contract.cmake:122 (message):
+  Installed SDK import-header fixture failed: -- Building for: Visual Studio
+  18 2026
+
+  -- Selecting Windows SDK version 10.0.28000.0 to target Windows 10.0.26300.
+
+  -- Configuring incomplete, errors occurred!
+
+
+
+  CMake Error at CMakeLists.txt:2 (project):
+
+    Failed to run MSBuild command:
+
+
+
+      C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe
+
+
+
+    to get the value of VCTargetsPath:
+
+
+
+      MSBuild version 18.12.3-1.26559.12+8df097b6f for .NET Framework
+      MSBUILD : error MSB1025: An internal failure occurred while running MSBuild.
+      System.TypeInitializationException: The type initializer for 'Microsoft.Build.Execution.BuildParameters' threw an exception. ---> System.UnauthorizedAccessException: Access to the path 'C:\Users\MAURIZ~1\AppData\Local\Temp\ngt-576678406d5e\s\b\CMakeFiles\4.3.1-msvc1' is denied.
+         at System.IO.__Error.WinIOError(Int32 errorCode, String maybeFullPath)
+         at System.IO.LongPathHelper.GetLongPathName(StringBuffer path)
+         at System.IO.Directory.NewGetCurrentDirectory()
+         at System.IO.Directory.InternalGetCurrentDirectory(Boolean checkHost)
+         at Microsoft.Build.Execution.BuildParameters..cctor()
+         --- End of inner exception stack trace ---
+         at Microsoft.Build.Execution.BuildParameters.get_WarnOnUninitializedProperty()
+         at Microsoft.Build.Evaluation.ToolsetReader.ReadToolset(ToolsetPropertyDefinition toolsVersion, PropertyDictionary`1 globalProperties, PropertyDictionary`1 initialProperties, Boolean accumulateProperties)
+         at Microsoft.Build.Evaluation.ToolsetReader.ReadEachToolset(Dictionary`2 toolsets, PropertyDictionary`1 globalProperties, PropertyDictionary`1 initialProperties, Boolean accumulateProperties)
+         at Microsoft.Build.Evaluation.ToolsetReader.ReadToolsets(Dictionary`2 toolsets, PropertyDictionary`1 globalProperties, PropertyDictionary`1 initialProperties, Boolean accumulateProperties, String& msBuildOverrideTasksPath, String& defaultOverrideToolsVersion)
+         at Microsoft.Build.Evaluation.ToolsetReader.<ReadAllToolsets>g__ReadConfigToolset|11_0(<>c__DisplayClass11_0& )
+         at Microsoft.Build.Evaluation.ToolsetReader.ReadAllToolsets(Dictionary`2 toolsets, ToolsetRegistryReader registryReader, ToolsetConfigurationReader configurationReader, PropertyDictionary`1 environmentProperties, PropertyDictionary`1 globalProperties, ToolsetDefinitionLocations locations)
+         at Microsoft.Build.Evaluation.ProjectCollection.InitializeToolsetCollection(ToolsetRegistryReader registryReader, ToolsetConfigurationReader configReader)
+         at Microsoft.Build.Evaluation.ProjectCollection..ctor(IDictionary`2 globalProperties, IEnumerable`1 loggers, ToolsetDefinitionLocations toolsetDefinitionLocations, Int32 maxNodeCount, Boolean onlyLogCriticalEvents, Boolean loadProjectsReadOnly, Boolean useAsynchronousLogging, Boolean reuseProjectRootElementCache, Boolean enableTargetOutputLogging, String parseConfigDirectory)
+         at Microsoft.Build.Evaluation.ProjectCollection..ctor(IDictionary`2 globalProperties, IEnumerable`1 loggers, IEnumerable`1 remoteLoggers, ToolsetDefinitionLocations toolsetDefinitionLocations, Int32 maxNodeCount, Boolean onlyLogCriticalEvents, Boolean loadProjectsReadOnly, Boolean useAsynchronousLogging, Boolean reuseProjectRootElementCache, Boolean enableTargetOutputLogging, String parseConfigDirectory)
+         at Microsoft.Build.CommandLine.MSBuildApp.BuildProject(String projectFile, String[] targets, String toolsVersion, Dictionary`2 globalProperties, Dictionary`2 restoreProperties, ILogger[] loggers, LoggerVerbosity verbosity, DistributedLoggerRecord[] distributedLoggerRecords, Boolean needToValidateProject, String schemaFile, Int32 cpuCount, Boolean multiThreaded, Boolean enableNodeReuse, TextWriter preprocessWriter, TextWriter targetsWriter, Boolean detailedSummary, ISet`1 warningsAsErrors, ISet`1 warningsNotAsErrors, ISet`1 warningsAsMessages, Boolean enableRestore, ProfilerLogger profilerLogger, Boolean enableProfiler, Boolean interactive, ProjectIsolationMode isolateProjects, GraphBuildOptions graphBuildOptions, Boolean lowPriority, Boolean question, Boolean isTaskAndTargetItemLoggingRequired, Boolean isBuildCheckEnabled, String[] inputResultsCaches, String outputResultsCache, Boolean saveProjectResult, BuildResult& result, Boolean reportFileAccesses, String[] commandLine)
+         at Microsoft.Build.CommandLine.MSBuildApp.Execute(String[] commandLine, CommandLineSwitches preGatheredSwitchesFromAutoResponseFile, CommandLineSwitches preGatheredSwitchesNotFromAutoResponseFile)
+      
+      Unhandled Exception: System.TypeInitializationException: The type initializer for 'Microsoft.Build.Execution.BuildParameters' threw an exception. ---> System.UnauthorizedAccessException: Access to the path 'C:\Users\MAURIZ~1\AppData\Local\Temp\ngt-576678406d5e\s\b\CMakeFiles\4.3.1-msvc1' is denied.
+         at System.IO.__Error.WinIOError(Int32 errorCode, String maybeFullPath)
+         at System.IO.LongPathHelper.GetLongPathName(StringBuffer path)
+         at System.IO.Directory.NewGetCurrentDirectory()
+         at System.IO.Directory.InternalGetCurrentDirectory(Boolean checkHost)
+         at Microsoft.Build.Execution.BuildParameters..cctor()
+         --- End of inner exception stack trace ---
+         at Microsoft.Build.Execution.BuildParameters.get_WarnOnUninitializedProperty()
+         at Microsoft.Build.Evaluation.ToolsetReader.ReadToolset(ToolsetPropertyDefinition toolsVersion, PropertyDictionary`1 globalProperties, PropertyDictionary`1 initialProperties, Boolean accumulateProperties)
+         at Microsoft.Build.Evaluation.ToolsetReader.ReadEachToolset(Dictionary`2 toolsets, PropertyDictionary`1 globalProperties, PropertyDictionary`1 initialProperties, Boolean accumulateProperties)
+         at Microsoft.Build.Evaluation.ToolsetReader.ReadToolsets(Dictionary`2 toolsets, PropertyDictionary`1 globalProperties, PropertyDictionary`1 initialProperties, Boolean accumulateProperties, String& msBuildOverrideTasksPath, String& defaultOverrideToolsVersion)
+         at Microsoft.Build.Evaluation.ToolsetReader.<ReadAllToolsets>g__ReadConfigToolset|11_0(<>c__DisplayClass11_0& )
+         at Microsoft.Build.Evaluation.ToolsetReader.ReadAllToolsets(Dictionary`2 toolsets, ToolsetRegistryReader registryReader, ToolsetConfigurationReader configurationReader, PropertyDictionary`1 environmentProperties, PropertyDictionary`1 globalProperties, ToolsetDefinitionLocations locations)
+         at Microsoft.Build.Evaluation.ProjectCollection.InitializeToolsetCollection(ToolsetRegistryReader registryReader, ToolsetConfigurationReader configReader)
+         at Microsoft.Build.Evaluation.ProjectCollection..ctor(IDictionary`2 globalProperties, IEnumerable`1 loggers, ToolsetDefinitionLocations toolsetDefinitionLocations, Int32 maxNodeCount, Boolean onlyLogCriticalEvents, Boolean loadProjectsReadOnly, Boolean useAsynchronousLogging, Boolean reuseProjectRootElementCache, Boolean enableTargetOutputLogging, String parseConfigDirectory)
+         at Microsoft.Build.Evaluation.ProjectCollection..ctor(IDictionary`2 globalProperties, IEnumerable`1 loggers, IEnumerable`1 remoteLoggers, ToolsetDefinitionLocations toolsetDefinitionLocations, Int32 maxNodeCount, Boolean onlyLogCriticalEvents, Boolean loadProjectsReadOnly, Boolean useAsynchronousLogging, Boolean reuseProjectRootElementCache, Boolean enableTargetOutputLogging, String parseConfigDirectory)
+         at Microsoft.Build.CommandLine.MSBuildApp.BuildProject(String projectFile, String[] targets, String toolsVersion, Dictionary`2 globalProperties, Dictionary`2 restoreProperties, ILogger[] loggers, LoggerVerbosity verbosity, DistributedLoggerRecord[] distributedLoggerRecords, Boolean needToValidateProject, String schemaFile, Int32 cpuCount, Boolean multiThreaded, Boolean enableNodeReuse, TextWriter preprocessWriter, TextWriter targetsWriter, Boolean detailedSummary, ISet`1 warningsAsErrors, ISet`1 warningsNotAsErrors, ISet`1 warningsAsMessages, Boolean enableRestore, ProfilerLogger profilerLogger, Boolean enableProfiler, Boolean interactive, ProjectIsolationMode isolateProjects, GraphBuildOptions graphBuildOptions, Boolean lowPriority, Boolean question, Boolean isTaskAndTargetItemLoggingRequired, Boolean isBuildCheckEnabled, String[] inputResultsCaches, String outputResultsCache, Boolean saveProjectResult, BuildResult& result, Boolean reportFileAccesses, String[] commandLine)
+         at Microsoft.Build.CommandLine.MSBuildApp.Execute(String[] commandLine, CommandLineSwitches preGatheredSwitchesFromAutoResponseFile, CommandLineSwitches preGatheredSwitchesNotFromAutoResponseFile)
+         at Microsoft.Build.CommandLine.MSBuildApp.Main(String[] args)
+      
+
+
+
+    Exit code: -532462766
+
+
+
+
+
+
+
+
+
+
+      Start 11: source_patch_contract
+11/29 Test #11: source_patch_contract ..............   Passed    0.42 sec
+      Start 12: windows_verifier_helper_contract
+12/29 Test #12: windows_verifier_helper_contract ...   Passed    3.10 sec
+      Start 13: windows_developer_entry_contract
+13/29 Test #13: windows_developer_entry_contract ...   Passed    5.90 sec
+      Start 14: file_replay_contract
+14/29 Test #14: file_replay_contract ...............   Passed    0.15 sec
+      Start 15: sample_math_native
+15/29 Test #15: sample_math_native .................   Passed    0.34 sec
+      Start 16: analysis_worker_contract
+16/29 Test #16: analysis_worker_contract ...........   Passed    1.07 sec
+      Start 17: fft_integer_contract
+17/29 Test #17: fft_integer_contract ...............   Passed    0.43 sec
+      Start 18: engine_channel_scheduler
+18/29 Test #18: engine_channel_scheduler ...........   Passed    0.09 sec
+      Start 19: gain_calibration_contract
+19/29 Test #19: gain_calibration_contract ..........   Passed    2.56 sec
+      Start 20: common_frontend_stream
+20/29 Test #20: common_frontend_stream .............   Passed    0.85 sec
+      Start 21: core_contracts
+21/29 Test #21: core_contracts .....................   Passed    7.91 sec
+      Start 22: cli_help
+22/29 Test #22: cli_help ...........................   Passed    0.11 sec
+      Start 23: cli_version
+23/29 Test #23: cli_version ........................   Passed    0.02 sec
+      Start 24: cli_hackrf_devices
+24/29 Test #24: cli_hackrf_devices .................   Passed    0.07 sec
+      Start 25: controller_lifecycle
+25/29 Test #25: controller_lifecycle ...............   Passed    0.86 sec
+      Start 26: native_rtlsdr_adapter_contract
+26/29 Test #26: native_rtlsdr_adapter_contract .....   Passed    0.35 sec
+      Start 27: native_bladerf_adapter_contract
+27/29 Test #27: native_bladerf_adapter_contract ....   Passed    0.53 sec
+      Start 28: native_sige_contract
+28/29 Test #28: native_sige_contract ...............   Passed    0.16 sec
+      Start 29: native_hackrf_contract
+29/29 Test #29: native_hackrf_contract .............   Passed    0.11 sec
+
+97% tests passed, 1 tests failed out of 29
+
+Total Test time (real) =  68.92 sec
+
+The following tests FAILED:
+	 10 - build_dependency_contract (Failed)
+Errors while running CTest

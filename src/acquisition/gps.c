@@ -1,8 +1,10 @@
 /** @file gps.c @brief Classic-derived GPS coarse, Doppler/code refinement and 3-of-4 search.
  * Numerical adaptation: native complex samples, floating PCPS, no legacy FFT gain constants.
  * FalseAlarm's integer-shape gamma survival law and GPS Pfa=1e-9 are retained. */
-#include "ngene/acquisition.h"
+#include "acquisition/workspace.h"
+#include "dsp/search_plan.h"
 #include "ngene/dsp/gps_ca.h"
+#include "acquisition/grid.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +17,7 @@
 typedef struct {
     size_t size;
     size_t nativeCapacity;
+    TNgSearchFftMode fftMode;
     TNgSearchFft *fft;
     TNgComplex *baseband;
     int16_t *integerBaseband;
@@ -63,40 +66,51 @@ void NgAcquisitionGpsFree(void *context)
 }
 
 /** Allocate all replica/FFT/correlation buffers before reception. */
-int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error)
+int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, TNgSearchFftMode mode, void **out,
+                               TNgError *error)
 {
     TNgGpsSearch *search;
     unsigned prn;
     size_t capacity;
     *out = NULL;
-    if (stream->sampleRateHz < 2048000 || stream->sampleRateHz > 20000000)
+    if (stream == NULL || stream->sampleRateHz < 2048000 || stream->sampleRateHz > 20000000)
         return NgFail(error, "GPS acquisition rate must be 2.048..20 Msps");
+    size_t size = stream->sampleRateHz >= 4096000 ? 4096 : 2048;
+    if (NgAcquisitionValidateGrid("GPS L1 C/A", stream->sampleRateHz, 1, size, error) != NG_OK)
+        return NG_ERROR;
     search = calloc(1, sizeof(*search));
     if (search == NULL)
         return NgFail(error, "GPS workspace allocation failed");
-    search->size = stream->sampleRateHz >= 4096000 ? 4096 : 2048;
+    search->size = size;
+    search->fftMode = mode;
     search->nativeCapacity = (stream->sampleRateHz + 999u) / 1000u;
     capacity = search->nativeCapacity > search->size ? search->nativeCapacity : search->size;
     search->baseband = calloc(search->size * NG_GPS_SEARCH_MS, sizeof(TNgComplex));
-    search->integerBaseband = calloc(2 * search->size * NG_GPS_SEARCH_MS, sizeof(int16_t));
+    if (mode != NG_SEARCH_FFT_FLOAT)
+        search->integerBaseband = calloc(2 * search->size * NG_GPS_SEARCH_MS, sizeof(int16_t));
     search->signal = calloc(search->size * NG_GPS_SUMS, sizeof(TNgComplex));
     search->carrier = calloc(capacity, sizeof(TNgComplex));
-    search->work = calloc(search->size, sizeof(TNgComplex));
-    search->codeFft = calloc(32 * search->size, sizeof(TNgComplex));
+    if (mode == NG_SEARCH_FFT_FLOAT) {
+        search->work = calloc(search->size, sizeof(TNgComplex));
+        search->codeFft = calloc(32 * search->size, sizeof(TNgComplex));
+    }
     search->native = calloc(capacity, sizeof(TNgComplex));
     search->code = calloc(capacity, sizeof(float));
     search->power = calloc(search->size, sizeof(double));
-    if (!search->baseband || !search->integerBaseband || !search->signal ||
-        !search->carrier || !search->work ||
-        !search->codeFft || !search->native || !search->code || !search->power ||
-        NgSearchFftCreate(search->size, &search->fft, error) != NG_OK) {
+    if (!search->baseband || !search->signal || !search->carrier || !search->native ||
+        !search->code || !search->power ||
+        (mode == NG_SEARCH_FFT_FLOAT ? (!search->work || !search->codeFft)
+                                     : !search->integerBaseband) ||
+        NgSearchFftCreateForMode(search->size, mode, &search->fft, error) != NG_OK) {
         NgAcquisitionGpsFree(search);
         return NgFail(error, "GPS DSP workspace allocation failed");
     }
     for (prn = 1; prn <= 32; ++prn) {
         size_t k;
-        TNgComplex *spectrum = search->codeFft + (prn - 1) * search->size;
         (void)NgGpsCaGenerate(prn, search->chips[prn - 1], NULL);
+        if (mode != NG_SEARCH_FFT_FLOAT)
+            continue;
+        TNgComplex *spectrum = search->codeFft + (prn - 1) * search->size;
         NgSearchCode(search->code, search->size, search->chips[prn - 1],
                      (double)search->size * 1000, NG_GPS_CA_RATE_HZ, 0);
         for (k = 0; k < search->size; ++k)
@@ -116,6 +130,7 @@ static int Prepare(TNgGpsSearch *search, const TNgAcquisitionCapture *capture,
     size_t k;
     size_t outputCount = search->size * NG_GPS_SEARCH_MS;
     double rate = (double)capture->stream.sampleRateHz;
+    search->prepared = 0;
     search->meanI = 0;
     search->meanQ = 0;
     for (k = 0; k < capture->count; ++k) {
@@ -124,28 +139,29 @@ static int Prepare(TNgGpsSearch *search, const TNgAcquisitionCapture *capture,
     }
     search->meanI /= (double)capture->count;
     search->meanQ /= (double)capture->count;
-    for (k = 0; k < outputCount; ++k) {
-        size_t begin =
-            (size_t)((uint64_t)k * capture->stream.sampleRateHz / ((uint64_t)search->size * 1000u));
-        size_t end = (size_t)((uint64_t)(k + 1) * capture->stream.sampleRateHz /
-                              ((uint64_t)search->size * 1000u));
-        size_t j;
-        double i = 0;
-        double q = 0;
-        /* Carrier recurrence is generated in native-ms batches below. */
-        if ((k % search->size) == 0 && cancel(cancelContext))
-            return NG_END;
-        for (j = begin; j < end; ++j) {
-            i += capture->samples[j].i - search->meanI;
-            q += (capture->samples[j].q - search->meanQ) *
-                 (capture->stream.spectrumInverted ? -1 : 1);
+    if (capture->stream.digitalIfHz == 0) {
+        for (k = 0; k < outputCount; ++k) {
+            size_t begin =
+                (size_t)((uint64_t)k * capture->stream.sampleRateHz / ((uint64_t)search->size * 1000u));
+            size_t end = (size_t)((uint64_t)(k + 1) * capture->stream.sampleRateHz /
+                                  ((uint64_t)search->size * 1000u));
+            size_t j;
+            double i = 0;
+            double q = 0;
+            if ((k % search->size) == 0 && cancel(cancelContext))
+                return NG_END;
+            for (j = begin; j < end; ++j) {
+                i += capture->samples[j].i - search->meanI;
+                q += (capture->samples[j].q - search->meanQ) *
+                     (capture->stream.spectrumInverted ? -1 : 1);
+            }
+            search->baseband[k].i = (float)(i / (double)(end - begin));
+            search->baseband[k].q = (float)(q / (double)(end - begin));
         }
-        search->baseband[k].i = (float)(i / (double)(end - begin));
-        search->baseband[k].q = (float)(q / (double)(end - begin));
-    }
-    /* IF must be removed before compression. Recompute only when IF is nonzero. */
-    if (capture->stream.digitalIfHz != 0) {
+    } else {
         unsigned ms;
+        if (cancel(cancelContext))
+            return NG_END;
         for (ms = 0; ms < NG_GPS_SEARCH_MS; ++ms) {
             size_t begin = (size_t)((uint64_t)ms * capture->stream.sampleRateHz / 1000u);
             size_t end = (size_t)((uint64_t)(ms + 1) * capture->stream.sampleRateHz / 1000u);
@@ -182,7 +198,7 @@ static int Prepare(TNgGpsSearch *search, const TNgAcquisitionCapture *capture,
                 return NG_END;
         }
     }
-    {
+    if (search->fftMode != NG_SEARCH_FFT_FLOAT) {
         double maximum = 0;
         for (k = 0; k < outputCount; ++k) {
             maximum = fmax(maximum, fabs(search->baseband[k].i));
@@ -209,7 +225,11 @@ static int Coarse(TNgGpsSearch *search, unsigned prn, double doppler, int square
 {
     unsigned ms;
     size_t k;
-    const TNgComplex *code = search->codeFft + (prn - 1) * search->size;
+    if (fftMode != search->fftMode)
+        return NG_ERROR;
+    const TNgComplex *code = fftMode == NG_SEARCH_FFT_FLOAT
+                                ? search->codeFft + (prn - 1) * search->size
+                                : NULL;
     memset(search->power, 0, search->size * sizeof(*search->power));
     if (fftMode != NG_SEARCH_FFT_FLOAT &&
         (search->integerCodePrn != prn || search->integerCodeMode != fftMode)) {
@@ -233,13 +253,13 @@ static int Coarse(TNgGpsSearch *search, unsigned prn, double doppler, int square
         memcpy(search->work, search->baseband + ms * search->size,
                search->size * sizeof(TNgComplex));
         NgSearchMix(search->work, search->carrier, search->size);
-        NgSearchFftExecuteMode(search->fft, search->work, 0, fftMode);
+        NgSearchFftExecute(search->fft, search->work, 0);
         for (k = 0; k < search->size; ++k) {
             TNgComplex a = search->work[k];
             search->work[k].i = a.i * code[k].i + a.q * code[k].q;
             search->work[k].q = a.q * code[k].i - a.i * code[k].q;
         }
-        NgSearchFftExecuteMode(search->fft, search->work, 1, fftMode);
+        NgSearchFftExecute(search->fft, search->work, 1);
         for (k = 0; k < search->size; ++k) {
             double i = search->work[k].i;
             double q = search->work[k].q;

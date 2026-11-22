@@ -49,7 +49,20 @@ refinement spans approximately +/-1 chip with native-sample steps.
 Numerical adaptation uses floating complex PCPS with the BOC-modulated replica
 rather than Classic's subcarrier wipe-off before packed FFT compression. FFT sizes
 are 8192 or 16384 per 4 ms, with rational box integration and native-rate code
-refinement/confirmation. No ADC precision is narrowed. Replica/code-rate and IF
+refinement/confirmation. Automatic sizing selects 8192 below 4.096 Msps and 16384
+at or above that rate. The optional 4096 mode uses fixed-phase native subcarrier
+removal and a primary-code-only coarse replica.
+
+The workspace requires as many whole native pairs per 4-ms period as coarse
+FFT cells. An explicit 16384 with an effective stream rate below 4096000
+pairs/s fails receiver startup with the effective and minimum rates in the
+diagnostic. Replay metadata supplies the rate when a capture is selected or
+passed via `--replay`. The fractional period boundary uses floor, so 4095999
+pairs/s yields 16383 usable pairs even when the buffer capacity rounds up to
+16384. The 4096 and 8192 choices fit across the supported acquisition rate
+range of 2.048–20 Msps.
+
+No ADC precision is narrowed. Replica/code-rate and IF
 origins are capture-relative; inverted spectra are conjugated only in private data.
 The 224-ms capture has seven disjoint 32-ms intervals: coarse, Doppler refinement,
 code refinement and four confirmation attempts. This follows EVO's frozen-capture

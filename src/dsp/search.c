@@ -1,5 +1,6 @@
 /** @file search.c @brief Allocation-free search kernels with SSE2, AArch64 NEON and C fallback. */
 #include "ngene/dsp/search.h"
+#include "dsp/search_plan.h"
 #include "ngene/dsp/gps_ca.h"
 #include "ngene/dsp/fft.h"
 #include <math.h>
@@ -158,44 +159,60 @@ static size_t PairStart(size_t size)
     return (stages & 1u) ? 8u : 4u;
 }
 
+int NgSearchFftSupportsSize(size_t size)
+{
+    return size >= NG_FFT_MIN_SIZE && size <= NG_FFT_MAX_SIZE && (size & (size - 1)) == 0;
+}
+
 /** Build reusable transform tables outside the sample path. */
-int NgSearchFftCreate(size_t size, TNgSearchFft **out, TNgError *error)
+static int CreateSearchFft(size_t size, unsigned modes, TNgSearchFft **out, TNgError *error)
 {
     TNgSearchFft *plan;
     size_t k;
+    int floating = (modes & (1u << NG_SEARCH_FFT_FLOAT)) != 0;
+    int precise = (modes & (1u << NG_SEARCH_FFT_INTEGER_PRECISE)) != 0;
+    int scaled = (modes & (1u << NG_SEARCH_FFT_INTEGER_SCALED)) != 0;
     *out = NULL;
-    if (size < 8 || size > 16384 || (size & (size - 1)) != 0)
+    if (!NgSearchFftSupportsSize(size))
         return NgFail(error, "Invalid search FFT size");
     plan = calloc(1, sizeof(*plan));
     if (plan == NULL)
         return NgFail(error, "Search FFT allocation failed");
     plan->size = size;
-    plan->reverse = calloc(size, sizeof(*plan->reverse));
-    plan->pairs = calloc(4 * size, sizeof(*plan->pairs));
-    plan->integerInput = calloc(2 * size, sizeof(int16_t));
-    plan->integerOutput = calloc(2 * size, sizeof(int16_t));
-    plan->preciseWork = calloc(2 * size, sizeof(int32_t));
-    plan->preciseInput = calloc(2 * size, sizeof(int32_t));
-    plan->integerTwiddles = calloc(2 * size, sizeof(int32_t));
-    plan->codeSpectrum16 = calloc(2 * size, sizeof(int16_t));
-    plan->codeSpectrum32 = calloc(2 * size, sizeof(int32_t));
-    if (plan->reverse == NULL || plan->pairs == NULL || plan->integerInput == NULL ||
-        plan->integerOutput == NULL || plan->preciseWork == NULL ||
-        plan->preciseInput == NULL ||
-        plan->integerTwiddles == NULL || plan->codeSpectrum16 == NULL ||
-        plan->codeSpectrum32 == NULL || NgFftCreate(size, &plan->integerPlan, error) != NG_OK) {
+    if (floating || precise)
+        plan->reverse = calloc(size, sizeof(*plan->reverse));
+    if (floating)
+        plan->pairs = calloc(4 * size, sizeof(*plan->pairs));
+    if (precise) {
+        plan->preciseWork = calloc(2 * size, sizeof(*plan->preciseWork));
+        plan->preciseInput = calloc(2 * size, sizeof(*plan->preciseInput));
+        plan->integerTwiddles = calloc(2 * size, sizeof(*plan->integerTwiddles));
+        plan->codeSpectrum32 = calloc(2 * size, sizeof(*plan->codeSpectrum32));
+    }
+    if (scaled) {
+        plan->integerInput = calloc(2 * size, sizeof(*plan->integerInput));
+        plan->integerOutput = calloc(2 * size, sizeof(*plan->integerOutput));
+        plan->codeSpectrum16 = calloc(2 * size, sizeof(*plan->codeSpectrum16));
+    }
+    if (((floating || precise) && !plan->reverse) || (floating && !plan->pairs) ||
+        (precise && (!plan->preciseWork || !plan->preciseInput || !plan->integerTwiddles ||
+                     !plan->codeSpectrum32)) ||
+        (scaled && (!plan->integerInput || !plan->integerOutput || !plan->codeSpectrum16 ||
+                    NgFftCreate(size, &plan->integerPlan, error) != NG_OK))) {
         NgSearchFftDestroy(plan);
         return NgFail(error, "Search FFT tables allocation failed");
     }
-    for (k = 0; k < size; ++k) {
-        size_t bit;
-        size_t value = k;
-        for (bit = size; bit > 1; bit >>= 1) {
-            plan->reverse[k] = (plan->reverse[k] << 1) | (value & 1);
-            value >>= 1;
+    if (plan->reverse) {
+        for (k = 0; k < size; ++k) {
+            size_t bit;
+            size_t value = k;
+            for (bit = size; bit > 1; bit >>= 1) {
+                plan->reverse[k] = (plan->reverse[k] << 1) | (value & 1);
+                value >>= 1;
+            }
         }
     }
-    {
+    if (precise) {
         size_t width, offset = 0, j;
         for (width = 2; width <= size; width *= 2) {
             for (j = 0; j < width / 2; ++j) {
@@ -206,7 +223,7 @@ int NgSearchFftCreate(size_t size, TNgSearchFft **out, TNgError *error)
             offset += width / 2;
         }
     }
-    {
+    if (floating) {
         size_t half = PairStart(size), used = 0, table;
         for (; half < size; half *= 4)
             for (table = 0; table < 2; ++table) {
@@ -222,6 +239,23 @@ int NgSearchFftCreate(size_t size, TNgSearchFft **out, TNgError *error)
     }
     *out = plan;
     return NG_OK;
+}
+
+int NgSearchFftCreate(size_t size, TNgSearchFft **out, TNgError *error)
+{
+    unsigned modes = (1u << NG_SEARCH_FFT_FLOAT) | (1u << NG_SEARCH_FFT_INTEGER_PRECISE) |
+                     (1u << NG_SEARCH_FFT_INTEGER_SCALED);
+    return CreateSearchFft(size, modes, out, error);
+}
+
+int NgSearchFftCreateForMode(size_t size, TNgSearchFftMode mode, TNgSearchFft **out,
+                             TNgError *error)
+{
+    if (mode < NG_SEARCH_FFT_FLOAT || mode > NG_SEARCH_FFT_INTEGER_SCALED) {
+        *out = NULL;
+        return NgFail(error, "Invalid search FFT mode");
+    }
+    return CreateSearchFft(size, 1u << mode, out, error);
 }
 
 /** Release owned tables. */
@@ -246,7 +280,8 @@ int NgSearchFftExecuteInt32(TNgSearchFft *plan, const int32_t *input, int32_t *o
                            int inverse, TNgError *error)
 {
     size_t n, k, width, offset = 0;
-    if (!plan || !input || !output || input == output || (inverse != 0 && inverse != 1))
+    if (!plan || !plan->integerTwiddles || !input || !output || input == output ||
+        (inverse != 0 && inverse != 1))
         return NgFail(error, "Invalid integer FFT buffers or direction");
     n = plan->size;
     for (k = 0; k < 2 * n; ++k)
@@ -287,7 +322,10 @@ int NgSearchIntegerCode(TNgSearchFft *plan, const float *code, TNgSearchFftMode 
                         TNgError *error)
 {
     size_t k, n;
-    if (!plan || !code || mode == NG_SEARCH_FFT_FLOAT)
+    if (!plan || !code ||
+        (mode == NG_SEARCH_FFT_INTEGER_SCALED ? !plan->integerPlan
+                                             : mode != NG_SEARCH_FFT_INTEGER_PRECISE ||
+                                                   !plan->preciseInput))
         return NgFail(error, "Integer code FFT requires integer arithmetic mode");
     n = plan->size;
     plan->codeReady = 0;
@@ -315,6 +353,15 @@ int NgSearchIntegerCode(TNgSearchFft *plan, const float *code, TNgSearchFftMode 
     plan->codeMode = mode;
     plan->codeReady = 1;
     return NG_OK;
+}
+
+/** Scale one spectral component with the signed division's truncation toward zero.
+ * PCPS bounds the conjugate product in int64 and selects shift for output within +/-8192. */
+static int32_t ScaleSpectralComponent(int64_t component, unsigned shift)
+{
+    uint64_t magnitude = (uint64_t)(component < 0 ? -component : component);
+    int32_t scaled = (int32_t)(magnitude >> shift);
+    return component < 0 ? -scaled : scaled;
 }
 
 int NgSearchIntegerPcps(TNgSearchFft *plan, const int16_t *baseband,
@@ -378,8 +425,8 @@ int NgSearchIntegerPcps(TNgSearchFft *plan, const int16_t *baseband,
                     plan->codeSpectrum32[2 * k];
         int64_t d = mode == NG_SEARCH_FFT_INTEGER_SCALED ? plan->codeSpectrum16[2 * k + 1] :
                     plan->codeSpectrum32[2 * k + 1];
-        int32_t real = (int32_t)((a * c + b * d) / (INT64_C(1) << shift));
-        int32_t imag = (int32_t)((b * c - a * d) / (INT64_C(1) << shift));
+        int32_t real = ScaleSpectralComponent(a * c + b * d, shift);
+        int32_t imag = ScaleSpectralComponent(b * c - a * d, shift);
         if (mode == NG_SEARCH_FFT_INTEGER_SCALED) {
             plan->integerInput[2 * k] = (int16_t)real;
             plan->integerInput[2 * k + 1] = (int16_t)-imag;

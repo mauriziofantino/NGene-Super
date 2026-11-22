@@ -1,28 +1,18 @@
 /** @file acquisition.c @brief Bounded ring subscriber and cancellable acquisition worker. */
 #include "ngene/acquisition.h"
+#include "acquisition/grid.h"
+#include "acquisition/workspace.h"
 #include "platform/platform.h"
+#include <inttypes.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <math.h>
 #include <string.h>
-/** Default strategy workspace implemented separately from scheduling/ownership. */
-int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error);
-/** Release the default workspace after its worker has joined. */
-void NgAcquisitionGpsFree(void *context);
-/** Default GPS operations, immutable for the process lifetime. */
-extern const TNgAcquisitionStrategy ngGpsAcquisitionStrategy;
 /** Copy default-strategy display data on its owning worker only. */
 void NgAcquisitionGpsSearchSpace(void *context, TNgAcquisitionSearchSpace *space);
 
-/** Galileo E1-B strategy resources (PRNs 1..32 in this increment). */
-int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, unsigned fftSize, void **out,
-                                  TNgError *error);
-/** Free Galileo private DSP resources. */
-void NgAcquisitionGalileoFree(void *context);
 /** Copy completed Galileo display data on its worker. */
 void NgAcquisitionGalileoSearchSpace(void *context, TNgAcquisitionSearchSpace *space);
-/** Galileo E1-B operations. */
-extern const TNgAcquisitionStrategy ngGalileoAcquisitionStrategy;
 /** Deferred display reduction; seeds are already available to tracking before these run. */
 int NgAcquisitionGpsDisplay(void *context, unsigned prn, const TNgAcquisitionConfig *config,
                             TNgAcquisitionCancel cancel, void *cancelContext);
@@ -382,6 +372,29 @@ void NgAcquisitionDefaults(TNgAcquisitionConfig *config)
     config->cpuBudget = 1.0;
 }
 
+int NgAcquisitionValidateGrid(const char *signal, uint32_t rateHz, unsigned periodMs,
+                              size_t size, TNgError *error)
+{
+    if (periodMs == 0)
+        return NgFail(error, "%s acquisition code period must be positive", signal);
+    if (!NgSearchFftSupportsSize(size))
+        return NgFail(error, "%s acquisition FFT size %zu is unsupported by the search FFT",
+                      signal, size);
+    /* The compression boundaries are floor(k * Fs * periodMs / (1000 * N)).
+     * If the step is below one, the first cell is empty even when a rounded-up
+     * buffer can store N native pairs. A step >= 1 makes every cell nonempty. */
+    uint64_t nativePairs = (uint64_t)rateHz * periodMs / 1000u;
+    if (nativePairs < size) {
+        uint64_t minimumRate = ((uint64_t)size * 1000u + periodMs - 1u) / periodMs;
+        return NgFail(error,
+                      "%s acquisition FFT size %zu requires at least %" PRIu64
+                      " pairs/s for a %u ms code period. Effective rate is %" PRIu32
+                      " pairs/s (%" PRIu64 " native pairs per period)",
+                      signal, size, minimumRate, periodMs, rateHz, nativePairs);
+    }
+    return NG_OK;
+}
+
 /** Reject malformed module options before worker creation. */
 int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error)
 {
@@ -516,9 +529,10 @@ static int CreateWithDuration(const TNgAcquisitionConfig *config, const TNgStrea
         wanted = config->lastPrn - config->firstPrn + 1;
     for (k = 1; k < wanted; ++k) {
         int result = strategy == &ngGpsAcquisitionStrategy
-                         ? NgAcquisitionGpsWorkspace(stream, &a->contexts[k], error)
-                         : NgAcquisitionGalileoWorkspace(stream, config->fftSize, &a->contexts[k],
-                                                         error);
+                         ? NgAcquisitionGpsWorkspace(stream, config->fftMode, &a->contexts[k],
+                                                     error)
+                         : NgAcquisitionGalileoWorkspace(stream, config->fftSize, config->fftMode,
+                                                         &a->contexts[k], error);
         if (result != NG_OK) {
             FreeContexts(a, 1);
             NgMutexDestroy(&a->mutex);
@@ -565,7 +579,8 @@ int NgAcquisitionCreate(const TNgAcquisitionConfig *config, const TNgStreamInfo 
     *out = NULL;
     if (NgAcquisitionValidate(config, error) != NG_OK)
         return NG_ERROR;
-    if (config->enabled && NgAcquisitionGpsWorkspace(stream, &workspace, error) != NG_OK)
+    if (config->enabled &&
+        NgAcquisitionGpsWorkspace(stream, config->fftMode, &workspace, error) != NG_OK)
         return NG_ERROR;
     status = CreateWithDuration(config, stream, &ngGpsAcquisitionStrategy, workspace, out, channel,
                                 error, 56);
@@ -586,7 +601,8 @@ int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStre
     if (NgAcquisitionValidate(config, error) != NG_OK)
         return NG_ERROR;
     if (config->enabled &&
-        NgAcquisitionGalileoWorkspace(stream, config->fftSize, &workspace, error) != NG_OK)
+        NgAcquisitionGalileoWorkspace(stream, config->fftSize, config->fftMode, &workspace,
+                                      error) != NG_OK)
         return NG_ERROR;
     status = CreateWithDuration(config, stream, &ngGalileoAcquisitionStrategy, workspace, out,
                                 channel, error, 224);
