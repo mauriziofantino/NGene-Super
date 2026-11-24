@@ -1,0 +1,7 @@
+AArch64 NEON carrier, product/XOR, phase rotation, code/replica and FFT execution passed
+AArch64 int32 FFT N=1024: 12 transforms, bit-exact
+AArch64 int32 FFT N=2048: 12 transforms, bit-exact
+AArch64 int32 FFT N=4096: 12 transforms, bit-exact
+AArch64 int32 FFT N=8192: 12 transforms, bit-exact
+AArch64 int32 FFT N=16384: 12 transforms, bit-exact
+AArch64 int32 FFT: 761856 I/Q components match the scalar reference

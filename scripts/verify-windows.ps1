@@ -145,6 +145,7 @@ try {
                     if ($configureFailure) { throw $configureFailure }
                     $buildPreset = $preset + $(if ($configuration -eq 'Debug') { '-debug' } else { '' })
                     Invoke-Checked "$label-build" $tools.cmake @('--build', '--preset', $buildPreset, '--parallel', '2', '--verbose')
+                    Invoke-Checked "$label-f4-bench-build" $tools.cmake @('--build', '--preset', $buildPreset, '--target', 'ngene_int32_fft_lab', '--parallel', '2')
                     $testReport = Join-Path $build "$configuration-junit.xml"
                     Invoke-Checked "$label-tests" $tools.ctest @('--preset', $buildPreset, '--no-tests=error', '--output-junit', $testReport)
                     Assert-TestReport $testReport
@@ -168,6 +169,18 @@ try {
                     $result.passed = $true
                 } catch { $result.failure = $_.Exception.Message; Write-Warning $result.failure }
                 $script:evidence.configurations += $result
+            }
+        }
+        if ($Architecture -eq 'ARM64' -and @($script:evidence.configurations | Where-Object { -not $_.passed }).Count -eq 0) {
+            $scalar = Join-Path $WorkRoot 'int32-scalar.bin'
+            $neon = Join-Path $WorkRoot 'int32-neon.bin'
+            Invoke-Checked 'arm64-int32-scalar' (Join-Path $checkout 'build/msvc-arm64/Release/ngene_int32_fft_lab.exe') @($scalar)
+            $neonBuild = Join-Path $checkout 'build/msvc-arm64-int32-neon'
+            Invoke-Checked 'arm64-int32-neon-configure' $tools.cmake @('--preset', 'windows-msvc-arm64', '-B', $neonBuild, '-DNGENE_EXPERIMENTAL_INT32_NEON=ON')
+            Invoke-Checked 'arm64-int32-neon-build' $tools.cmake @('--build', $neonBuild, '--config', 'Release', '--target', 'ngene_int32_fft_lab', '--parallel', '2')
+            Invoke-Checked 'arm64-int32-neon-verify' (Join-Path $neonBuild 'Release/ngene_int32_fft_lab.exe') @($neon)
+            if ((Get-FileHash -LiteralPath $scalar).Hash -ne (Get-FileHash -LiteralPath $neon).Hash) {
+                throw 'ARM64 NEON and scalar int32 FFT output differ.'
             }
         }
     } finally { Pop-Location }

@@ -1,6 +1,28 @@
 # NGene EVO · Piano incrementale e registro di attuazione
 
-**Revisione del 21 novembre 2026.** Baseline di lettura EVO `970c0dc`, ramo `chatGPT/fast-arithmetic`. Il piano è sottoposto ad approvazione per singolo incremento. La revisione documentale è conclusa. In questa revisione sono stati ispezionati sorgenti, contratti e prove storiche. Le misure prima/dopo iniziano con F1.
+## Sintesi per riprendere il lavoro · 24 novembre 2026
+
+**Obiettivo.** Ridurre il tempo che EVO impiega a cercare i satelliti, lasciando al tracking e al calcolo di posizione il tempo di elaborare tutti i campioni. Il confronto si fa sulla stessa cattura. Per valutare l’accuratezza occorrono epoche comuni e una posizione di riferimento. Il numero di fix misura la disponibilità.
+
+**Dove siamo.** Lavorare nel repository EVO, ramo `chatGPT/fast-arithmetic`. Il commit `5de362f` contiene F1–F3. Il kernel SSE2 e le verifiche di F4 x64 sono nel lavoro locale. La review di §1 descrive la situazione di partenza a `970c0dc`; il registro di §13 riporta gli esiti successivi. Classic serve come riferimento in lettura.
+
+| Passo | Risultato concreto | Limite della verifica |
+|---|---|---|
+| F1 · Confrontare lo stesso lavoro | Un banco verifica la mappa completa della ricerca rispetto a un calcolo indipendente. | Q14 e int32 superano la tolleranza in alcuni casi a Doppler errato. Questo scarto resta visibile anche se due versioni dello stesso kernel coincidono. [Report F1](../../development/profiling/F1/README.md) |
+| F2a · Controllare la griglia | EVO verifica la dimensione della FFT rispetto ai campioni realmente disponibili. Galileo a 16384 punti richiede almeno 4,096 Msps. | Copertura operativa GPS/Galileo. BeiDou richiede la propria prova su 10 ms. [Report F2a](../../development/profiling/F2a/README.md) |
+| F2b · Preparare una cattura una sola volta | GPS e Galileo evitano la compressione duplicata e allocano i buffer per l’aritmetica scelta. Il percorso float evita una quantizzazione superflua. | 108 ricerche in parità entro la stessa modalità. I benefici di memoria e tempo si riferiscono ai profili misurati. [Report F2b](../../development/profiling/F2b/README.md) |
+| F3 · Ridurre il costo del prodotto spettrale | La riduzione di scala intera conserva il troncamento con segno. Con un worker la ricerca Q14 migliora in tutte le coppie misurate. | 54 ricerche in parità entro modalità e replay Q14 senza gap. Con quattro worker i risultati dipendono dal caso. [Report F3](../../development/profiling/F3/README.md) |
+| F4 · Accelerare la FFT int32 | Su x64 le butterfly SSE2 entrano in uso da 2048 punti. Equivalenza bit per bit col riferimento scalare e riduzione del 30–53% sulla ricerca PCPS int32 nei profili misurati. | A 1024 punti resta lo scalare. Il candidato NEON è bit-esatto in emulazione. Restano le prove native e le misure su ARM. [Misure F4](../../development/profiling/F4/README.md) |
+
+### Quanto resta e in quale ordine
+
+1. **F4, completamento per piattaforma.** Il percorso x64 è verificato. Il candidato NEON rispetta il contratto signed Q30 in emulazione. Restano le prove native e la misura della ricerca completa su hardware ARM. Nei profili Windows misurati float e Q14 restano più veloci di int32 sulla ricerca completa.
+2. **F6 e F5, dopo le misure F4.** Verificare per prima cosa se attese dei worker, code o distribuzione del carico spiegano il costo residuo. F6 parte dal pool già esistente, con precedenza a tracking/PVT. F5 può proseguire sul banco offline. Provare separatamente formato nativo CI8/CI16, portante a 16 livelli, prodotti allargati e riscalati a byte, correlazione XOR corretta o prodotto SIMD su repliche binarie. Includere −128, continuità di fase e riuso della rotazione sui tap early/prompt/late. Per proporre un profilo operativo servono misure di clipping, sensibilità e tempo della catena. La replica CBOC multilivello ha un perimetro distinto.
+3. **F6a, solo in presenza di perdita misurabile.** Per integrazioni coerenti estese confrontare la deriva del codice con un riferimento a fase continua. Registrare l’effetto su picco, sensibilità e falsi allarmi prima di proporre una compensazione.
+4. **F7–F8, configurazione e interfaccia.** Esporre in INI, API e GUI i controlli con backend qualificato, le unità e il valore effettivo per segnale. Verificare importazione dei vecchi profili, riavvio, errori e viste canali/PVT anche in assenza di dati. Le prove U1–U6 sono in §8.
+5. **Estensioni con dipendenze proprie.** Per BeiDou partire da identificatori e repliche (B0–B1), poi acquisizione e tracking, decodifica, osservabili, PVT, replay, RF e interfaccia (B2–B10). Per la richiesta iniziale su DC e navigazione, prevedere un confronto offline EVO con/senza rimozione DC sulle stesse epoche PVT. Verificare lo smoothing e le correzioni iono/tropo già presenti prima delle estensioni EGNOS e OSNMA. La qualifica sul segnale reale e l’autenticazione richiedono prove dedicate.
+
+I requisiti originari sono nei [promemoria del 17 novembre](../../DSP_RESUME_2026-11-17.md) e [del 18 novembre](../../DSP_RESUME_2026-11-18.md). Per lo stato successivo valgono i report di fase e lo [stato del ricevitore](PROJECT_STATUS.md). Il [piano delle opzioni DSP](DSP_OPTIONS_PLAN.md) documenta le prove di quantizzazione e portante.
 
 ## 1. Esito della review e priorità
 
@@ -148,7 +170,7 @@ Il catalogo operativo parte da parser, validatore, serializzatore, API e control
 | Categoria | Esempi e decisione GUI |
 |---|---|
 | Utente e hardware | Formato comune auto/CI8/CI16, frequenze in Hz nel profilo, MHz/GHz o Msps nella vista. Range e passi dipendono dal frontend. Mostrare il valore fissato dal SiGe e avvisare della perdita di precisione se si restringe l'ADC. |
-| Algoritmo avanzato | Dimensione FFT separata per sistema e opzione `auto`: GPS 1024 come default, Galileo 4096/8192/16384 subordinato a Fs e BeiDou 16384/32768 oppure N validato dalla strategia a blocchi. PRN GPS/Galileo 1–32 e BeiDou 1–63 dopo B0. `tracking.doppler_smoothing_ms` 0–10000 ms, default 200, zero disattiva. Rendere visibili profilo DSP e modalità applicata. |
+| Algoritmo avanzato | Dimensione FFT separata per sistema e opzione `auto`: GPS 1024 come candidato manuale da qualificare, Galileo 4096/8192/16384 subordinato a Fs e BeiDou 16384/32768 oppure N validato dalla strategia a blocchi. PRN GPS/Galileo 1–32 e BeiDou 1–63 dopo B0. `tracking.doppler_smoothing_ms` 0–10000 ms, default 200, zero disattiva. Rendere visibili profilo DSP e modalità applicata. |
 | Risorse | Slot, riserve per sistema, worker, budget acquisizione, finestre e code. Mostrare unità e allocazione stimata. Verificare capacità aggregata, carico massimo e precedenza tracking/PVT. |
 | Derivati, alias e compatibilità | IF digitale da frequenza segnale e sintonia. Ricondurre vecchie chiavi aritmetiche alla forma canonica `[dsp]`. `pvt.carrier_smoothing_length` viene accettata dal parser storico senza impostare un filtro. Trattarla come compatibilità di lettura. |
 | Solo INI, mascherati o hardcoded | Incrociare chiavi lette, scritte e realmente consumate. Segnalare controlli mancanti e duplicati nel risultato F7. Parametri di test, seed, ripetizioni e opzioni di profiling restano negli strumenti di sviluppo. |
@@ -233,13 +255,23 @@ Eseguire T1–T3 e i contratti toccati in CI per modifica. Eseguire i confronti 
 
 ## 11. Ipotesi e decisioni aperte
 
-Prima della prima modifica al codice concordare il perimetro di F1, gli input distribuibili, l'host di misura, il percorso Classic di riferimento e le tolleranze per famiglia. Una baseline deterministica sintetica è utilizzabile anche se manca un replay RF con verità nota. In tal caso la qualifica dell'accuratezza di posizione rimane aperta. F2a ha una prova autonoma sul denominatore.
+Per ogni nuovo confronto registrare gli input distribuibili, l'host di misura, il riferimento numerico e le tolleranze per famiglia. Una baseline deterministica sintetica è utilizzabile anche se manca un replay RF con verità nota. In tal caso la qualifica dell'accuratezza di posizione rimane aperta. F2a ha una prova autonoma sul denominatore.
 
 Per B2 rimangono da scegliere componente iniziale, griglia e soglie B1C. Per B4 occorrono vettori indipendenti con polarità e sincronismo dichiarati. Per B7 occorre concordare riferimento temporale/terrestre e modello dei bias. Per i backend ARM e AVX occorre associare ogni affermazione di prestazione a hardware reale. Eventuali obiettivi percentuali di velocità, centimetri di differenza o scarti C/N0 sono criteri sperimentali da fissare prima della prova. Le soglie operative di acquisizione e PVT hanno un procedimento di approvazione separato.
 
-## 12. Primo incremento implementabile
+## 12. Scheda di implementazione F4
 
-**F1** interessa [tests/test_acquisition.c](../../tests/test_acquisition.c) per il confronto PCPS e, se serve un driver separato, i banchi in [benchmarks](../../benchmarks/). Riutilizzare [tests/test_fft.c](../../tests/test_fft.c) e [tests/test_tracking.c](../../tests/test_tracking.c) per le rispettive baseline. Scrivere il manifest di misura e i risultati nel percorso di profiling dell'incremento. Il main operativo resta privo di strumentazione sperimentale. Per F2a i punti di intervento successivi sono [workspace Galileo](../../src/acquisition/galileo.c), validazione sullo stream effettivo e relativa vista di configurazione.
+**Baseline e perimetro.** Partire da `5de362f` e conservare i dati locali F4. Il primo candidato riguarda le butterfly di `NgSearchFftExecuteInt32` in [search.c](../../src/dsp/search.c). La funzione scalare è il riferimento per l’equivalenza. La specifica numerica è comune ai backend C, SSE2 e NEON. La validazione prestazionale è per architettura.
+
+| Ordine | Intervento | Evidenza richiesta per passare oltre |
+|---|---|---|
+| 1 | Aggiungere al banco F4 una chiamata diretta alla FFT a N=1024, poi coprire 2048, 4096, 8192 e 16384. Congelare vettori, seed, direzione, versione del compilatore e hash della baseline. | Prove riproducibili con zero, impulso, tono, estremi ammessi e residui negativi. N=1024 viene provato direttamente anche quando il profilo GPS operativo seleziona un’altra N. |
+| 2 | Implementare un solo candidato SIMD int32 per volta, iniziando da x64 dove esiste il profilo. Documentare i limiti di prodotti e somme intermedi e conservare la divisione signed Q30 con troncamento verso zero e la scala della trasformata inversa. | Confrontare **ogni componente I e Q** con il C scalare, in entrambe le direzioni. Accettare zero differenze per questo contratto, inclusi i casi negativi al confine dell’arrotondamento. Ripetere la stessa prova sul backend NEON quando disponibile. |
+| 3 | Verificare i chiamanti. In acquisizione esercitare le ricerche GPS/Galileo native. Nello spettro controllare il ramo int32 in [analysis.c](../../src/analysis/analysis.c), che passa per `NgSearchFftExecuteMode`, e rendere espliciti formati e conversioni ai confini. | Dal buffer di ingresso FFT all’uscita del kernel intero il percorso deve restare intero. Confrontare scala e bin dello spettro, mappe complete, rumore a Doppler errato, picco, raffinamenti e conferma M-su-N. Conservare i riferimenti F1 per il confronto fra aritmetiche. |
+| 4 | Cronometrare in Release senza timer interni, con gli stessi input, ordine A/B bilanciato e uno e quattro worker. Confrontare prima/dopo int32 e usare float e Q14 come confronti distinti. | Tempi grezzi e mediane per FFT e ricerca completa, memoria per worker, latenza di cancellazione e gap del replay. Registrare eventuali regressioni e attribuire i risultati all’host effettivo. |
+| 5 | Integrare il candidato dove equivalenza e vantaggio sulla ricerca sono ripetibili. Se fallisce un criterio, conservare il backend precedente e registrare il caso riproducibile. | Report in `development/profiling/F4/`, revisione e hash, configurazione normale ripristinata, CTest e replay con esiti. Registrare separatamente piattaforme misurate, emulate e ancora da provare. |
+
+Durante F4 conservare ricerca coarse, raffinamento Doppler, raffinamento codice e conferma M-su-N, inclusa la stima delle soglie. I timer appartengono al banco di sviluppo. Le misure dei worker restano compatibili con lo scheduling fra costellazioni.
 
 ## 13. Criteri di chiusura e registro degli incrementi
 
@@ -262,6 +294,9 @@ Per B2 rimangono da scegliere componente iniziale, griglia e soglie B1C. Per B4 
 | 2026-11-22 | F6a | Proposto | Piano aggiornato dopo F2b | Modello e caso di riferimento dalle [§§4.4–4.5 della tesi Fantino](../references/PhD_Fantino070206.pdf#page=66). | Lo studio e il banco a integrazione estesa restano futuri. La soglia di interesse è una perdita misurabile dovuta alla deriva nell'intervallo coerente. |
 | 2026-11-22 | F3 | Approvato | `970c0dc` con F1/F2a/F2b locali | Profiling PCPS alle durate correnti e confronto entro ciascuna modalità. | Il banco a integrazione estesa passa allo studio futuro F6a. |
 | 2026-11-22 | F3 | Verificato | `970c0dc` con F1/F2a/F2b → stesso HEAD con F3 locale | Packing spettrale intero con troncamento conservato. 54 ricerche in parità entro modalità, 96 processi di timing, replay Q14 a zero gap, 30/30 CTest Release. [Report e dati](../../development/profiling/F3/README.md) | In F4 partire dalle FFT float/int32 e separare il profilo Q14. La compensazione per integrazione coerente estesa resta in F6a. |
+| 2026-11-24 | F4 | In corso | `5de362f` | Profilo iniziale float/int32 Windows x64, N=4096/16384. [Misure e riproduzione](../../development/profiling/F4/README.md) | Butterfly int32 da valutare per prima. Restano banco diretto N=1024 e qualifica del kernel. |
+| 2026-11-24 | F4 x64 | Verificato | `5de362f` → patch locale SSE2 | 80 FFT e 1.015.808 componenti I/Q identiche, 54 ricerche PCPS in parità, replay da 13.087.200 coppie a zero gap, 30/30 CTest Release. Riduzione della ricerca int32 del 30–53%. [Report](../../development/profiling/F4/README.md) | SSE2 da N=2048. NEON resta da qualificare. |
+| 2026-11-24 | F4 ARM64 | In corso | patch locale NEON | 60 FFT, 761.856 componenti I/Q identiche in Unicorn. Compilazione incrociata del sorgente per Windows, Linux e macOS ARM64. [Report](../../development/profiling/F4/README.md) | Candidato opt-in. Restano build native e misure su hardware ARM. |
 
 Le capacità già presenti nella baseline, compresi PCPS intero, backend SIMD e GUI DSP, sono riferimenti per il confronto. I risultati storici mantengono la data, la revisione e la copertura riportate nei documenti originali. [Stato progetto](PROJECT_STATUS.md) · [Validazione](VALIDATION.md) · [Benchmark FFT](../../benchmarks/fft/README.md)
 

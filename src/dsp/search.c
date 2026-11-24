@@ -12,6 +12,9 @@
 #endif
 #if NG_NEON
 #define NG_SEARCH_NEON 1
+#if defined(NGENE_EXPERIMENTAL_INT32_NEON)
+#define NG_SEARCH_INT32_NEON 1
+#endif
 #endif
 #define NG_SEARCH_TAU 6.28318530717958647692
 
@@ -276,6 +279,71 @@ void NgSearchFftDestroy(TNgSearchFft *plan)
     }
 }
 
+#ifdef NG_SEARCH_SSE
+/* SSE2 widens unsigned even lanes. Remove the signed operands' high-word
+ * contributions before accumulating the products in 64 bits. */
+static inline __m128i MultiplySignedEven(__m128i a, __m128i b)
+{
+    __m128i correction = _mm_add_epi32(_mm_and_si128(a, _mm_srai_epi32(b, 31)),
+                                      _mm_and_si128(b, _mm_srai_epi32(a, 31)));
+    return _mm_sub_epi64(_mm_mul_epu32(a, b), _mm_slli_epi64(correction, 32));
+}
+
+/* Bias negative sums before discarding 30 bits, as C signed division does.
+ * Only the low 32 bits of each quotient are used. */
+static inline __m128i TruncateQ30(__m128i value)
+{
+    const __m128i fractionMask = _mm_set1_epi64x(INT64_C(1073741823));
+    __m128i sign = _mm_srai_epi32(_mm_shuffle_epi32(value, _MM_SHUFFLE(3, 3, 1, 1)), 31);
+    return _mm_srli_epi64(_mm_add_epi64(value, _mm_and_si128(sign, fractionMask)), 30);
+}
+
+static inline void ButterflyInt32Pair(int32_t *a, int32_t *b, const int32_t *twiddles,
+                                     __m128i conjugate)
+{
+    __m128i bottom = _mm_loadu_si128((const __m128i *)(const void *)b);
+    __m128i top = _mm_loadu_si128((const __m128i *)(const void *)a);
+    __m128i w = _mm_loadu_si128((const __m128i *)(const void *)twiddles);
+    __m128i wi = _mm_shuffle_epi32(w, _MM_SHUFFLE(3, 3, 1, 1));
+    wi = _mm_sub_epi32(_mm_xor_si128(wi, conjugate), conjugate);
+    __m128i bi = _mm_srli_epi64(bottom, 32);
+    __m128i real = TruncateQ30(_mm_sub_epi64(MultiplySignedEven(bottom, w),
+                                            MultiplySignedEven(bi, wi)));
+    __m128i imag = TruncateQ30(_mm_add_epi64(MultiplySignedEven(bottom, wi),
+                                            MultiplySignedEven(bi, w)));
+    __m128i product = _mm_unpacklo_epi64(_mm_unpacklo_epi32(real, imag),
+                                         _mm_unpackhi_epi32(real, imag));
+    _mm_storeu_si128((__m128i *)(void *)a, _mm_add_epi32(top, product));
+    _mm_storeu_si128((__m128i *)(void *)b, _mm_sub_epi32(top, product));
+}
+#elif defined(NG_SEARCH_INT32_NEON)
+/* Apply one signed Q30 truncation after each complete complex dot product. */
+static inline int32x2_t TruncateQ30(int64x2_t value)
+{
+    const int64x2_t fractionMask = vdupq_n_s64(INT64_C(1073741823));
+    const int64x2_t bias = vandq_s64(vshrq_n_s64(value, 63), fractionMask);
+    return vshrn_n_s64(vaddq_s64(value, bias), 30);
+}
+
+static inline void ButterflyInt32Pair(int32_t *a, int32_t *b, const int32_t *twiddles,
+                                     int32x2_t conjugate)
+{
+    int32x2x2_t top = vld2_s32(a), bottom = vld2_s32(b);
+    const int32x2x2_t w = vld2_s32(twiddles);
+    const int32x2_t wi = vsub_s32(veor_s32(w.val[1], conjugate), conjugate);
+    const int32x2_t real = TruncateQ30(vmlsl_s32(vmull_s32(bottom.val[0], w.val[0]),
+                                               bottom.val[1], wi));
+    const int32x2_t imag = TruncateQ30(vmlal_s32(vmull_s32(bottom.val[0], wi),
+                                               bottom.val[1], w.val[0]));
+    bottom.val[0] = vsub_s32(top.val[0], real);
+    bottom.val[1] = vsub_s32(top.val[1], imag);
+    top.val[0] = vadd_s32(top.val[0], real);
+    top.val[1] = vadd_s32(top.val[1], imag);
+    vst2_s32(a, top);
+    vst2_s32(b, bottom);
+}
+#endif
+
 int NgSearchFftExecuteInt32(TNgSearchFft *plan, const int32_t *input, int32_t *output,
                            int inverse, TNgError *error)
 {
@@ -292,8 +360,31 @@ int NgSearchFftExecuteInt32(TNgSearchFft *plan, const int32_t *input, int32_t *o
         output[2 * r] = input[2 * k];
         output[2 * r + 1] = input[2 * k + 1];
     }
+#ifdef NG_SEARCH_SSE
+    const __m128i conjugate = _mm_set1_epi32(-inverse);
+    /* The measured SSE2 benefit starts at 2048 complex samples. */
+    const size_t vectorMinWidth = n >= 2048 ? 4 : n + 1;
+#elif defined(NG_SEARCH_INT32_NEON)
+    const int32x2_t conjugate = vdup_n_s32(-inverse);
+    const size_t vectorMinWidth = 4;
+#endif
     for (width = 2; width <= n; width *= 2) {
         size_t base, j;
+#if defined(NG_SEARCH_SSE) || defined(NG_SEARCH_INT32_NEON)
+        /* For N <= 16384, the complex magnitude stays below 2^29.
+         * The Q30 twiddle norm is at most 1 + 2^-30. Together with
+         * truncation this adds less than 2 to each stage's 2x bound. */
+        if (width >= vectorMinWidth) {
+            for (base = 0; base < n; base += width)
+                for (j = 0; j < width / 2; j += 2) {
+                    int32_t *a = output + 2 * (base + j);
+                    ButterflyInt32Pair(a, a + width, plan->integerTwiddles + 2 * (offset + j),
+                                       conjugate);
+                }
+            offset += width / 2;
+            continue;
+        }
+#endif
         for (base = 0; base < n; base += width)
             for (j = 0; j < width / 2; ++j) {
                 size_t a = 2 * (base + j), b = a + width;

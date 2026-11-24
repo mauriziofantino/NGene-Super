@@ -39,9 +39,16 @@ profiles and lower memory for all arithmetic modes.
 
 Integer PCPS uses magnitude shifts for spectrum packing while preserving
 signed truncation. Windows Q14 searches were faster at one worker and
-matched the previous decisions within each tested mode. F4 will profile
-the FFT stages that dominate the float and int32 coarse rows.
+matched the previous decisions within each tested mode.
 [F3 verification](../../development/profiling/F3/README.md).
+
+On x64, the native int32 FFT uses SSE2 butterflies from 2048 complex points.
+The Windows Release benchmark matched the scalar output bit for bit and
+measured a 30–53% reduction in full int32 PCPS search time on its GPS and
+Galileo fixtures with one and four workers. The scalar path covers smaller
+sizes and the default ARM build. The opt-in NEON candidate matched the scalar
+reference in emulation. Native performance qualification is pending.
+[F4 verification](../../development/profiling/F4/README.md).
 
 Channels is a stable table with numeric C/N0 and horizontal bars. Total slots,
 GPS/Galileo reservations and automatic preference are configurable. Only the

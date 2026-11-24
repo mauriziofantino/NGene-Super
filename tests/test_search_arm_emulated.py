@@ -18,9 +18,9 @@ parser.add_argument('--clang', required=True)
 args = parser.parse_args()
 directory = ROOT / 'build/search-arm-emulated'
 directory.mkdir(parents=True, exist_ok=True)
-(directory/'math.h').write_text('double cos(double);double sin(double);double fmod(double,double);long long llround(double);\n#define sqrt __builtin_sqrt\n#define floor __builtin_floor\n#define isfinite __builtin_isfinite\n')
+(directory/'math.h').write_text('double cos(double);double sin(double);double fmod(double,double);long long llround(double);long lround(double);double ldexp(double,int);\n#define fabs __builtin_fabs\n#define fmax __builtin_fmax\n#define sqrt __builtin_sqrt\n#define floor __builtin_floor\n#define isfinite __builtin_isfinite\n')
 (directory/'stdlib.h').write_text('#include <stddef.h>\nvoid *calloc(size_t,size_t);void free(void*);\n')
-(directory/'string.h').write_text('#include <stddef.h>\nvoid *memcpy(void*,const void*,size_t);\n')
+(directory/'string.h').write_text('#include <stddef.h>\nvoid *memcpy(void*,const void*,size_t);void *memset(void*,int,size_t);\n')
 shim = directory/'shim.c'
 shim.write_text('''
 #include "''' + (ROOT/'src/dsp/search.c').as_posix() + '''"
@@ -33,15 +33,23 @@ __attribute__((noinline)) double fmod(double x,double y){return x+y;}
 __attribute__((noinline)) long long llround(double x){return (long long)x;}
 #undef sqrt
 __attribute__((noinline)) double sqrt(double x){return x+3;}
+int Int32(size_t n,size_t *reverse,int32_t *twiddles,const int32_t *input,int32_t *output,int inverse)
+{
+    TNgSearchFft plan;
+    plan.size=n;
+    plan.reverse=reverse;
+    plan.integerTwiddles=twiddles;
+    return NgSearchFftExecuteInt32(&plan,input,output,inverse,0);
+}
 void Carrier(TNgComplex *out,size_t n,const double *p,int square){NgSearchCarrier(out,n,p[0],p[1],p[2],square);}
 void Code(float *out,size_t n,const int8_t *chips,const double *p){NgSearchCode(out,n,chips,p[0],p[1],p[2]);}
 void Phases(double *out,size_t n,const double *p){NgTrackingCodePhases(out,n,p[0],p[1],p[2]);}
 void Replica(float *out,const double *p,size_t n,const int8_t *chips,unsigned period,const double *offset,int boc){NgTrackingReplica(out,p,n,chips,period,*offset,boc);}
 ''')
 elf=directory/'search.elf'
-exports=['Carrier','Code','Phases','Replica','NgSearchMix','NgSearchCorrelate','NgSearchFftExecute','cos','sin','fmod','llround','sqrt']
+exports=['Int32','Carrier','Code','Phases','Replica','NgSearchMix','NgSearchCorrelate','NgSearchFftExecute','cos','sin','fmod','llround','sqrt']
 subprocess.run([args.clang,'--target=aarch64-none-elf','-O3','-ffp-contract=off','-Wall','-Wextra','-Werror',
-    '-ffreestanding','-ffunction-sections','-fdata-sections','-I',str(directory),'-I',str(ROOT/'include'),'-I',str(ROOT/'src'),
+    '-DNGENE_EXPERIMENTAL_INT32_NEON=1','-ffreestanding','-ffunction-sections','-fdata-sections','-I',str(directory),'-I',str(ROOT/'include'),'-I',str(ROOT/'src'),
     '-nostdlib','-fuse-ld=lld','-Wl,--gc-sections','-Wl,--image-base=0x10000','-Wl,-Ttext=0x100000','-Wl,--entry=Carrier',
     *['-Wl,-u,'+name for name in exports],str(shim),'-o',str(elf)],check=True)
 m=Machine(elf,'arm64')
@@ -56,7 +64,7 @@ def libc(uc,address,size,data):
         value=math.fmod(x,y) if name=='fmod' else getattr(math,name)(x)
         uc.reg_write(UC_ARM64_REG_D0,struct.unpack('<Q',struct.pack('<d',value))[0])
     uc.reg_write(UC_ARM64_REG_PC,uc.reg_read(UC_ARM64_REG_X30))
-m.uc.hook_add(UC_HOOK_CODE,libc)
+libc_hook = m.uc.hook_add(UC_HOOK_CODE,libc)
 A,B,C,P,OUT=DATA+0x1000,DATA+0x20000,DATA+0x40000,DATA+0x60000,DATA+0x80000
 def put(address,fmt,values):m.uc.mem_write(address,struct.pack('<'+fmt*len(values),*values))
 def get(address,fmt,n):return struct.unpack('<'+fmt*n,m.uc.mem_read(address,struct.calcsize(fmt)*n))
@@ -119,3 +127,60 @@ for n in [8,16,64]:
     m.call('NgSearchFftExecute',P,A,1)
     assert max(abs(a-b) for a,b in zip(get(A,'f',2*n),values))<1e-6
 print('AArch64 NEON carrier, product/XOR, phase rotation, code/replica and FFT execution passed')
+
+def truncate(value, divisor):
+    return -(abs(value) // divisor) if value < 0 else value // divisor
+
+
+def scalar_fft(values, reverse, stages, inverse):
+    n = len(reverse)
+    result = [component for k in reverse for component in values[2*k:2*k+2]]
+    for coefficients in stages:
+        half = len(coefficients)
+        for base in range(0, n, 2 * half):
+            for k, (wr, wi) in enumerate(coefficients):
+                a = 2 * (base + k)
+                b = a + 2 * half
+                if inverse:
+                    wi = -wi
+                br, bi = result[b:b+2]
+                r = truncate(br * wr - bi * wi, 1 << 30)
+                q = truncate(br * wi + bi * wr, 1 << 30)
+                ar, ai = result[a:a+2]
+                result[a:a+2] = ar + r, ai + q
+                result[b:b+2] = ar - r, ai - q
+    return tuple(truncate(x, n) for x in result) if inverse else tuple(result)
+
+
+m.uc.hook_del(libc_hook)
+rng = random.Random(20261121)
+components = 0
+for n in (1024, 2048, 4096, 8192, 16384):
+    bits = n.bit_length() - 1
+    reverse = [int(f'{k:0{bits}b}'[::-1], 2) for k in range(n)]
+    stages = []
+    for shift in range(bits):
+        half = 1 << shift
+        stages.append([(round(math.cos(-math.pi*k/half) * (1 << 30)),
+                        round(math.sin(-math.pi*k/half) * (1 << 30))) for k in range(half)])
+    put(B, 'Q', reverse)
+    put(C, 'i', [part for stage in stages for twiddle in stage for part in twiddle])
+    input_address = DATA + 0xa0000
+    fixtures = [
+        [0] * (2*n),
+        [16384 if k == 2*(n//3) else 0 for k in range(2*n)],
+        [-16384] * (2*n),
+        [-16384 if k & 2 else 16384 for k in range(2*n)],
+        [k % 17 - 8 for k in range(2*n)],
+        [rng.randint(-16384, 16384) for _ in range(2*n)],
+    ]
+    for index, values in enumerate(fixtures):
+        put(input_address, 'i', values)
+        for inverse in (0, 1):
+            assert m.call('Int32', n, B, C, input_address, OUT, inverse) == 0
+            actual = get(OUT, 'i', 2*n)
+            expected = scalar_fft(values, reverse, stages, inverse)
+            assert actual == expected, (n, index, inverse)
+            components += 2*n
+    print(f'AArch64 int32 FFT N={n}: 12 transforms, bit-exact')
+print(f'AArch64 int32 FFT: {components} I/Q components match the scalar reference')

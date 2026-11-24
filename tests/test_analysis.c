@@ -269,6 +269,17 @@ int main(void)
         sum += snapshot.histogramQ[i];
     }
     CHECK(sum == 4096);
+    /* The int32 adapter must restore the same tone frequency and level. */
+    c.fftSize = 2048;
+    c.averages = 2;
+    c.fftMode = NG_SEARCH_FFT_INTEGER_PRECISE;
+    CHECK(NgAnalysisConfigure(a, &c, &e) == NG_OK);
+    v.meta.firstSample = 10000;
+    Submit(a, &v, 0);
+    WaitResult(a, 2);
+    CHECK(snapshot.firstSample == 10000 && snapshot.binHz == 32);
+    CHECK(fabs(snapshot.peakHz - 4096) < 0.01);
+    CHECK(fabs(snapshot.peakDbfs + 6.02) < 0.15);
     c.spectrumEnabled = 0;
     c.histogramBins = 16;
     c.histogramPairs = 1024;
@@ -280,7 +291,7 @@ int main(void)
     v.meta.firstSample = 12000;
     v.meta.count = 1024;
     Submit(a, &v, 0);
-    WaitResult(a, 2);
+    WaitResult(a, 3);
     CHECK(snapshot.spectrumBins == 0 && snapshot.histogramI[0] == 1024 &&
           snapshot.histogramQ[15] == 1024);
     CHECK(snapshot.removedDcI == 0 && snapshot.removedDcQ == 0);

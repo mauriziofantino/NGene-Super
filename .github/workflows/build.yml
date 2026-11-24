@@ -3,6 +3,7 @@ on: [push, pull_request]
 jobs:
   portable:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-14]
         web: ["ON", "OFF"]
@@ -11,7 +12,16 @@ jobs:
       - uses: actions/checkout@v4
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNGENE_WITH_WEB=${{ matrix.web }}
       - run: cmake --build build --config Release --parallel 2
+      - run: cmake --build build --config Release --target ngene_int32_fft_lab --parallel 2
       - run: ctest --test-dir build -C Release --output-on-failure
+      - name: Compare ARM64 int32 FFT with the scalar reference
+        if: matrix.os == 'macos-14' && matrix.web == 'OFF' && runner.arch == 'ARM64'
+        run: |
+          build/ngene_int32_fft_lab build/int32-scalar.bin
+          cmake -S . -B build -DNGENE_EXPERIMENTAL_INT32_NEON=ON
+          cmake --build build --config Release --target ngene_int32_fft_lab --parallel 2
+          build/ngene_int32_fft_lab build/int32-neon.bin
+          cmp build/int32-scalar.bin build/int32-neon.bin
   hackrf-api:
     runs-on: ubuntu-24.04
     steps:
@@ -28,6 +38,15 @@ jobs:
       - run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux-aarch64.cmake -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build --parallel 2
       - run: ctest --test-dir build --output-on-failure
+
+      - name: Compare ARM64 int32 FFT under QEMU
+        run: |
+          cmake --build build --target ngene_int32_fft_lab --parallel 2
+          qemu-aarch64 -L /usr/aarch64-linux-gnu build/ngene_int32_fft_lab build/int32-scalar.bin
+          cmake -S . -B build -DNGENE_EXPERIMENTAL_INT32_NEON=ON
+          cmake --build build --target ngene_int32_fft_lab --parallel 2
+          qemu-aarch64 -L /usr/aarch64-linux-gnu build/ngene_int32_fft_lab build/int32-neon.bin
+          cmp build/int32-scalar.bin build/int32-neon.bin
 
   arm32-cross:
     runs-on: ubuntu-24.04

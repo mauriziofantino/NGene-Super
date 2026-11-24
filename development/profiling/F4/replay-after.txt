@@ -1,0 +1,7 @@
+NGene 0.6.4 Windows/x86_64
+source=file format=CI8 fs=8183800 pairs/s tune=1575381600 Hz filter=0 Hz window=8183 pairs
+signal=1575420000 Hz digital_IF=38400 Hz conditioning=bypass
+windows=1600 processed_pairs=13087200 written_pairs=0 gaps=0 known_input_drops=0 queued_discarded_at_stop=0 wall_seconds=1.603769
+GPS acquisition: searches=5 skipped_pairs=10694956 gaps=0
+GPS PRN07 not confirmed Doppler=-2999.0 Hz code_phase=67.933594 chips peak/threshold=0.720 confirmation=0/4 epoch=0 sample=9328620
+Galileo acquisition: searches=0 skipped_pairs=11254028 gaps=0

@@ -1,0 +1,10 @@
+clang version 22.1.3 (https://github.com/llvm/llvm-project e9846648fd6183ee6d8cbdb4502213fcf902a211)
+search-windows-arm64.obj ce4c0405d21c2e2a5c33f987ba1a909e03e7235d2ca2ac3d229bf352830ab6e1
+Format: COFF-ARM64
+Arch: aarch64
+search-aarch64-linux-gnu.o 6e552a7e74f43b120eea57a4de2882fd2697fff13bfd852aa0c44a41966873cd
+Format: elf64-littleaarch64
+Arch: aarch64
+search-arm64-apple-macos14.o 13db573eef809642d704de3a020cef25ee1806c6edd0d19d52835e075c2d2fd1
+Format: Mach-O arm64
+Arch: aarch64

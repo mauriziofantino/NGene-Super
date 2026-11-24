@@ -36,6 +36,10 @@ checking the current status and code.
   [ARCHITECTURE.md](docs/service/ARCHITECTURE.md). Keep vendor-specific behavior in
   frontend adapters and preserve shared-stream, ownership, timing, and precision
   contracts.
+- Verify each code or build-system change on Windows, Linux, and macOS.
+  Use the native CI jobs in [the build workflow](.github/workflows/build.yml)
+  for the exact revision under review. Record each platform's result and mark
+  unavailable checks as pending.
 - Validate the requested behavior, not just compilation. Run the smallest relevant
   tests, add regression coverage for behavior changes, and clearly distinguish
   deterministic tests, replay evidence, and tests performed on physical RF hardware.
