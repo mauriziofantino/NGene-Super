@@ -51,8 +51,7 @@ const fields = [
   ['Recording', 'recording.segment_samples', 'Pairs per segment', 'number', null, '', '0 = single raw file']
 ];
 let values = {}, savedValues = {}, revision = '1', token = '', status = null, capabilities = null;
-let dirty = false, httpBusy = false, pendingCommand = null, socket = null, reconnectTimer = null;
-let serviceWasReachable = false, reconnectAttempted = false;
+let dirty = false, httpBusy = false, pendingCommand = null, socket = null;
 let terminalShutdown = false;
 let calibrationBusy = false, calibrationJobId = null, calibrationRequest = null;
 let calibrationStopRequested = false;
@@ -503,21 +502,20 @@ async function deleteFile(name, directory, fileRevision) {
 function suspendForTerminalShutdown() {
   terminalShutdown = true;
   quitting = true;
-  clearTimeout(reconnectTimer);
   waiting = false;
   statusRequestPending = false;
   pendingCommand = null;
   $('connection').textContent = 'Suspended';
   $('connection').classList.remove('online');
-  notice('Receiver closed from the terminal. This console is suspended; restart ngene --web to reconnect.');
+  notice('Receiver closed from the terminal. This console is suspended; restart ngene --web and reload this page to reconnect.');
   log('Receiver announced terminal shutdown.');
   controls();
   socket?.close(1000, 'service stopping');
 }
 async function connect() {
-  clearTimeout(reconnectTimer); if (quitting) return;
+  if (quitting) return;
   try {
-    capabilities = await api('bootstrap'); serviceWasReachable = true; token = capabilities.token;
+    capabilities = await api('bootstrap'); token = capabilities.token;
     $('platform').textContent = `${capabilities.os} / ${capabilities.architecture}`; $('version').textContent = `v${capabilities.version}`;
     if (!moduleForm) {
       moduleForm = moduleParameters(await api('module-schema'));
@@ -526,9 +524,9 @@ async function connect() {
     }
     await loadConfig();
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/v1/events?token=${encodeURIComponent(token)}`);
-    socket.onopen = () => { reconnectAttempted = false; lastResponse=-Infinity; $('connection').textContent = 'Connected'; $('connection').classList.add('online'); waiting = false; log('Connected to NGene.'); requestStatus(); refreshFiles(); };
-    socket.onmessage = event => { waiting=false; lastResponse=performance.now(); try { const message=JSON.parse(event.data); if(message?.event==='service_stopping'&&message.source==='terminal'){suspendForTerminalShutdown();return;} pendingTelemetry=message; if(!renderPending){renderPending=true;requestAnimationFrame(()=>{renderPending=false;const latest=pendingTelemetry;pendingTelemetry=null;if(latest)renderStatus(latest);});} } catch(error){log(`Invalid telemetry: ${error.message}`,true);} };
-    socket.onclose = () => { waiting = false; pendingCommand = null; $('connection').textContent = terminalShutdown ? 'Suspended' : quitting ? 'Service closed' : 'Disconnected'; $('connection').classList.remove('online'); controls(); if (!quitting && serviceWasReachable && !reconnectAttempted) { reconnectAttempted = true; notice('Connection lost. Trying once to reconnect…', true); reconnectTimer = setTimeout(connect, 1500); } };
+    socket.onopen = () => { lastResponse=-Infinity; $('connection').textContent = 'Connected'; $('connection').classList.add('online'); waiting = false; log('Connected to NGene.'); requestStatus(); refreshFiles(); };
+    socket.onmessage = event => { waiting=false; lastResponse=performance.now(); try { const message=JSON.parse(event.data); if(message?.event==='service_stopping'&&message.source==='terminal'){suspendForTerminalShutdown();return;} pendingTelemetry=message; if(!renderPending){renderPending=true;requestAnimationFrame(()=>{renderPending=false;const latest=pendingTelemetry;pendingTelemetry=null;if(latest && connected() && !quitting)renderStatus(latest);});} } catch(error){log(`Invalid telemetry: ${error.message}`,true);} };
+    socket.onclose = () => { waiting = false; pendingCommand = null; $('connection').textContent = terminalShutdown ? 'Suspended' : quitting ? 'Service closed' : 'Disconnected'; $('connection').classList.remove('online'); controls();};
     socket.onerror = () => socket.close();
   } catch (error) { $('connection').textContent = 'Disconnected'; notice(error.message, true); controls(); }
 }

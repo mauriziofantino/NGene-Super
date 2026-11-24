@@ -378,7 +378,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(await shutdownPage.locator('#connection').textContent(),'Connected');
     await post('shutdown',{});
     await delay(4000);
-    assert.equal(shutdownBootstrapAttempts,2,'A stopped service must not cause repeated reconnect attempts');
+    assert.equal(shutdownBootstrapAttempts,1,'A stopped service must not cause any automatic reconnect attempt');
     assert.equal(await shutdownPage.locator('#connection').textContent(),'Disconnected');
     await shutdownPage.close();
     assert.equal(await exit,0);
