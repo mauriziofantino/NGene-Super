@@ -313,7 +313,8 @@ static void QuantizedMixContract(void)
     TNgIq8 input[65];
     double prefix[132], sumI, sumQ, ci, cq, di, dq;
     size_t k;
-    unsigned inverted, mode;
+    int inverted;
+    unsigned mode;
     for (k = 0; k < 65; ++k) {
         input[k].i = (int8_t)(k == 0 ? -128 : (int)(k * 71) % 256 - 128);
         input[k].q = (int8_t)(k == 1 ? -128 : (int)(k * 43) % 256 - 128);
