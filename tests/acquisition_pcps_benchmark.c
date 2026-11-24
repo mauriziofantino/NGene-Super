@@ -205,7 +205,7 @@ static int VerifyMaps(TPcpsFixture *b, double frequency)
     }
     if (frequency == dopplerHz && expectedPeak != 247 * b->n / 8192)
         return Fail("oracle peak differs from injected lag");
-    NgSearchCarrier(b->carrier, b->n, b->n * 250.0, frequency, 0, 0);
+    NgSearchCarrier(b->carrier, b->n, (double)b->n * 250.0, frequency, 0, 0);
     for (size_t m = 0; m < sizeof(modes) / sizeof(modes[0]); ++m) {
         size_t peak = 0;
         double errorNorm = 0, maxError = 0, sum = 0;
@@ -271,7 +271,7 @@ static int Measure(TPcpsFixture *b)
         if (NgAcquisitionGalileoWorkspace(&capture.stream, (unsigned)b->n, modes[m],
                                           &b->workspaces[m], &error) != NG_OK)
             return Fail(error.message);
-    NgSearchCarrier(b->carrier, b->n, b->n * 250.0, dopplerHz, 0, 0);
+    NgSearchCarrier(b->carrier, b->n, (double)b->n * 250.0, dopplerHz, 0, 0);
 
     for (unsigned trial = 0; trial < WARMUPS + REPEATS; ++trial) {
         for (unsigned position = 0; position < 3; ++position) {
