@@ -470,7 +470,7 @@ int NgSearchIntegerCode(TNgSearchFft *plan, const float *code, TNgSearchFftMode 
 
 /** Scale one spectral component with the signed division's truncation toward zero.
  * PCPS bounds the conjugate product in int64 and selects shift for output within +/-8192. */
-static int32_t ScaleSpectralComponent(int64_t component, unsigned shift)
+static int32_t ScaleSpectralComponent(int64_t component, int shift)
 {
     uint64_t magnitude = (uint64_t)(component < 0 ? -component : component);
     int32_t scaled = (int32_t)(magnitude >> shift);
@@ -483,7 +483,7 @@ int NgSearchIntegerPcps(TNgSearchFft *plan, const int16_t *baseband,
 {
     size_t k, n;
     uint64_t maximum = 0;
-    unsigned shift = 0;
+    int shift = 0; /* At most 51 shifts for a uint64_t maximum and limit 8192. */
     double restore;
     if (!plan || !baseband || !carrier || !power || !plan->codeReady ||
         plan->codeMode != mode || !(baseScale > 0))
