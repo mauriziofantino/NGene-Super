@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 /** Copy default-strategy display data on its owning worker only. */
 void NgAcquisitionGpsSearchSpace(void *context, TNgAcquisitionSearchSpace *space);
@@ -32,6 +33,9 @@ struct TNgAcquisition {
     int paused;                     /**< New admission paused; protected by mutex. */
     TNgAcquisitionConfig config;    /**< Frozen decisions. */
     TNgAcquisitionCapture capture;  /**< Published capture geometry. */
+#ifdef NGENE_PROFILE_ACQUISITION_JOBS
+    double capturePublished;
+#endif
     TNgComplex *storage;            /**< Native float capture, producer-owned while slot is zero. */
     size_t filled, capacity;        /**< Capture assembly counts. */
     uint64_t expectedSample, epoch; /**< Producer continuity. */
@@ -60,6 +64,9 @@ typedef struct {
     int generation;                /**< Capture cancellation generation. */
     int permit;                    /**< Owns one cooperative DSP-stage permit. */
     double cpuMark;                /**< Thread CPU seconds at the last charged boundary. */
+#ifdef NGENE_PROFILE_ACQUISITION_JOBS
+    double published, claimed, permitWait;
+#endif
 } TNgAcquisitionJob;
 
 /** All constellation jobs share this bounded set of OS workers. */
@@ -129,6 +136,9 @@ static int WorkCancelled(void *context)
         return 1;
     if (delay)
         NgSleepMs((unsigned)delay);
+#ifdef NGENE_PROFILE_ACQUISITION_JOBS
+    double startedWaiting = NgMonotonicSeconds();
+#endif
     NgMutexLock(&pool->mutex);
     while (!pool->stopping && !Cancelled(job) &&
            (pool->executing >= (unsigned)NgAtomicGet(&pool->executionLimit) ||
@@ -140,6 +150,9 @@ static int WorkCancelled(void *context)
         job->permit = 1;
     }
     NgMutexUnlock(&pool->mutex);
+#ifdef NGENE_PROFILE_ACQUISITION_JOBS
+    job->permitWait += NgMonotonicSeconds() - startedWaiting;
+#endif
     /* Waiting is not charged: the next stage is measured from here. */
     job->cpuMark = NgThreadCpuSeconds();
     return cancelled;
@@ -208,6 +221,11 @@ static int Claim(TNgAcquisitionPool *pool, TNgAcquisitionJob *job)
         job->lane = lane;
         job->permit = 0;
         job->cpuMark = NgThreadCpuSeconds();
+#ifdef NGENE_PROFILE_ACQUISITION_JOBS
+        job->published = a->capturePublished;
+        job->claimed = NgMonotonicSeconds();
+        job->permitWait = 0;
+#endif
         pool->nextSystem = 1 - system;
         NgMutexUnlock(&a->mutex);
         return 1;
@@ -240,7 +258,8 @@ static void Execute(TNgAcquisitionJob *job)
                                      job, &result, &error);
     result.completedSeconds = NgMonotonicSeconds();
     NgMutexLock(&a->mutex);
-    if (!Cancelled(job)) {
+    int published = !Cancelled(job);
+    if (published) {
         a->snapshot.results[job->prn - 1] = result;
         a->snapshot.searches++;
         a->snapshot.currentPrns[job->lane] = 0;
@@ -251,6 +270,16 @@ static void Execute(TNgAcquisitionJob *job)
             snprintf(a->snapshot.message, sizeof(a->snapshot.message), "%s", error.message);
     }
     NgMutexUnlock(&a->mutex);
+#ifdef NGENE_PROFILE_ACQUISITION_JOBS
+    fprintf(stderr,
+            "f6_job,%s,%" PRIu64 ",%" PRIu64 ",%u,%d,%d,%d,%.17g,%.17g,%.17g,%.9f,%.9f,%.9f\n",
+            a->strategy == &ngGalileoAcquisitionStrategy ? "galileo" :
+            a->strategy == &ngGpsAcquisitionStrategy ? "gps" : "custom",
+            job->capture.origin.epoch, job->capture.origin.firstSample, job->prn,
+            status, published, result.confirmed, result.dopplerHz, result.codePhaseChips,
+            result.peakRatio, job->claimed - job->published, job->permitWait,
+            result.completedSeconds - job->published);
+#endif
     if (status == NG_OK && native && result.confirmed && !Cancelled(job) &&
         job->capture.displayPrn != job->prn) {
         int display =
@@ -462,6 +491,9 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
             acquisition->filled = 0;
             acquisition->skipped += window->meta.count - take;
             acquisition->nextPrn = acquisition->config.firstPrn;
+#ifdef NGENE_PROFILE_ACQUISITION_JOBS
+            acquisition->capturePublished = NgMonotonicSeconds();
+#endif
             NgAtomicSet(&acquisition->slot, 1);
             Wake(acquisition->pool);
         }

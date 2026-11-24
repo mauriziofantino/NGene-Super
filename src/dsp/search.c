@@ -18,6 +18,14 @@
 #endif
 #define NG_SEARCH_TAU 6.28318530717958647692
 
+#if defined(NGENE_EXPERIMENTAL_INT32_AVX2) && defined(NG_SEARCH_SSE)
+#define NG_SEARCH_INT32_AVX2 1
+#include "dsp/x86/avx2_available.h"
+void NgSearchFftInt32StageAvx2(int32_t *output, const int32_t *twiddles, size_t size,
+                              size_t width, int inverse);
+
+#endif
+
 /** Quantized byte rotation with explicit scale, preserving native ring samples. */
 void NgSearchMixPrefixCi8Arithmetic(double *prefix, const TNgIq8 *input, size_t count,
                                     double rateHz, double frequencyHz, double phaseCycles,
@@ -150,6 +158,9 @@ struct TNgSearchFft {
     int32_t *codeSpectrum32;
     TNgSearchFftMode codeMode;
     int codeReady;
+#ifdef NG_SEARCH_INT32_AVX2
+    int useInt32Avx2;
+#endif
 };
 
 /** Half-width of the first twiddled stage pair: the trivial stages before it are one
@@ -187,6 +198,9 @@ static int CreateSearchFft(size_t size, unsigned modes, TNgSearchFft **out, TNgE
     if (floating)
         plan->pairs = calloc(4 * size, sizeof(*plan->pairs));
     if (precise) {
+#ifdef NG_SEARCH_INT32_AVX2
+        plan->useInt32Avx2 = NgDspAvx2Available();
+#endif
         plan->preciseWork = calloc(2 * size, sizeof(*plan->preciseWork));
         plan->preciseInput = calloc(2 * size, sizeof(*plan->preciseInput));
         plan->integerTwiddles = calloc(2 * size, sizeof(*plan->integerTwiddles));
@@ -370,6 +384,14 @@ int NgSearchFftExecuteInt32(TNgSearchFft *plan, const int32_t *input, int32_t *o
 #endif
     for (width = 2; width <= n; width *= 2) {
         size_t base, j;
+#ifdef NG_SEARCH_INT32_AVX2
+        if (width >= 8 && plan->useInt32Avx2) {
+            NgSearchFftInt32StageAvx2(output, plan->integerTwiddles + 2 * offset, n, width,
+                                     inverse);
+            offset += width / 2;
+            continue;
+        }
+#endif
 #if defined(NG_SEARCH_SSE) || defined(NG_SEARCH_INT32_NEON)
         /* For N <= 16384, the complex magnitude stays below 2^29.
          * The Q30 twiddle norm is at most 1 + 2^-30. Together with

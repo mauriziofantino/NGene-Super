@@ -216,3 +216,265 @@ La build operativa Windows x64 Release con il candidato disattivato
 passa 30/30 CTest. Il controllo dello script di verifica Windows
 passa anche dopo l’aggiunta del confronto ARM64.
 [CTest Windows](ctest-neon-patch-windows.txt) · [Oggetti ARM64](neon-cross-build.txt)
+
+## Incremento AVX2 int32/Q30
+
+Il candidato x86-64 processa quattro butterfly per iterazione con prodotti
+signed allargati a 64 bit. Conserva il troncamento Q30 verso zero e la
+divisione inversa per N. Compilare due build Release con
+`-DNGENE_EXPERIMENTAL_INT32_AVX2=OFF` e `ON`. Con l'opzione attiva, il piano
+controlla la disponibilità di AVX2 e dello stato YMM prima di selezionare il
+candidato. Per le larghezze di stadio inferiori a 8 usa il percorso esistente.
+
+Ripetere i comandi del banco sopra con le due build. Il banco diretto ora
+copre tutte le potenze di due da 8 a 16384. Su Windows x64 con Core i7-1355U,
+MSVC 19.52.37029 e affinità `0x0f`, 192 trasformate
+dirette e inverse danno 1.048.320 componenti I/Q identiche. Nella fascia
+2048–16384, il rapporto mediano accoppiato AVX2/baseline è 0,44–0,54
+in 24 coppie per dimensione e direzione. Sotto 2048 la baseline del ricevitore
+usa C scalare. Per 8 e 16 punti la misura non mostra un vantaggio.
+Il comando `ngene_int32_fft_lab --plans` misura la creazione dei piani
+separatamente, come media di 32 creazioni per lunghezza. Dati locali
+`plans-OFF.csv` e `plans-ON.csv`.
+
+Il banco PCPS conferma la parità dei 27 casi per variante, in tre modalità
+aritmetiche. A 4,096 Msps e IF 38,5 kHz le misure int32 della ricerca completa
+sono le seguenti, in rapporto mediano accoppiato AVX2/SSE2.
+
+| Segnale | N | Worker | Rapporto |
+| --- | ---: | ---: | ---: |
+| GPS | 4096 | 1 | 0,849 |
+| GPS | 4096 | 4 | 0,909 |
+| Galileo | 16384 | 1 | 0,760 |
+| Galileo | 16384 | 4 | 0,765 |
+
+Nel caso GPS a quattro worker l'intervallo dei rapporti delle quattro
+coppie è 0,779–1,555, quindi il beneficio in quella configurazione resta
+da confermare. Dati locali in `build/f4-avx2-comparison/`.
+
+### PSD comune a spettro e waterfall
+
+Compilare il target `ngene_int32_psd_lab` nelle stesse due build ed eseguirlo
+in quattro coppie con ordine alternato. Il banco invia burst CI8 al worker
+PSD reale. Usa finestra Hann, quattro medie Welch e overlap del 50%.
+Per tutte le sette potenze di due da 256 a 16384 coincidono checksum, primo
+campione, frequenza e livello del picco su ogni frame verificato.
+
+| N | Rapporto mediano accoppiato del tempo worker | Rapporto della latenza cattura–pubblicazione |
+| ---: | ---: | ---: |
+| 256 | 0,93 | 1,35 |
+| 512 | 0,85 | 0,86 |
+| 1024 | 0,70 | 0,71 |
+| 2048 | 0,72 | 0,70 |
+| 4096 | 0,75 | 0,76 |
+| 8192 | 0,53 | 0,53 |
+| 16384 | 0,99 | 0,96 |
+
+I tempi del worker sono durate monotone. Le misure riguardano il produttore
+comune delle tre viste. Restano da misurare il costo CPU con le viste attive
+e la ripetibilità agli estremi della matrice. CSV locali `psd-*.csv` in
+`build/f4-avx2-comparison/`. Il primo frame per dimensione viene scartato
+dalla misura a piano riusato.
+
+Il job macOS ARM64 esegue il banco diretto C/NEON sulla stessa macchina e
+pubblica i CSV accoppiati nella prossima esecuzione CI della revisione.
+La qualifica nativa ARM e le build native Linux e macOS restano da eseguire
+per questo incremento.
+
+Le due build Windows x64 per replay da file hanno superato 25/25 CTest.
+La baseline include la ripetizione di tre test di build e scripting
+con directory temporanea locale, Ninja e policy PowerShell di processo.
+La traccia F6 è disattivata in entrambe le build di verifica.
+
+## Incremento AVX2 Q14
+
+Il candidato elabora otto butterfly per iterazione. Riusa la permutazione,
+gli stadi fino a 8 punti e i blocchi da 512 campioni del backend SSE2.
+Mantiene l'arrotondamento verso meno infinito, il dimezzamento per stadio
+e la saturazione del contratto Q14. L'opzione
+`-DNGENE_EXPERIMENTAL_Q14_AVX2=ON` abilita il candidato su x86-64 con
+verifica AVX2 a runtime. Può essere valutata indipendentemente da int32.
+
+Su Core i7-1355U e Windows x64 Release con MSVC 19.52, il contratto FFT
+passa su ogni potenza di due da 8 a 16384. Il banco con SSE2 e AVX2 nello
+stesso processo ha verificato gli stessi buffer contro C e ha alternato
+l'ordine per 21 round. Tra 128 e 8192 punti il tempo mediano della FFT
+completa cala di circa il 7–13%. A 16 e 32 punti sale rispettivamente
+da 0,033 a 0,037 µs e da 0,053 a 0,057 µs.
+
+Il worker PSD con `ngene_int32_psd_lab --q14` ha pubblicato le stesse
+posizioni campione, checksum e picchi in quattro coppie di replay sintetici
+da 256 a 16384 punti. Il tempo mediano accoppiato del worker peggiora del
+42% a 256 e del 26% a 2048 punti, varia di circa il −1% a 4096 e
+scende dell'8% a 16384. Il miglioramento del kernel varia quindi con
+la dimensione e con il resto del lavoro del worker.
+
+Le nove fixture Q14 PCPS coincidono in checksum e decisioni tra le
+varianti. Nelle quattro coppie temporali a 4,096 Msps, i rapporti mediani
+AVX2/SSE2 del tempo di ricerca completa sono i seguenti.
+
+| Segnale | Worker | Rapporto mediano | Min–max |
+| --- | ---: | ---: | ---: |
+| GPS | 1 | 0,922 | 0,732–1,713 |
+| GPS | 4 | 0,966 | 0,936–0,988 |
+| Galileo | 1 | 0,945 | 0,882–1,149 |
+| Galileo | 4 | 0,994 | 0,670–1,264 |
+
+Solo GPS a quattro worker migliora in tutte le coppie. La PSD peggiora
+in alcune dimensioni e il guadagno PCPS dipende dal profilo. Il candidato
+resta disponibile come opzione sperimentale. Le prove native Linux,
+macOS e ARM rimangono aperte.
+
+La build Windows x64 con Q14 AVX2 ha superato 25/25 CTest con la traccia
+F6 disattivata. Il banco int32 ricompilato dopo il riuso del controllo
+AVX2 restituisce lo stesso buffer della baseline SSE2.
+
+Per riprodurre, configurare `benchmarks/fft` con
+`NGENE_FFT_BASELINE_ROOT` puntato all'albero SSE2 e abilitare
+`NGENE_EXPERIMENTAL_Q14_AVX2` nella variante corrente. Per PCPS riusare la
+procedura F3 con `verify <cartella> 2` e `timing <cartella> gps 2` o
+`timing <cartella> galileo 2`. Per la PSD usare `--q14` in entrambe
+le build. I dati grezzi locali sono in `build/f4-q14-results/`.
+SHA-256 del kernel AVX2 misurato
+`306b95ae86e9c3873cb8cdf8c52d2be6ee218ac47558219c10f617644a5c2381`.
+
+[FFT diretta e hash dei sorgenti](q14-avx2-fft.csv) ·
+[Riepilogo PSD](q14-avx2-psd-summary.csv) ·
+[Parità PCPS](q14-avx2-pcps-verify.csv) ·
+[Tempi PCPS](q14-avx2-pcps-summary.csv)
+
+## Verifica della disponibilità AVX-512 e SVE/SVE2 · 2026-11-24
+
+Il probe offline, compilato per l'ISA di base, controlla CPUID e lo stato ZMM
+abilitato dal sistema operativo su Windows x64. Su Linux AArch64 legge
+HWCAP/HWCAP2 e la lunghezza vettoriale SVE del thread.
+
+```text
+cl /W4 /WX /O2 /Fe:build/f4/isa_probe.exe development/profiling/F4/isa_probe.c
+cc -O2 -Wall -Wextra -o build/f4/isa_probe development/profiling/F4/isa_probe.c
+```
+
+Con MSVC 19.52 su Intel Core i7-1355U il probe restituisce
+`avx512f=0 avx512bw=0 os_zmm=0`. Le build Windows F4 SSE2 e AVX2 esistenti
+producono entrambe SHA-256
+`a170a57a2e75735ef77a10af0f613be7330f2cfc377c039095c064610ab47ca2`
+sugli output del banco int32. La verifica Linux AArch64 del probe e i confronti
+dei kernel AVX-512 e SVE/SVE2 restano aperti. Nessun tempo prestazionale nuovo.
+
+## F4 · Inventario degli ingressi interi · 2026-11-24
+
+I e Q sono interlacciati, con I per primo. Il riferimento di decodifica è
+`NgIqComponent` in `src/stream/format.c`. Le parole a 16 bit sono little endian.
+
+| Ingresso | Estremi e zero | Conversione verso CI16 |
+|---|---|---|
+| CI8, incluso il formato storico zero | -128, 0, 127 in unità ADC | Moltiplicazione esatta per 256 |
+| CU8 | 0, 128, 255 sul filo. Sottrarre 128 per ottenere -128, 0, 127 | Centrare e moltiplicare per 256 |
+| SC16 Q11 | -2048, 0, 2047 in un contenitore signed a 16 bit | Moltiplicazione esatta per 16. Il convertitore rifiuta campioni fuori range |
+| CI16 | -32768, 0, 32767. La precisione effettiva dipende dalla sorgente | Identità |
+
+- Acquisizione PCPS. Il callback accetta CI8, CI16 e SC16 Q11. CU8 entra
+  attraverso la conversione dello stream comune. La copia della cattura
+  converte interi in float esattamente in unità del buffer comune. Il
+  profilo di ricerca determina la successiva aritmetica FFT e produce la
+  mappa di potenza usata nella ricerca.
+- Tracking. Il percorso byte configurabile richiede CI8. Il percorso wide
+  legge i livelli signed tramite NgIqComponent e alimenta mixer e somme
+  prefisse da cui ricava gli accumuli I/Q dei tap in double.
+- Spettro e waterfall. Il worker usa fattori di ingresso 128, 8 e 1 per
+  CI8, SC16 Q11 e CI16 rispettivamente, prima della finestra e degli
+  adattamenti specifici del profilo FFT. Le potenze dipendono anche dalla
+  normalizzazione applicata dal worker. Il confronto va eseguito alla
+  stessa scala di uscita, includendo l'eventuale ampliamento dello stream.
+
+Su Windows, build Release esistente f4-q14-ON, 4/4 CTest superati.
+Eseguiti tracking_contract, sample_math_native, analysis_worker_contract e
+common_frontend_stream. Quest'ultimo esercita conversioni e limiti dei
+formati. La verifica copre i percorsi esistenti. Il riferimento FFT scalare
+CI8 con twiddle quantizzati è il successivo incremento del banco.
+
+## F4 · Banco FFT scalare CI8
+
+Compilare `ci8_fft_lab.c` con MSVC 19.52, `/O2 /W4 /WX`. Il banco
+stampa il CSV su stdout. Il [risultato](ci8-fft.csv) contiene 576 casi
+da 8 a 16384 punti, nelle due direzioni, con impulso, valori estremi,
+tono fuori bin e rumore a seed fisso.
+
+Il riferimento double usa lo stesso schema radix-2 con twiddle double.
+L'errore per componente è espresso in unità ADC dopo divisione per N,
+ripristinando prima gli shift e la scala d'ingresso. I twiddle a 7 e 15
+bit frazionari usano un contenitore che rappresenta entrambi gli
+estremi ±1. I prodotti e le somme usano int64. Nel percorso wide la
+magnitudine iniziale è inferiore a 47000. Ogni stadio cresce al più
+di un fattore 2,01 con un'unità additiva di arrotondamento. Dopo 14
+stadi la magnitudine resta sotto 10^9 e i prodotti sotto 2^47.
+
+| Profilo | Errore massimo Q7 | Errore massimo Q15 | Clipping per precisione |
+|---|---:|---:|---:|
+| Wide con 8 bit frazionari aggiunti all'ingresso | 0,371412 | 0,001521 | 0 |
+| Buffer limitato a INT8 con shift fisso di un bit per stadio | 3,002887 | 3,784791 | 50 |
+| Buffer limitato a INT8 con esponente comune adattivo | 3,002887 | 3,784791 | 0 |
+
+Il profilo wide Q15 è il candidato di maggiore fedeltà tra quelli
+provati. Il riscalamento adattivo evita i clipping osservati nel banco
+con shift fisso. Gli intermedi limitati a INT8 richiedono ancora prove
+su sensibilità e mappe PCPS. Il banco qualifica il confronto numerico
+offline. Tempi, SIMD e replay operativo restano da misurare.
+
+### Tempi dei profili scalari CI8
+
+Windows x64, i7-1355U, MSVC 19.52 con /O2 /W4 /WX. Nove esecuzioni
+del banco, con 96 trasformate per configurazione in ciascuna esecuzione.
+Il cronometro include butterfly e riscalamento. Esclude tabelle,
+permutazione iniziale, riferimento double e scrittura dei risultati.
+Il CSV numerico delle 576 trasformate è identico byte per byte alla
+serie precedente.
+
+| Coefficienti | Wide | INT8 shift fisso | INT8 shift adattivo |
+|---|---:|---:|---:|
+| Q7 | 16,31 ms | 40,79 ms | 61,38 ms |
+| Q15 | 15,79 ms | 39,61 ms | 63,30 ms |
+
+I valori sono mediane delle nove somme per configurazione.
+In questo banco i profili stretti aggiungono passaggi per riscalare
+o determinare lo shift e costano circa 2,5–4 volte il wide.
+Il banco usa workspace int64 per ogni candidato. I tempi descrivono
+l'aritmetica scalare e non quantificano il beneficio di un workspace
+compatto o di SIMD. I dati grezzi sono in [ci8-fft-timing.csv](ci8-fft-timing.csv).
+Restano aperte le prove SIMD e la sensibilità delle mappe PCPS.
+
+### Candidato AVX2 wide Q15
+
+Compilare ci8_fft_avx2.c con /arch:AVX2 e il banco con
+/DCI8_LAB_AVX2 /D_CRT_SECURE_NO_WARNINGS /Isrc, poi collegare gli oggetti.
+Passare il percorso del dump binario in entrambe le prove e aggiungere
+avx2 come secondo argomento per abilitare il candidato. La verifica ISA
+riusa il controllo CPU e OS del progetto. Lo stadio largo 2 resta scalare.
+
+Windows x64 con MSVC 19.52. Dump integrali identici sui 576 casi,
+di cui 96 esercitano il candidato. SHA-256
+512ee02a6931ddd679afde7c23fd2a2ea304ef5939355e6310cbfbff8b1c1411.
+In nove coppie alternate la mediana delle 96 trasformate wide Q15
+passa da 27,57 ms scalare a 13,99 ms AVX2. Le misure riguardano lo
+stesso binario e includono gli stadi scalari. [Dati](ci8-fft-avx2-timing.csv).
+
+La prova resta offline. Restano aperti workspace compatto INT8,
+mappe e sensibilità PCPS, e qualifica nativa delle altre ISA.
+
+### Workspace INT8 con shift fisso
+
+Nel banco usare il percorso del dump seguito da 'compact'. Il percorso
+compatto applica arrotondamento, shift fisso e saturazione prima di scrivere
+ogni butterfly nel buffer a un byte per componente. I prodotti restano
+allargati. A N=16384 il buffer attivo per gli stadi passa da 256 a 32 KiB.
+Il banco conserva il buffer wide per preparazione, confronto e dump.
+
+Su Windows x64, MSVC 19.52 /O2 /W4 /WX, gli output binari e i CSV
+di errore coincidono con il banco scalare, inclusi i conteggi di clipping.
+192 dei 576 casi esercitano il candidato. In nove coppie alternate
+la mediana delle 96 trasformate passa da 34,16 a 19,28 ms per Q7
+e da 33,96 a 19,35 ms per Q15. Il cronometro misura solo gli stadi.
+[Dati grezzi](ci8-fft-compact-timing.csv).
+
+Restano da verificare il workspace adattivo, il SIMD per il profilo
+compatto e la sensibilità delle mappe PCPS.

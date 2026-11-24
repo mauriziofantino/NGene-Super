@@ -13,6 +13,8 @@ add_executable(ngene_fft_benchmark benchmark.c
     "${NGENE_FFT_SOURCE_ROOT}/src/dsp/fft/fft.c" "${NGENE_ROOT}/src/core/error.c")
 target_include_directories(ngene_fft_benchmark PRIVATE "${NGENE_ROOT}/include" "${NGENE_ROOT}/src")
 include("${NGENE_ROOT}/cmake/TargetArchitecture.cmake")
+include("${NGENE_ROOT}/cmake/Q14Avx2.cmake")
+ngene_add_q14_avx2(ngene_fft_benchmark "${NGENE_FFT_SOURCE_ROOT}")
 include("${NGENE_ROOT}/cmake/FftBackend.cmake")
 ngene_select_fft_backend("${NGENE_FFT_SOURCE_ROOT}" fft_kernel)
 if(fft_kernel_assembler)

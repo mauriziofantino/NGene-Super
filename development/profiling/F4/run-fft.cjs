@@ -6,7 +6,7 @@ const {spawnSync} = require('node:child_process');
 
 const [action, directory = 'build/f4'] = process.argv.slice(2);
 const variants = ['before', 'after'];
-const sizes = [1024, 2048, 4096, 8192, 16384];
+const sizes = Array.from({length: 12}, (_, i) => 8 * 2 ** i);
 const vectors = 8;
 
 function run(variant, args = []) {

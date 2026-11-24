@@ -17,11 +17,25 @@ jobs:
       - name: Compare ARM64 int32 FFT with the scalar reference
         if: matrix.os == 'macos-14' && matrix.web == 'OFF' && runner.arch == 'ARM64'
         run: |
+          mkdir -p build/f4-native
+          cp build/ngene_int32_fft_lab build/f4-native/ngene_int32_fft_before
           build/ngene_int32_fft_lab build/int32-scalar.bin
           cmake -S . -B build -DNGENE_EXPERIMENTAL_INT32_NEON=ON
           cmake --build build --config Release --target ngene_int32_fft_lab --parallel 2
           build/ngene_int32_fft_lab build/int32-neon.bin
           cmp build/int32-scalar.bin build/int32-neon.bin
+          cp build/ngene_int32_fft_lab build/f4-native/ngene_int32_fft_after
+          sysctl -n machdep.cpu.brand_string > build/f4-native/host.txt
+          node development/profiling/F4/run-fft.cjs timing build/f4-native > build/f4-native/timing.csv
+          node development/profiling/F4/run-fft.cjs summary build/f4-native/timing.csv > build/f4-native/summary.csv
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-14' && matrix.web == 'OFF' && runner.arch == 'ARM64'
+        with:
+          name: arm64-neon-int32-fft-native
+          path: |
+            build/f4-native/host.txt
+            build/f4-native/timing.csv
+            build/f4-native/summary.csv
   hackrf-api:
     runs-on: ubuntu-24.04
     steps:

@@ -86,12 +86,16 @@ if (action === 'profile') {
             run('ngene_pcps_', variant, repeat, [system, rate, n, 38500, mode, workers, 5]);
       }
 } else if (action === 'verify') {
+  const [onlyMode] = process.argv.slice(4);
+  assert(onlyMode === undefined || modes.some(mode => String(mode) === onlyMode),
+    'Expected FFT mode 0, 1, or 2');
   const cases = sizes.flatMap(([signal, n]) => [0, 38500].map(ifHz => [signal, 8183800, n, ifHz, 1]));
   cases.push(['gps', 8183800, 4096, 38500, 2], ['gps', 8183800, 4096, 0, 3],
     ['galileo', 2048000, 8192, -38500, 1], ['galileo', 2048000, 4096, 38500, 2],
     ['galileo', 4096000, 16384, 0, 3]);
   for (const [signal, fsHz, n, ifHz, scenario] of cases)
     for (const mode of modes) {
+      if (onlyMode !== undefined && Number(onlyMode) !== mode) continue;
       const args = [signal, fsHz, n, ifHz, mode, 1, scenario];
       const expected = run('ngene_pcps_', 'before', 0, args);
       assert.equal(run('ngene_pcps_', 'after', 0, args), expected, args.join(' '));

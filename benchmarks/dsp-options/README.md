@@ -4,6 +4,8 @@ Development-only candidate kernels for the October 31, 2026 frontend design stud
 Nothing in this directory is linked into the operational receiver. This is not a
 benchmark of a complete acquisition/tracking implementation or of the Classic executable.
 See [the options plan](../../docs/service/DSP_OPTIONS_PLAN.md).
+The F5 extension and output checks are described in the
+[F5 report](../../development/profiling/F5/README.md).
 
 ## Reproduce
 

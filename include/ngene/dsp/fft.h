@@ -69,13 +69,13 @@ int NgFftExecute(const TNgFftPlan *plan, size_t size, const int16_t *input, int1
 int NgFftReference(const TNgFftPlan *plan, size_t size, const int16_t *input, int16_t *output,
                    TNgError *error);
 /**
- * @brief Report the FFT backend selected at compilation.
+ * @brief Report the available Q14 FFT backend.
  *
  * @details
  * The returned string has static storage; do not free it. On 32-bit x86 it reflects the
- * CPU's SSE2 capability; the other targets select their backend at compilation.
+ * CPU's SSE2 capability. Experimental x86-64 builds also check runtime AVX2 support.
  *
- * @return Static name of the available SSE2, NEON or C-reference backend.
+ * @return Static name of the available AVX2/SSE2, SSE2, NEON or C-reference backend.
  */
 const char *NgFftBackend(void);
 #endif

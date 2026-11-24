@@ -3,6 +3,10 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef NGENE_EXPERIMENTAL_Q14_AVX2
+#include "dsp/x86/avx2_available.h"
+void NgFftQ14StageAvx2(int16_t *data, const int16_t *twiddles, size_t n, size_t width);
+#endif
 
 /** @brief Immutable integer FFT permutation and Q14 twiddle tables shared by disjoint executions.
  */
@@ -15,6 +19,9 @@ struct TNgFftPlan {
     uint32_t *reverse;
     /** Owned immutable interleaved Q14 sine/cosine butterfly coefficients. */
     int16_t *twiddles;
+#ifdef NGENE_EXPERIMENTAL_Q14_AVX2
+    int avx2;
+#endif
 #ifdef NGENE_FFT_RUNTIME_SSE2
     /** ISA decision made once at creation; never execute SSE2 on unsupported CPUs. */
     int simd;
@@ -132,6 +139,9 @@ int NgFftCreate(size_t maximumSize, TNgFftPlan **out, TNgError *error)
         return NgFail(error, "Cannot allocate FFT plan");
     }
     p->maximum = maximumSize;
+#ifdef NGENE_EXPERIMENTAL_Q14_AVX2
+    p->avx2 = NgDspAvx2Available();
+#endif
 #ifdef NGENE_FFT_RUNTIME_SSE2
     p->simd = NgFftSimdAvailable();
 #endif
@@ -264,6 +274,13 @@ static int Execute(const TNgFftPlan *p, size_t n, const int16_t *a, int16_t *b, 
             NgFftFirstStages(b + 2 * chunk, block);
             offset = 28;
             for (m = 16; m <= block; m *= 2) {
+#ifdef NGENE_EXPERIMENTAL_Q14_AVX2
+                if (p->avx2) {
+                    NgFftQ14StageAvx2(b + 2 * chunk, p->twiddles + offset, block, m);
+                    offset += 2 * m;
+                    continue;
+                }
+#endif
                 for (base = chunk; base < chunk + block; base += m) {
                     NgFftButterflies(b + 2 * base, b + 2 * base + m, p->twiddles + offset, m / 2);
                 }
@@ -283,6 +300,13 @@ static int Execute(const TNgFftPlan *p, size_t n, const int16_t *a, int16_t *b, 
         m = 2;
     }
     for (; m <= n; m *= 2) {
+#ifdef NGENE_EXPERIMENTAL_Q14_AVX2
+        if (reference == 0 && m >= 16 && p->avx2) {
+            NgFftQ14StageAvx2(b, p->twiddles + offset, n, m);
+            offset += 2 * m;
+            continue;
+        }
+#endif
         for (base = 0; base < n; base += m) {
 #ifdef NG_FFT_HAVE_KERNEL
             if (reference == 0) {
@@ -345,16 +369,21 @@ int NgFftReference(const TNgFftPlan *plan, size_t size, const int16_t *input, in
 }
 
 /**
- * @brief Report the FFT backend selected at compilation.
+ * @brief Report the available Q14 FFT backend.
  *
  * @details
  * The returned string has static storage; do not free it. On 32-bit x86, SSE2 capability
- * is checked and older CPUs report the scalar fallback. Plans cache that decision.
+ * is checked and older CPUs report the scalar fallback. Experimental x86-64 builds
+ * also check runtime AVX2 support. Plans cache these decisions.
  *
- * Result: Static name of the available SSE2, NEON or C-reference backend.
+ * Result: Static name of the available AVX2/SSE2, SSE2, NEON or C-reference backend.
  */
 const char *NgFftBackend(void)
 {
+#ifdef NGENE_EXPERIMENTAL_Q14_AVX2
+    if (NgDspAvx2Available())
+        return "AVX2/SSE2";
+#endif
 #ifdef NGENE_FFT_RUNTIME_SSE2
     if (NgFftSimdAvailable() == 0) {
         return "C-reference";

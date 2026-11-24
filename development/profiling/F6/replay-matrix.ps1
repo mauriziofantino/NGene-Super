@@ -4,7 +4,10 @@ param(
     [string]$Output = 'build/f6',
     [ValidateRange(1, 60)][int]$Seconds = 30,
     [ValidateRange(1, 10)][int]$Pairs = 2,
-    [ValidateRange(1024, 65535)][int]$Port = 19626
+    [ValidateRange(1024, 65535)][int]$Port = 19626,
+    [switch]$Int32Fft,
+    [ValidateSet(0, 1, 4)][int]$OnlyTrackingWorkers = 0,
+    [ValidateSet(0, 1, 4)][int]$OnlyAcqBudget = 0
 )
 $ErrorActionPreference = 'Stop'
 $Executable = (Resolve-Path -LiteralPath $Executable).Path
@@ -24,6 +27,10 @@ function Measure-Replay([int]$Trial, [int]$Workers, [int]$Budget) {
     $directory = Join-Path $Output $tag
     $null = New-Item -ItemType Directory -Force $directory
     $config = Join-Path $directory 'receiver.ini'
+    $dsp = ''
+    if ($Int32Fft) {
+        $dsp = "[dsp]`ngps_fft=integer_precise`ngalileo_fft=integer_precise"
+    }
     @"
 [frontend]
 type=file
@@ -47,6 +54,7 @@ loop=false
 sample_limit=$expected
 [recording]
 enabled=false
+$dsp
 "@ | Set-Content -LiteralPath $config -Encoding ascii
     $serviceArgs = '--web --port {0} --config "{1}" --output-dir "{2}"' -f $Port, $config, $directory
     $launch = @{
@@ -66,6 +74,10 @@ enabled=false
         } until ($bootstrap -or $service.HasExited -or $startup.Elapsed.TotalSeconds -ge 10)
         if (!$bootstrap -or $service.HasExited) { throw "Replay service did not start in $directory" }
         $effective = Read-Json 'config'
+        if ($Int32Fft -and ($effective.ini -notmatch '(?m)^gps_fft=integer_precise\s*$' -or
+                            $effective.ini -notmatch '(?m)^galileo_fft=integer_precise\s*$')) {
+            throw "Int32 FFT was not applied in $directory"
+        }
         if ($effective.ini -notmatch "(?m)^workers=$Workers\s*$" -or
             $effective.ini -notmatch "(?m)^cpu_budget=$Budget\s*$" -or $effective.ini -notmatch "(?m)^sample_limit=$expected\s*$") {
             throw "Unexpected effective configuration in $directory"
@@ -126,6 +138,8 @@ for ($trial = 1; $trial -le $Pairs; ++$trial) {
     if ($trial % 2 -eq 0) { [array]::Reverse($order) }
     foreach ($index in $order) {
         $workers, $budget = $conditions[$index]
+        if (($OnlyTrackingWorkers -and $workers -ne $OnlyTrackingWorkers) -or
+            ($OnlyAcqBudget -and $budget -ne $OnlyAcqBudget)) { continue }
         Measure-Replay $trial $workers $budget
     }
 }

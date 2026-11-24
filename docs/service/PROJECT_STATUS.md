@@ -50,6 +50,32 @@ sizes and the default ARM build. The opt-in NEON candidate matched the scalar
 reference in emulation. Native performance qualification is pending.
 [F4 verification](../../development/profiling/F4/README.md).
 
+The opt-in x86-64 AVX2 int32 FFT matched the baseline bit for bit at all
+12 sizes on Windows. The paired PCPS bench measured a median reduction
+of 15% for GPS and 24% for Galileo at one worker. The macOS ARM64 job
+collects paired NEON timings on its next run.
+
+The opt-in x86-64 AVX2 Q14 FFT matched SSE2 and scalar outputs on Windows.
+The direct FFT bench measured lower median time from 128 to 8192 points.
+PSD and full PCPS results depended on size and worker count.
+[Q14 verification](../../development/profiling/F4/README.md#incremento-avx2-q14).
+
+The F6 mixed GPS/Galileo replay matrix measures the existing tracking pool
+and acquisition permits at fixed precision. More acquisition permits reduced
+observed contention and advanced Galileo confirmation on the test capture at
+higher CPU cost. Exact event parity and per-job deadlines remain open.
+[F6 replay](../../development/profiling/F6/README.md).
+
+The development build can trace acquisition jobs by constellation, epoch,
+first sample and PRN. In one 30-second int32 replay pair, the 46 decisions
+with matching keys agreed between SSE2 and AVX2. Admission and deadline
+qualification remain open.
+
+The F5 offline GPS bench includes a 16-level carrier and a Q15 mixer with
+byte rescaling. The new candidates remain experimental. The bench verifies
+phase continuity and measures prompt deflection and saturation.
+[F5 offline bench](../../development/profiling/F5/README.md).
+
 Channels is a stable table with numeric C/N0 and horizontal bars. Total slots,
 GPS/Galileo reservations and automatic preference are configurable. Only the
 selected channel computes optional taps/current search display; confirmed maps

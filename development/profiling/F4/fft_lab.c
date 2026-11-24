@@ -1,9 +1,11 @@
 /* Direct int32 FFT qualification. Keeps setup, disk I/O and timing separate. */
 #include "dsp/search_plan.h"
+#include "ngene/dsp/fft.h"
 #include "platform/platform.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define MAX_SIZE 16384
 #define Q14_LIMIT 16384
@@ -49,13 +51,29 @@ static void Execute(TNgSearchFft *plan, int inverse)
 int main(int argc, char **argv)
 {
     FILE *result = NULL;
+    const int plansOnly = argc == 2 && strcmp(argv[1], "--plans") == 0;
     if (argc > 2)
         return EXIT_FAILURE;
-    if (argc == 2 && !(result = fopen(argv[1], "wb")))
+    if (argc == 2 && !plansOnly && !(result = fopen(argv[1], "wb")))
         return EXIT_FAILURE;
-    for (size_t n = 1024; n <= MAX_SIZE; n *= 2) {
+    for (size_t n = NG_FFT_MIN_SIZE; n <= MAX_SIZE; n *= 2) {
         TNgError error = {{0}};
         TNgSearchFft *plan = NULL;
+        if (plansOnly) {
+            double elapsed = 0;
+            for (unsigned trial = 0; trial < 32; ++trial) {
+                const double start = NgMonotonicSeconds();
+                if (NgSearchFftCreateForMode(n, NG_SEARCH_FFT_INTEGER_PRECISE, &plan,
+                                             &error) != NG_OK) {
+                    fprintf(stderr, "%s\n", error.message);
+                    return EXIT_FAILURE;
+                }
+                elapsed += NgMonotonicSeconds() - start;
+                NgSearchFftDestroy(plan);
+            }
+            printf("%zu,%.9g\n", n, elapsed / 32);
+            continue;
+        }
         if (NgSearchFftCreateForMode(n, NG_SEARCH_FFT_INTEGER_PRECISE, &plan, &error) != NG_OK) {
             fprintf(stderr, "%s\n", error.message);
             return EXIT_FAILURE;
@@ -69,7 +87,7 @@ int main(int argc, char **argv)
                         return EXIT_FAILURE;
                 }
             } else {
-                const size_t trials = 524288 / n;
+                const size_t trials = n < 1024 ? 512 : 524288 / n;
                 MakeVector(n, VECTOR_COUNT - 1);
                 for (unsigned k = 0; k < 5; ++k)
                     Execute(plan, inverse);

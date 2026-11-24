@@ -12,13 +12,16 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#if defined(DSP_OPTIONS_AVX2) && defined(_MSC_VER)
+#include <intrin.h>
+#endif
 #if (defined(_M_X64) || defined(__x86_64__)) && !defined(REFERENCE_ONLY)
 #include <emmintrin.h>
 #define SSE 1
 #endif
 #define PI 3.14159265358979323846
 #define MAX_N 64003
-#define MODES 5
+#define MODES 7
 #define CHECK(x)                                                                                   \
     do {                                                                                           \
         if (!(x)) {                                                                                \
@@ -32,7 +35,8 @@
 #define NOINLINE __attribute__((noinline))
 #endif
 static const char *names[MODES] = {"double_oracle", "iq16_q15_simd", "iq8_q15_simd",
-                                   "iq8_xor_square", "sign1_xor_square"};
+                                   "iq8_xor_square", "sign1_xor_square",
+                                   "iq8_carrier16", "iq8_q15_rescaled"};
 
 typedef struct {
     double i, q;
@@ -42,6 +46,8 @@ typedef struct {
     size_t n;
     double raw[2 * MAX_N], r[2 * MAX_N], j[2 * MAX_N];
     int16_t x16[2 * MAX_N], wr[2 * MAX_N], wj[2 * MAX_N];
+    int16_t r16[2 * MAX_N], j16[2 * MAX_N];
+    int8_t code[MAX_N];
     int8_t x8[2 * MAX_N];
     uint8_t mr[2 * MAX_N], mj[2 * MAX_N];
     uint32_t br[(2 * MAX_N + 31) / 32], bj[(2 * MAX_N + 31) / 32];
@@ -95,6 +101,24 @@ static int8_t Quant8(double x)
     return (int8_t)(y < -128 ? -128 : y > 127 ? 127 : y);
 }
 
+static int16_t Carrier16(double x)
+{
+    /* Uniform levels from -15 to +15, with unit magnitude at the rails. */
+    return (int16_t)(2 * (int)floor((x + 1) * 7.5 + 0.5) - 15);
+}
+
+static int RescaleByte(int product, size_t *clipped)
+{
+    /* A complex CI8/Q15 dot pair fits in int32 even when both inputs are -128. */
+    int rounded = (abs(product) + 16384) / 32768;
+    int value = product < 0 ? -rounded : rounded;
+    if (value < -128 || value > 127) {
+        (*clipped)++;
+        return value < -128 ? -128 : 127;
+    }
+    return value;
+}
+
 static void Convert(Block *b)
 {
     size_t k;
@@ -121,6 +145,7 @@ static void Prepare(Block *b, size_t n, double fs, double ifHz, double codeOffse
         double c = cos(phase), s = sin(phase);
         int prn = NgGpsCaNext(chips, &code);
         unsigned t;
+        b->code[k] = (int8_t)prn;
         b->r[2 * k] = prn * c;
         b->r[2 * k + 1] = prn * s;
         b->j[2 * k] = -prn * s;
@@ -129,6 +154,8 @@ static void Prepare(Block *b, size_t n, double fs, double ifHz, double codeOffse
             size_t p = 2 * k + t;
             b->wr[p] = (int16_t)lround(b->r[p] * 32767);
             b->wj[p] = (int16_t)lround(b->j[p] * 32767);
+            b->r16[p] = (int16_t)(prn * Carrier16(prn * b->r[p]));
+            b->j16[p] = (int16_t)(prn * Carrier16(prn * b->j[p]));
             b->mr[p] = b->r[p] < 0 ? 255 : 0;
             b->mj[p] = b->j[p] < 0 ? 255 : 0;
             b->negativesR += (unsigned)(b->mr[p] != 0);
@@ -169,6 +196,28 @@ static int64_t Dot16Scalar(const int16_t *x, const int16_t *w, size_t n)
         sum += (int32_t)x[k] * w[k];
     return sum;
 }
+#ifdef DSP_OPTIONS_AVX2
+int64_t DspOptionsDot16Avx2(const int16_t *x, const int16_t *w, size_t n);
+int64_t DspOptionsDot8Avx2(const int8_t *x, const int16_t *w, size_t n);
+static int useAvx2;
+
+static int Avx2Available(void)
+{
+#ifdef _MSC_VER
+    int info[4];
+    __cpuid(info, 0);
+    if (info[0] < 7)
+        return 0;
+    __cpuid(info, 1);
+    if ((info[2] & (3 << 27)) != (3 << 27) || (_xgetbv(0) & 6) != 6)
+        return 0;
+    __cpuidex(info, 7, 0);
+    return (info[1] & (1 << 5)) != 0;
+#else
+    return __builtin_cpu_supports("avx2") != 0;
+#endif
+}
+#endif
 #ifdef SSE
 static __m128i AddWide(__m128i acc, __m128i x)
 {
@@ -188,6 +237,10 @@ static int64_t Dot16(const int16_t *x, const int16_t *w, size_t n)
 {
     size_t k = 0;
     int64_t sum = 0;
+#ifdef DSP_OPTIONS_AVX2
+    if (useAvx2)
+        return DspOptionsDot16Avx2(x, w, n);
+#endif
 #ifdef SSE
     __m128i acc = _mm_setzero_si128();
     for (; k + 8 <= n; k += 8)
@@ -204,6 +257,10 @@ static int64_t Dot8(const int8_t *x, const int16_t *w, size_t n)
 {
     size_t k = 0;
     int64_t sum = 0;
+#ifdef DSP_OPTIONS_AVX2
+    if (useAvx2)
+        return DspOptionsDot8Avx2(x, w, n);
+#endif
 #ifdef SSE
     __m128i acc = _mm_setzero_si128(), zero = _mm_setzero_si128();
     for (; k + 16 <= n; k += 16) {
@@ -276,6 +333,78 @@ static Complex Bits(const Block *b)
     }
 }
 
+static Complex Rescaled(const Block *b, size_t *clipped)
+{
+    int64_t i = 0, q = 0;
+    size_t k;
+    for (k = 0; k < b->n; k++) {
+        size_t p = 2 * k;
+        int code = b->code[k];
+        int x = b->x8[p], y = b->x8[p + 1];
+        /* Undo the replica sign on the weights before rounding and saturation. */
+        int real = code * (x * b->wr[p] + y * b->wr[p + 1]);
+        int imag = code * (x * b->wj[p] + y * b->wj[p + 1]);
+        i += code * RescaleByte(real, clipped);
+        q += code * RescaleByte(imag, clipped);
+    }
+    {
+        Complex z = {(double)i / 128, (double)q / 128};
+        return z;
+    }
+}
+
+static void RotationReuse(void)
+{
+    enum { N = 521, TAPS = 3, SPLIT = 173 };
+    const double fs = 16367600, hz = 4001375.25;
+    const double offsets[TAPS] = {0, 0.5, 1};
+    int8_t chips[1023];
+    TNgGpsCaNco code[TAPS];
+    TNgError error = {{0}};
+    int64_t full[TAPS][2] = {{0}}, resumed[TAPS][2] = {{0}};
+    int rotated[N][2];
+    size_t k, tap, clipped = 0;
+    double phase = 0.137;
+    CHECK(NgGpsCaGenerate(7, chips, &error) == NG_OK);
+    for (tap = 0; tap < TAPS; tap++)
+        CHECK(NgGpsCaNcoInit(&code[tap], fs, 1023000, offsets[tap], &error) == NG_OK);
+    for (k = 0; k < N; k++) {
+        double direct = 0.137 + hz * (double)k / fs;
+        int x = (int)(k % 256) - 128, y = 127 - (int)((73 * k) % 256);
+        long c, s;
+        if (k == SPLIT)
+            phase = fmod(phase, 1.0);
+        CHECK(fabs(remainder(phase - direct, 1.0)) < 1e-11);
+        c = lround(32767 * cos(2 * PI * phase));
+        s = lround(32767 * sin(2 * PI * phase));
+        CHECK(c == lround(32767 * cos(2 * PI * direct)));
+        CHECK(s == lround(32767 * sin(2 * PI * direct)));
+        rotated[k][0] = RescaleByte(x * (int)c + y * (int)s, &clipped);
+        rotated[k][1] = RescaleByte(y * (int)c - x * (int)s, &clipped);
+        phase += hz / fs;
+    }
+    CHECK(clipped > 0);
+    for (tap = 0; tap < TAPS; tap++) {
+        TNgGpsCaNco streaming = code[tap];
+        size_t ignored = 0;
+        for (k = 0; k < N; k++) {
+            double angle = 2 * PI * (0.137 + hz * (double)k / fs);
+            int c = (int)lround(32767 * cos(angle)), s = (int)lround(32767 * sin(angle));
+            int x = (int)(k % 256) - 128, y = 127 - (int)((73 * k) % 256);
+            int sign = NgGpsCaNext(chips, &code[tap]);
+            full[tap][0] += sign * RescaleByte(x * c + y * s, &ignored);
+            full[tap][1] += sign * RescaleByte(y * c - x * s, &ignored);
+        }
+        for (k = 0; k < N; k++) {
+            int sign = NgGpsCaNext(chips, &streaming);
+            resumed[tap][0] += sign * rotated[k][0];
+            resumed[tap][1] += sign * rotated[k][1];
+        }
+        CHECK(full[tap][0] == resumed[tap][0] && full[tap][1] == resumed[tap][1]);
+    }
+    puts("# PASS: Q15 byte rotation reused across three taps with continuous carrier phase");
+}
+
 static NOINLINE Complex Run(const Block *b, int mode, double sigma)
 {
     Complex z = {0, 0};
@@ -307,6 +436,15 @@ static NOINLINE Complex Run(const Block *b, int mode, double sigma)
         z = Bits(b);
         scale = sigma * sqrt(PI / 2) * PI / 4;
     }
+    if (mode == 5) {
+        z.i = (double)Dot8(b->x8, b->r16, 2 * b->n);
+        z.q = (double)Dot8(b->x8, b->j16, 2 * b->n);
+        scale = 1.0 / (128 * 15);
+    }
+    if (mode == 6) {
+        size_t clipped = 0;
+        return Rescaled(b, &clipped);
+    }
     z.i *= scale;
     z.q *= scale;
     return z;
@@ -319,6 +457,11 @@ static void Contracts(void)
     uint8_t masks[521];
     int8_t x[521];
     int16_t w[521], wide[521];
+    size_t clipped = 0;
+    CHECK(Carrier16(-1) == -15 && Carrier16(1) == 15);
+    CHECK(RescaleByte(-128 * 32768, &clipped) == -128 && clipped == 0);
+    CHECK(RescaleByte(128 * 32768, &clipped) == 127 && clipped == 1);
+    CHECK(RescaleByte(-181 * 32768, &clipped) == -128 && clipped == 2);
     for (v = -128; v <= 127; v++)
         for (sign = 0; sign <= 1; sign++) {
             uint8_t a = (uint8_t)v ^ (sign ? 255 : 0);
@@ -543,6 +686,11 @@ static void Quality(void)
                     CHECK(error < 0.01);
                 printf("quality,%s,%s,%.0f,%.8f,%.6f\n", cases[c], names[m], ifHz, error, phase);
             }
+            {
+                size_t clipped = 0;
+                Rescaled(&block, &clipped);
+                printf("clipping,%s,%.0f,%zu,%zu\n", cases[c], ifHz, clipped, 2 * block.n);
+            }
         }
     }
 }
@@ -746,18 +894,37 @@ static void StreamTiming(void)
 
 int main(int argc, char **argv)
 {
+    const char *backend =
+#ifdef SSE
+        "SSE2";
+#else
+        "C-reference";
+#endif
 #ifndef NDEBUG
     fprintf(stderr, "Release build required\n");
     return 1;
 #endif
-    printf("# compiler=%s backend=%s fixed_seed=1729\n", NGENE_EXPERIMENT_COMPILER,
-#ifdef SSE
-           "SSE2"
-#else
-           "C-reference"
+    if (argc > 1 && strcmp(argv[1], "--avx2") == 0) {
+#ifdef DSP_OPTIONS_AVX2
+        if (Avx2Available()) {
+            useAvx2 = 1;
+            backend = "AVX2-dot";
+            --argc;
+            ++argv;
+        } else
 #endif
-    );
+        {
+            fprintf(stderr, "AVX2 dot products unavailable on this build or host\n");
+            return 2;
+        }
+    }
+    printf("# compiler=%s backend=%s fixed_seed=1729\n", NGENE_EXPERIMENT_COMPILER, backend);
     Contracts();
+    RotationReuse();
+    if (argc == 2 && strcmp(argv[1], "--timing") == 0) {
+        Timing();
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "--verify") == 0) {
         Quality();
         Harmonics();
