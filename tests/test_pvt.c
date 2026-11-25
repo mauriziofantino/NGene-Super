@@ -26,8 +26,49 @@ static double Delay(double sineElevation)
                              : 0;
 }
 
+/** Compute DOP independently by inverting the fixture's ENU geometry Gram matrix. */
+static void CheckDop(const TNgPvtSnapshot *s)
+{
+    double augmented[6][12] = {{0}};
+    unsigned columns = 3, clock[3] = {0};
+    const unsigned present[] = {s->gps, s->galileo, s->beidou};
+    for (unsigned c = 0; c < 3; ++c)
+        if (present[c])
+            clock[c] = columns++;
+    for (unsigned k = 0; k < s->skyCount; ++k) {
+        const TNgPvtSatelliteView *sky = &s->sky[k];
+        double row[6] = {cos(sky->elevation) * sin(sky->azimuth),
+                         cos(sky->elevation) * cos(sky->azimuth), sin(sky->elevation)};
+        row[clock[sky->constellation - 1]] = -1;
+        for (unsigned i = 0; i < columns; ++i)
+            for (unsigned j = 0; j < columns; ++j)
+                augmented[i][j] += row[i] * row[j];
+    }
+    for (unsigned i = 0; i < columns; ++i)
+        augmented[i][i + columns] = 1;
+    for (unsigned i = 0; i < columns; ++i) {
+        const double scale = augmented[i][i];
+        CHECK(scale > 1e-10);
+        for (unsigned j = 0; j < 2 * columns; ++j)
+            augmented[i][j] /= scale;
+        for (unsigned k = 0; k < columns; ++k) {
+            if (k == i)
+                continue;
+            const double factor = augmented[k][i];
+            for (unsigned j = 0; j < 2 * columns; ++j)
+                augmented[k][j] -= factor * augmented[i][j];
+        }
+    }
+    double trace = 0;
+    for (unsigned i = 0; i < columns; ++i)
+        trace += augmented[i][i + columns];
+    CHECK(fabs(s->gdop - sqrt(trace)) < 1e-8);
+    CHECK(fabs(s->hdop - sqrt(augmented[0][columns] + augmented[1][columns + 1])) < 1e-8);
+    CHECK(fabs(s->vdop - sqrt(augmented[2][columns + 2])) < 1e-8);
+}
+
 /** Create a diverse healthy circular-orbit constellation and exact synthetic transmit times. */
-static void Fixture(unsigned mixed, int rollover)
+static void Fixture(unsigned mask, int rollover)
 {
     TNgTrackingSnapshot channels[64] = {0};
     TNgPvtSnapshot solution;
@@ -37,19 +78,31 @@ static void Fixture(unsigned mixed, int rollover)
     double receiver[3] = {(radius + 100) * cos(lat) * cos(lon),
                           (radius + 100) * cos(lat) * sin(lon),
                           (radius * (1 - 6.6943799901413165e-3) + 100) * sin(lat)};
-    unsigned k, j;
+    unsigned k, j, active[3], count = 0;
+    const double biases[3] = {0, 35, -47};
+    unsigned nextPrn[3] = {1, 1, 1};
+    for (unsigned system = 0; system < 3; ++system)
+        if (mask & (1u << system))
+            active[count++] = system;
     for (k = 0; k < 10; k++) {
         TNgTrackingSnapshot *t = &channels[k];
         TNgBroadcast *b = &t->navigation.broadcast;
         double tx = reference - 0.08, position[3], velocity[3], clock, drift, rotated[3],
                range = 24000000;
         t->active = t->pll = t->navigation.towValid = b->ephemeridesReceived = 1;
-        t->constellation = mixed && k >= 5 ? 2 : 1;
-        t->prn = k + 1;
+        const unsigned system = active[k * count / 10];
+        const double timeOffset = system == 2 ? 14 : 0;
+        const double earth = system == 2 ? 7.2921150e-5 : W;
+        const double codeBias = biases[system];
+        tx -= timeOffset;
+        t->constellation = system + 1;
+        t->prn = nextPrn[system]++;
         t->epoch = 7;
         t->endSample = 2400000;
         t->codeRateHz = 1023000;
-        b->eph.sqrtA = sqrt(26560000.0);
+        b->eph.sqrtA = sqrt(system == 2 ? 27906100.0 : 26560000.0);
+        b->eph.axisRate = system == 2 ? -0.3 : 0;
+        b->eph.meanMotionRate = system == 2 ? 3e-12 : 0;
         b->eph.i0 = 0.95;
         b->eph.eccentricity = 0.01;
         b->eph.toe = rollover ? 604000 : 345000;
@@ -61,7 +114,7 @@ static void Fixture(unsigned mixed, int rollover)
         for (j = 0; j < 20; j++) {
             double angle, sine;
             CHECK(NgPvtSatellite(b, t->constellation, tx, position, velocity, &clock, &drift));
-            angle = W * range / C;
+            angle = earth * range / C;
             rotated[0] = cos(angle) * position[0] + sin(angle) * position[1];
             rotated[1] = -sin(angle) * position[0] + cos(angle) * position[1];
             rotated[2] = position[2];
@@ -71,7 +124,7 @@ static void Fixture(unsigned mixed, int rollover)
                     (rotated[1] - receiver[1]) * cos(lat) * sin(lon) +
                     (rotated[2] - receiver[2]) * sin(lat)) /
                    range;
-            tx = reference + clock - (range + Delay(sine)) / C;
+            tx = reference - timeOffset + clock - (range + Delay(sine) + codeBias) / C;
         }
         t->navigation.transmitTimeSeconds = fmod(tx + 604800, 604800);
         /* Independently check analytic orbital derivatives against central differences. */
@@ -85,7 +138,7 @@ static void Fixture(unsigned mixed, int rollover)
             CHECK(fabs((cp - cm) / 0.1 - drift) < 1e-12);
         }
         {
-            double rate = 0, angle = W * range / C, vs[3];
+            double rate = 0, angle = earth * range / C, vs[3];
             vs[0] = cos(angle) * velocity[0] + sin(angle) * velocity[1];
             vs[1] = -sin(angle) * velocity[0] + cos(angle) * velocity[1];
             vs[2] = velocity[2];
@@ -100,10 +153,12 @@ static void Fixture(unsigned mixed, int rollover)
     NgPvtCompute(channels, 7, 2400000, 2400000, &solution);
     CHECK(solution.available && solution.velocityAvailable && solution.satellites == 10);
     CHECK(solution.dopAvailable && solution.skyCount == 10);
+    CHECK(solution.residualRms < 0.02);
+    CheckDop(&solution);
     CHECK(solution.hdop > 0 && solution.vdop > 0 && solution.gdop > 0);
     CHECK(solution.gdop * solution.gdop >=
           solution.hdop * solution.hdop + solution.vdop * solution.vdop);
-    {
+    if (mask & 1u) {
         TNgPvtSnapshot corrected;
         for (k = 0; k < 10; ++k)
             if (channels[k].constellation == 1) {
@@ -115,15 +170,24 @@ static void Fixture(unsigned mixed, int rollover)
         for (k = 0; k < 10; ++k)
             channels[k].navigation.broadcast.ionoReceived = 0;
     }
+    const unsigned admitted[] = {solution.gps, solution.galileo, solution.beidou};
+    const double clocks[] = {solution.clockGps, solution.clockGalileo, solution.clockBeidou};
+    for (unsigned system = 0; system < 3; ++system) {
+        CHECK((admitted[system] > 0) == ((mask & (1u << system)) != 0));
+        if (admitted[system])
+            CHECK(fabs((clocks[system] - clocks[active[0]]) -
+                        (biases[system] - biases[active[0]])) < 0.2);
+    }
     for (k = 0; k < solution.skyCount; k++) {
         const TNgPvtSatelliteView *sky = &solution.sky[k];
+        const double earth = sky->constellation == 3 ? 7.2921150e-5 : W;
         double position[3], velocity[3], clock, drift, range = 24000000, rotated[3];
-        CHECK(sky->prn == k + 1 && sky->constellation == channels[k].constellation);
+        CHECK(sky->prn == channels[k].prn && sky->constellation == channels[k].constellation);
         CHECK(NgPvtSatellite(&channels[k].navigation.broadcast, sky->constellation,
                              channels[k].navigation.transmitTimeSeconds, position, velocity, &clock,
                              &drift));
         for (j = 0; j < 3; j++) {
-            double angle = W * range / C;
+            double angle = earth * range / C;
             rotated[0] = cos(angle) * position[0] + sin(angle) * position[1];
             rotated[1] = -sin(angle) * position[0] + cos(angle) * position[1];
             rotated[2] = position[2];
@@ -145,6 +209,17 @@ static void Fixture(unsigned mixed, int rollover)
     CHECK(fabs(solution.velocity[0] - 12) < 1e-5 && fabs(solution.velocity[1] + 3) < 1e-5 &&
           fabs(solution.velocity[2] - 1) < 1e-5);
     CHECK(fabs(solution.clockDrift - 0.7) < 1e-5);
+    if (count == 3) {
+        TNgTrackingSnapshot same = channels[0];
+        for (k = 0; k < 10; ++k) {
+            const unsigned system = channels[k].constellation;
+            channels[k] = same;
+            channels[k].constellation = system;
+            channels[k].prn = k + 1;
+        }
+        NgPvtCompute(channels, 7, 2400000, 2400000, &solution);
+        CHECK(!solution.available && solution.satellites == 10);
+    }
     for (k = 0; k < 10; k++)
         channels[k].epoch = 8;
     NgPvtCompute(channels, 7, 2400000, 2400000, &solution);
@@ -157,9 +232,10 @@ static void Fixture(unsigned mixed, int rollover)
 /** Check GPS-only, mixed biases, rollover and invalid-generation rejection. */
 int main(void)
 {
-    Fixture(0, 0);
-    Fixture(1, 0);
-    Fixture(1, 1);
-    puts("broadcast analytic derivatives, common epochs, mixed clocks and week rollover passed");
+    for (unsigned mask = 1; mask < 8; ++mask) {
+        Fixture(mask, 0);
+        Fixture(mask, 1);
+    }
+    puts("broadcast derivatives, all seven constellation sets and week rollover passed");
     return 0;
 }

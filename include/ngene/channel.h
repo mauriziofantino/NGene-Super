@@ -11,6 +11,24 @@ typedef enum {
     NG_CHANNEL_FAST_REACQUISITION
 } TNgChannelState;
 
+/** Supported satellite identity namespaces. Values match channel registrations. */
+typedef enum {
+    NG_CONSTELLATION_GPS = 1,
+    NG_CONSTELLATION_GALILEO = 2,
+    NG_CONSTELLATION_BEIDOU = 3
+} TNgConstellation;
+
+#define NG_CONSTELLATION_COUNT 3u
+#define NG_LEGACY_MAX_PRN 32u
+#define NG_SATELLITE_MAX_PRN 63u
+
+/** The first signal in each constellation is L1 C/A, E1-B or B1C respectively. */
+#define NG_PRIMARY_SIGNAL 1u
+
+/** Return the highest assigned PRN number for the supported signal, or zero. */
+unsigned NgConstellationPrnLimit(TNgConstellation constellation);
+int NgSatellitePrnValid(TNgConstellation constellation, unsigned prn);
+
 /** @brief Stable receiver-local satellite/signal channel identity. */
 typedef struct {
     /** Receiver-local identity of this channel instance. */

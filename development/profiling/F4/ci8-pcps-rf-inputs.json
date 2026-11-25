@@ -1,0 +1,70 @@
+{
+  "sources": [
+    {
+      "id": "evo",
+      "file": "../../../captures/ngene_capture_1793467780_407877a6335d6906_000000.cs8",
+      "sha256": "f559ce60f4dfeed9ce142dd61eb248a456a6d88dc7503a94ec3ff24cc1532b92",
+      "rate": 8183800,
+      "ifHz": 38400,
+      "firstSample": 700504800,
+      "offsets": [
+        0,
+        4091900,
+        8183800
+      ],
+      "prns": {
+        "gps": [
+          7
+        ],
+        "galileo": [
+          7
+        ]
+      }
+    },
+    {
+      "id": "classic",
+      "file": "../../../../NGene Classic/recordings/hackrf-l1-ci8.raw",
+      "sha256": "e8695e36b7c73fca9dcf67662be2b17f5946fe6a96b9a4326d310aaf320211d4",
+      "rate": 8183800,
+      "ifHz": 0,
+      "firstSample": 0,
+      "offsets": [
+        0,
+        81838000,
+        327352000
+      ],
+      "prns": {
+        "gps": [
+          5,
+          7
+        ],
+        "galileo": [
+          7,
+          26
+        ]
+      }
+    },
+    {
+      "id": "classic-diagnosi",
+      "file": "../../../../NGene Classic/recordings/diagnosi/hackrf-l1-ci8.raw",
+      "sha256": "90c65dd542de8eee1b411fe60df6ce24e12374b6c82261ff5feef213491168b1",
+      "rate": 8183800,
+      "ifHz": 0,
+      "firstSample": 0,
+      "offsets": [
+        0,
+        163676000
+      ],
+      "prns": {
+        "gps": [
+          5,
+          7
+        ],
+        "galileo": [
+          7,
+          26
+        ]
+      }
+    }
+  ]
+}

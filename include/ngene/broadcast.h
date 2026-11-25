@@ -36,6 +36,8 @@ typedef struct TNgOrbit {
     int sisa;   /**< Signal-In-Space Accuracy (for GPS: URA, Use Range Accuracy) */
     /* Galileo dedicated fields */
     int galileoDataValidity; /**< Validity status of the Galileo navigation data */
+    double axisRate;       /**< B1C rate of semi-major axis [m/s]. */
+    double meanMotionRate; /**< B1C rate of mean-motion correction [rad/s²]. */
 } TNgOrbit;
 
 typedef struct TNgBroadcastClock {
@@ -45,6 +47,8 @@ typedef struct TNgBroadcastClock {
     double bgd_E1E5a;   /**< Broadcast Group delay E1,E5a (Galileo) */
     double bgd_E1E5b;   /**< Broadcast Group delay E1,E5b (Galileo) */
     int iodc;           /**< Issue Of Data */
+    double beidouDataIsc; /**< B1C data-to-pilot signal correction [s]. */
+    double beidouB2aTgd; /**< B2a pilot group delay [s], stored from B-CNAV1. */
 } TNgBroadcastClock;
 
 /** Consistent issue-of-data cache, owned by one channel. */
@@ -58,7 +62,7 @@ typedef struct {
         int sf[5];
     } iono; /**< Galileo ionosphere telemetry. */
 
-    int satelliteId;                /**< Galileo SVID from word 4; zero before reception. */
+    int satelliteId;                /**< Broadcast SVID when available; zero before reception. */
     int wn, tow, wnValid, towValid; /**< Broadcast system time, unexpanded week. */
     int subframe1Received, subframe2Received, subframe3Received, subframe4Received,
         subframe5Received;                 /**< Parts received. */

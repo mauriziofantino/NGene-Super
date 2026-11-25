@@ -24,7 +24,25 @@ typedef struct {
     double gdop, hdop, vdop;                   /**< Unweighted geometry, separate code clocks. */
     unsigned skyCount;                         /**< Number of real solved lines of sight. */
     TNgPvtSatelliteView sky[64];               /**< Solution-epoch satellite sky geometry. */
+    unsigned beidou; /**< Admitted B1C measurements. */
+    double clockBeidou; /**< Independent B1C receiver code bias [m]. */
 } TNgPvtSnapshot;
+
+/** Raw common-epoch code and Doppler observables, before broadcast corrections. */
+typedef struct {
+    uint64_t epoch, sample; /**< Receiver continuity/time anchor. */
+    unsigned prn, constellation; /**< Satellite identity. */
+    double nativeTransmitTow; /**< Native code-time TOW [s]. */
+    double commonTransmitTow; /**< Nominal GPST-equivalent code-time TOW [s]. */
+    double pseudorange; /**< Code range from supplied receiver TOW, including clock biases [m]. */
+    double dopplerHz; /**< Measured carrier Doppler with IF removed [Hz]. */
+    double rangeRate; /**< Doppler-derived range rate, positive away [m/s]. */
+} TNgPvtObservation;
+
+/** Form an observation at sample using a nominal GPST receiver TOW.
+ * Reject mismatched epochs, stale/unhealthy data and unsupported constellations. */
+int NgPvtObserve(const TNgTrackingSnapshot *channel, uint64_t epoch, uint64_t sample,
+                 double sampleRate, double receiverTow, TNgPvtObservation *observation);
 
 /** Compute broadcast satellite ECEF, velocity, clock and drift at transmit time. */
 int NgPvtSatellite(const TNgBroadcast *broadcast, unsigned constellation, double transmitTime,

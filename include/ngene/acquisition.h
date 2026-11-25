@@ -8,8 +8,8 @@
 typedef struct {
     double falseAlarmProbability; /**< Per-cell Pfa, default 1e-9; shared noise policy. */
     int enabled;                  /**< Zero disables channel registration. */
-    unsigned firstPrn;            /**< First GPS C/A PRN, 1..32. */
-    unsigned lastPrn;             /**< Last PRN, firstPrn..32. */
+    unsigned firstPrn;            /**< First PRN of the selected constellation. */
+    unsigned lastPrn;             /**< Last PRN of the selected constellation, inclusive. */
     int squareCarrier;            /**< Squared local sin/cos instead of sinusoidal carrier. */
     int xorCorrelation;           /**< Exact SIMD code sign XOR instead of multiplication. */
     TNgSearchFftMode fftMode;      /**< Coarse PCPS FFT arithmetic; refinement remains native. */
@@ -27,7 +27,7 @@ typedef struct {
 /** One search outcome, referenced to the first sample of its capture. */
 typedef struct {
     double completedSeconds; /**< Monotonic completion time, scheduling only, never GNSS time. */
-    unsigned prn;            /**< GPS L1 C/A PRN. */
+    unsigned prn;            /**< PRN in the runner constellation. */
     int confirmed;           /**< Nonzero only after 3 successes out of 4 independent attempts. */
     double dopplerHz;        /**< Physical Doppler, excluding digital IF. */
     double codePhaseChips;   /**< Local replica phase at firstSample, modulo 1023. */
@@ -73,14 +73,14 @@ typedef struct {
     uint64_t searches;         /**< Completed satellite searches. */
     uint64_t skippedSamples;   /**< Samples not captured while search owns the buffer. */
     uint64_t gaps;             /**< Discontinuities that invalidated the capture generation. */
-    TNgAcquisitionResult results[32]; /**< Latest result per GPS PRN. */
+    TNgAcquisitionResult results[NG_LEGACY_MAX_PRN]; /**< Latest results for PRNs 1..32. */
     char message[256]; /**< Bounded algorithm error/status; no I/O on the sample path. */
 } TNgAcquisitionSnapshot;
 
 /** Strategy input. All memory is immutable and owned by the runner until search returns. */
 typedef struct {
     const TNgComplex *samples; /**< Native-rate ADC samples, never sign-quantized. */
-    size_t count;              /**< At least 56 ms of contiguous pairs. */
+    size_t count;              /**< Contiguous pairs for the configured capture duration. */
     TNgStreamInfo stream;      /**< Actual rate and digital IF, never inferred from device name. */
     TNgBlockMeta origin;       /**< First capture sample and continuity generation. */
     unsigned displayPrn;       /**< Frozen observer request; zero skips display reduction. */
@@ -106,8 +106,9 @@ void NgAcquisitionDefaults(TNgAcquisitionConfig *config);
 void NgAcquisitionObserve(TNgAcquisition *acquisition, unsigned prn);
 /** Receiver scheduling only: yield between stages when tracking consumes its budget. */
 void NgAcquisitionSetBudget(TNgAcquisition *acquisition, unsigned yieldMilliseconds);
-/** Merge strategy subscriptions into one pool before reception; NULL operands are accepted. */
-int NgAcquisitionLink(TNgAcquisition *gps, TNgAcquisition *galileo, TNgError *error);
+/** Merge idle groups before reception. Accepts NULL operands.
+ * The pool supports up to three subscriptions and keeps the first group's budget. */
+int NgAcquisitionLink(TNgAcquisition *a, TNgAcquisition *b, TNgError *error);
 /** Receiver-owned signal clock: credit the search pool with cpuBudget seconds of CPU per
  * second of processed signal (capped). Returns the budget's stage concurrency, or zero when
  * the budget is disabled and the caller keeps its own adaptive limits. */
@@ -132,9 +133,20 @@ int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStre
 int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                                     const TNgAcquisitionStrategy *strategy, void *context,
                                     TNgAcquisition **out, TNgChannel *channel, TNgError *error);
+/** Register a caller-owned strategy for the primary signal of a supported constellation.
+ * Capture duration is in milliseconds at the native input rate. The runner supplies
+ * ownership, cancellation and scheduling; the caller supplies signal DSP. */
+int NgAcquisitionCreateForConstellation(const TNgAcquisitionConfig *config,
+                                         const TNgStreamInfo *stream,
+                                         TNgConstellation constellation, unsigned durationMs,
+                                         const TNgAcquisitionStrategy *strategy, void *context,
+                                         TNgAcquisition **out, TNgChannel *channel, TNgError *error);
+/** Copy all PRN results for the runner as one snapshot. Slot prn-1 is zero when unavailable. */
+void NgAcquisitionReadResults(TNgAcquisition *acquisition,
+                              TNgAcquisitionResult results[NG_SATELLITE_MAX_PRN]);
 /** Copy worker telemetry; safe concurrently with sample callbacks and search. */
 void NgAcquisitionRead(TNgAcquisition *acquisition, TNgAcquisitionSnapshot *snapshot);
-/** Copy the last completed map for PRN 1..32; zero output if unavailable. */
+/** Copy the last completed map for this PRN; zero output if unavailable. */
 void NgAcquisitionReadSearchSpace(TNgAcquisition *acquisition, unsigned prn,
                                   TNgAcquisitionSearchSpace *space);
 /** Cancel/join worker and free owned memory after the engine has stopped using channel.
@@ -144,4 +156,6 @@ void NgAcquisitionDestroy(TNgAcquisition *acquisition);
  * mask bit PRN-1 excludes a satellite already assigned to tracking. Pausing admits
  * no new capture/search; an in-flight single-satellite decision may finish unchanged. */
 void NgAcquisitionSetAdmission(TNgAcquisition *acquisition, uint32_t mask, int paused);
+/** Full-width exclusion mask for a signal with PRNs above 32. */
+void NgAcquisitionSetAdmissionMask(TNgAcquisition *acquisition, uint64_t mask, int paused);
 #endif

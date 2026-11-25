@@ -60,6 +60,57 @@ The direct FFT bench measured lower median time from 128 to 8192 points.
 PSD and full PCPS results depended on size and worker count.
 [Q14 verification](../../development/profiling/F4/README.md#incremento-avx2-q14).
 
+The F4 FFT package retains wide, compact fixed-shift and compact adaptive
+kernels, including the x64 AVX2 candidates. Compact adaptive AVX2 matched
+the scalar output and reduced FFT stage time by about 69% on Windows.
+The INT32 path completed more work in scheduled replay. Compare kernels
+under the same arithmetic contract and measure packing and scale restoration
+before attributing processing cost to the sample width.
+[F4 kernel package and measurements](../../development/profiling/F4/README.md#kernel-int8-adattivo-avx2-e-pacco-librerie).
+
+The experimental F4 scheduler can borrow an existing worker and a free
+workspace for a second Doppler row. Windows replay matched the published
+decisions for common jobs and recovered about 14 MiB of working set versus
+dedicated helper workspaces. Throughput and tracking latency varied under
+measured foreground load.
+[F4 workspace reuse](../../development/profiling/F4/README.md#riuso-del-workspace-e-del-worker-nello-scheduler).
+
+F4 qualification is closed on Windows with the direct precise INT32 path
+as the operating profile. The final replay matched published decisions on
+common jobs, including with identical tracking work. Doppler-row reuse
+and the compact kernels remain available for experiments. Linux and macOS
+validation is recorded as pending native work.
+[F4 qualification](../../development/profiling/F4/README.md#chiusura-della-qualifica-f4-su-windows) ·
+[Native test matrix](../../development/profiling/F4/qualification-native.md).
+
+BeiDou B1C B0 extends the acquisition runner and tracking cache to PRN 63
+and a pool with three subscriptions. B1 adds independent data and pilot
+primary replicas, verified offline for all 63 PRNs per component. B2 compares
+a 16384-cell SIMD grid and native block correlation on synthetic pilot data.
+Native Doppler and code refinement recover all injected delays in the fixture.
+The reduced grid shows delay-dependent peak loss, so threshold and RF/replay
+qualification remain open. Secondary-code support for Galileo and BeiDou is
+deferred to a future plan.
+[B2 acquisition lab](../../development/profiling/B2/README.md).
+B3 verifies pilot BOC(1,1) phase continuity and Early/Prompt/Late on arbitrary
+offline window partitions and exercises closed-loop convergence with Doppler
+ramps, multiple signal levels and a prompt-driven FLL to PLL transition.
+The lab also exercises fade recovery, gap reset with an injected new seed,
+and half-chip seed rejection. Offline C/N0 moments agree within 1.124 dB
+on the AWGN fixture. Strong coherent echoes can bypass the guard veto.
+The closed-loop two-ray test reproduces false PLL locks on strong echoes.
+Adding two guard taps does not improve those cases. RF remains pending.
+B4 adds a standalone B-CNAV1 decoder and a synthetic SIMD I/Q data bridge.
+Tracker integration and replay remain pending.
+[B-CNAV1 decoder](BEIDOU_BCNV1.md).
+B5–B7 adds matched B-CNAV1 broadcast caches, BDT code-time observation
+building, and a three-system QR PVT with independent code biases. All seven
+constellation combinations are exercised on synthetic observations. Producer-side
+B1C tracking integration and RF qualification remain pending.
+[BeiDou broadcast and PVT](BEIDOU_PVT.md).
+[B3 tracking lab](../../development/profiling/B3/README.md).
+[BeiDou incremental plan](PIANO_INCREMENTALE_EVO.md#6-beidou-b1c--incrementi-approvabili).
+
 The F6 mixed GPS/Galileo replay matrix measures the existing tracking pool
 and acquisition permits at fixed precision. More acquisition permits reduced
 observed contention and advanced Galileo confirmation on the test capture at

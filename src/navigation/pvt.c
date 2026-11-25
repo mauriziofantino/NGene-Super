@@ -3,16 +3,38 @@
  * Small C Householder QR replaces the Eigen boundary, retaining double arithmetic.
  */
 #include "ngene/pvt.h"
+#include "ngene/beidou_observation.h"
 #include <math.h>
 #include <string.h>
 #define NG_C 299792458.0
 #define NG_OMEGA 7.2921151467e-5
+#define NG_OMEGA_BDCS 7.2921150e-5
+#define NG_PVT_COLUMNS (3u + NG_CONSTELLATION_COUNT)
 #define NG_PI 3.14159265358979323846
 
 /** Signed week difference, including a reference across Sunday rollover. */
 static double Week(double time)
 {
     return time - 604800.0 * floor((time + 302400.0) / 604800.0);
+}
+
+/** Solve Kepler's equation and return the eccentric anomaly. */
+static double EccentricAnomaly(double anomaly, double eccentricity)
+{
+    double e = anomaly;
+    for (unsigned k = 0; k < 10; ++k) {
+        const double previous = e;
+        e = anomaly + eccentricity * sin(e);
+        if (fabs(e - previous) < 1e-12)
+            break;
+    }
+    return e;
+}
+
+/** Earth rotation in the native terrestrial frame of each broadcast. */
+static double EarthRotation(unsigned system)
+{
+    return system == NG_CONSTELLATION_BEIDOU ? NG_OMEGA_BDCS : NG_OMEGA;
 }
 
 /** Broadcast Kepler/harmonic equations, analytic velocity, relativistic clock correction. */
@@ -23,9 +45,11 @@ int NgPvtSatellite(const TNgBroadcast *b, unsigned system, double tx, double x[3
     const TNgBroadcastClock *c = &b->clk;
     double dt, a, tk, n, m, e, dtr, nu, phi, u, r, inc, omega;
     double ed, nud, ud, rd, id, xp, yp, xpd, ypd, od;
-    double relativity = system == 1 ? -4.442807633e-10 : -4.442807309e-10;
-    unsigned k;
-    if (!b->ephemeridesReceived || (system != 1 && system != 2) || !isfinite(tx) ||
+    const int beidou = system == NG_CONSTELLATION_BEIDOU;
+    const double earth = EarthRotation(system);
+    const double relativity = system == NG_CONSTELLATION_GPS ? -4.442807633e-10 : -4.442807309e-10;
+    if (!b->ephemeridesReceived || !NgConstellationPrnLimit((TNgConstellation)system) ||
+        !isfinite(tx) ||
         !isfinite(o->sqrtA) || o->sqrtA < 4000 || o->sqrtA > 7000 || !isfinite(o->eccentricity) ||
         o->eccentricity < 0 || o->eccentricity >= 1 || fabs(Week(tx - o->toe)) > 14400)
         return 0;
@@ -33,25 +57,40 @@ int NgPvtSatellite(const TNgBroadcast *b, unsigned system, double tx, double x[3
     *clock = (c->af[2] * dt + c->af[1]) * dt + c->af[0] - c->tGroupDelay;
     a = o->sqrtA * o->sqrtA;
     tk = Week(tx - *clock - o->toe);
-    n = sqrt((system == 1 ? 3.986005e14 : 3.986004418e14) / (a * a * a)) + o->deltaN;
-    m = fmod(o->meanAnomaly0 + n * tk + 2 * NG_PI, 2 * NG_PI);
-    e = m;
-    for (k = 0; k < 10; ++k) {
-        double previous = e;
-        e = m + o->eccentricity * sin(e);
-        if (fabs(e - previous) < 1e-12)
-            break;
-    }
-    if (fabs(e - m - o->eccentricity * sin(e)) > 1e-10)
+    n = sqrt((system == NG_CONSTELLATION_GPS ? 3.986005e14 : 3.986004418e14) /
+             (a * a * a)) + o->deltaN;
+    const double a0 = a, n0 = n;
+    const double axisRate = beidou ? o->axisRate : 0;
+    const double motionRate = beidou ? o->meanMotionRate : 0;
+    if (beidou && (fabs(Week(tx - c->toc)) > NG_BCNV1_MAX_BROADCAST_AGE ||
+                   !isfinite(axisRate) || !isfinite(motionRate)))
         return 0;
-    dtr = relativity * o->eccentricity * o->sqrtA * sin(e);
+    unsigned iteration = 0;
+    do {
+        if (beidou) {
+            dt = Week(tx - *clock - c->toc);
+            tk = Week(tx - *clock - o->toe);
+            a = a0 + axisRate * tk;
+            if (!(a > 0))
+                return 0;
+        }
+        m = fmod(o->meanAnomaly0 + (n0 + 0.5 * motionRate * tk) * tk + 2 * NG_PI,
+                 2 * NG_PI);
+        e = EccentricAnomaly(m, o->eccentricity);
+        if (fabs(e - m - o->eccentricity * sin(e)) > 1e-10)
+            return 0;
+        dtr = relativity * o->eccentricity * (beidou ? sqrt(a) : o->sqrtA) * sin(e);
+        if (beidou)
+            *clock = (c->af[2] * dt + c->af[1]) * dt + c->af[0] - c->tGroupDelay + dtr;
+    } while (++iteration < (beidou ? 3u : 1u));
+    n = n0 + motionRate * tk;
     nu = atan2(sqrt(1 - o->eccentricity * o->eccentricity) * sin(e), cos(e) - o->eccentricity);
     phi = nu + o->omega;
     u = phi + o->capitalCuc * cos(2 * phi) + o->capitalCus * sin(2 * phi);
     r = a * (1 - o->eccentricity * cos(e)) + o->capitalCrc * cos(2 * phi) +
         o->capitalCrs * sin(2 * phi);
     inc = o->i0 + o->iDot * tk + o->capitalCic * cos(2 * phi) + o->capitalCis * sin(2 * phi);
-    omega = o->capitalOmega0 + (o->capitalOmegaDot - NG_OMEGA) * tk - NG_OMEGA * o->toe;
+    omega = o->capitalOmega0 + (o->capitalOmegaDot - earth) * tk - earth * o->toe;
     xp = r * cos(u);
     yp = r * sin(u);
     x[0] = xp * cos(omega) - yp * cos(inc) * sin(omega);
@@ -60,29 +99,34 @@ int NgPvtSatellite(const TNgBroadcast *b, unsigned system, double tx, double x[3
     ed = n / (1 - o->eccentricity * cos(e));
     nud = sqrt(1 - o->eccentricity * o->eccentricity) * ed / (1 - o->eccentricity * cos(e));
     ud = nud * (1 + 2 * (o->capitalCus * cos(2 * phi) - o->capitalCuc * sin(2 * phi)));
-    rd = a * o->eccentricity * sin(e) * ed +
+    rd = axisRate * (1 - o->eccentricity * cos(e)) + a * o->eccentricity * sin(e) * ed +
          2 * (o->capitalCrs * cos(2 * phi) - o->capitalCrc * sin(2 * phi)) * nud;
     id = o->iDot + 2 * (o->capitalCis * cos(2 * phi) - o->capitalCic * sin(2 * phi)) * nud;
     xpd = rd * cos(u) - yp * ud;
     ypd = rd * sin(u) + xp * ud;
-    od = o->capitalOmegaDot - NG_OMEGA;
+    od = o->capitalOmegaDot - earth;
     v[0] = (xpd - yp * cos(inc) * od) * cos(omega) -
            (xp * od + ypd * cos(inc) - yp * sin(inc) * id) * sin(omega);
     v[1] = (xpd - yp * cos(inc) * od) * sin(omega) +
            (xp * od + ypd * cos(inc) - yp * sin(inc) * id) * cos(omega);
     v[2] = ypd * sin(inc) + yp * cos(inc) * id;
-    *clock += dtr;
-    *drift = c->af[1] + 2 * c->af[2] * dt + relativity * o->eccentricity * o->sqrtA * cos(e) * ed;
+    if (!beidou)
+        *clock += dtr;
+    const double sqrtAxis = beidou ? sqrt(a) : o->sqrtA;
+    *drift = c->af[1] + 2 * c->af[2] * dt + relativity * o->eccentricity *
+             (sqrtAxis * cos(e) * ed + axisRate / (2 * sqrtAxis) * sin(e));
     return isfinite(x[0]) && isfinite(x[1]) && isfinite(x[2]) && isfinite(*clock) &&
            isfinite(v[0]) && isfinite(v[1]) && isfinite(v[2]) && isfinite(*drift);
 }
 
 /** Column-pivoted Householder QR; no normal-equation squaring of the condition number. */
-static int Solve(double a[64][5], double b[64], unsigned rows, unsigned cols, double x[5],
-                 double covariance[5][5])
+static int Solve(double a[64][NG_PVT_COLUMNS], double b[64], unsigned rows, unsigned cols,
+                 double x[NG_PVT_COLUMNS], double covariance[NG_PVT_COLUMNS][NG_PVT_COLUMNS])
 {
-    unsigned permutation[5] = {0, 1, 2, 3, 4}, k, i, j;
-    double y[5] = {0};
+    unsigned permutation[NG_PVT_COLUMNS], k, i, j;
+    double y[NG_PVT_COLUMNS] = {0};
+    for (i = 0; i < cols; ++i)
+        permutation[i] = i;
     if (rows < cols)
         return 0;
     for (k = 0; k < cols; ++k) {
@@ -139,8 +183,8 @@ static int Solve(double a[64][5], double b[64], unsigned rows, unsigned cols, do
     for (i = 0; i < cols; ++i)
         x[permutation[i]] = y[i];
     if (covariance) {
-        double inverse[5][5] = {{0}};
-        memset(covariance, 0, 25 * sizeof(double));
+        double inverse[NG_PVT_COLUMNS][NG_PVT_COLUMNS] = {{0}};
+        memset(covariance, 0, sizeof(inverse));
         for (j = 0; j < cols; ++j)
             for (i = cols; i-- > 0;) {
                 double value = i == j ? 1.0 : 0.0;
@@ -208,14 +252,67 @@ static double GpsIonosphere(const TNgBroadcast *b, double latitude, double longi
     return NG_C * (1 + 16 * pow(0.53 - el, 3)) * delay;
 }
 
-/** Align observations to one sample, then solve separate GPS/Galileo clock biases. */
+/** Align native code time to one receiver sample and derive a nominal GPST label. */
+static int Align(const TNgTrackingSnapshot *t, uint64_t epoch, uint64_t sample, double fs,
+                 double *native, double *common, double *rangeRate)
+{
+    const TNgNavigationSnapshot *nav = &t->navigation;
+    const TNgBroadcast *b = &nav->broadcast;
+    const unsigned system = t->constellation;
+    if (!t->active || !t->pll || t->epoch != epoch || !nav->towValid ||
+        !b->ephemeridesReceived || b->eph.health || b->eph.galileoDataValidity ||
+        !NgSatellitePrnValid((TNgConstellation)system, t->prn) ||
+        (system != NG_CONSTELLATION_GPS && b->satelliteId &&
+         (unsigned)b->satelliteId != t->prn) ||
+        sample < t->endSample || (double)(sample - t->endSample) / fs > 0.01 ||
+        !isfinite(nav->transmitTimeSeconds) || !(t->codeRateHz > 0) ||
+        !isfinite(t->codeRateHz) || !isfinite(t->dopplerHz))
+        return 0;
+    *native = nav->transmitTimeSeconds +
+              (double)(sample - t->endSample) / fs * t->codeRateHz / 1023000.0;
+    *common = *native + (system == NG_CONSTELLATION_BEIDOU ? NG_BDT_TO_GPST_SECONDS : 0);
+    *rangeRate = -t->dopplerHz * NG_C / 1575420000.0;
+    return isfinite(*native) && isfinite(*rangeRate);
+}
+
+int NgPvtObserve(const TNgTrackingSnapshot *channel, uint64_t epoch, uint64_t sample,
+                 double sampleRate, double receiverTow, TNgPvtObservation *observation)
+{
+    TNgPvtObservation next = {0};
+    if (!channel || !observation || !(sampleRate > 0) || !isfinite(sampleRate) ||
+        !isfinite(receiverTow))
+        return NG_ERROR;
+    if (!Align(channel, epoch, sample, sampleRate, &next.nativeTransmitTow,
+               &next.commonTransmitTow, &next.rangeRate))
+        return NG_END;
+    double position[3], velocity[3], clock, drift;
+    if (!NgPvtSatellite(&channel->navigation.broadcast, channel->constellation,
+                        next.nativeTransmitTow, position, velocity, &clock, &drift))
+        return NG_END;
+    next.pseudorange = NG_C * Week(receiverTow - next.commonTransmitTow);
+    next.commonTransmitTow -= NG_BDT_WEEK_SECONDS *
+                              floor(next.commonTransmitTow / NG_BDT_WEEK_SECONDS);
+    next.nativeTransmitTow -= NG_BDT_WEEK_SECONDS *
+                              floor(next.nativeTransmitTow / NG_BDT_WEEK_SECONDS);
+    next.dopplerHz = channel->dopplerHz;
+    next.prn = channel->prn;
+    next.constellation = channel->constellation;
+    next.epoch = epoch;
+    next.sample = sample;
+    *observation = next;
+    return NG_OK;
+}
+
+/** Align observations to one sample, then solve one code-clock bias per active system. */
 void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
                   double fs, TNgPvtSnapshot *s)
 {
-    double satellite[64][3], velocity[64][3], clocks[64], drifts[64], tx[64], doppler[64], code[64];
+    double satellite[64][3], velocity[64][3], clocks[64], drifts[64], tx[64], rates[64], code[64];
     const TNgBroadcast *broadcasts[64];
-    unsigned systems[64], prns[64], n = 0, k, j, iteration, cols, gps = 0, galileo = 0;
-    double nominal = 0, pos[5] = {0}, matrix[64][5], rhs[64], correction[5];
+    unsigned systems[64], prns[64], n = 0, k, j, iteration, cols = 3;
+    unsigned counts[NG_CONSTELLATION_COUNT] = {0}, clockColumn[NG_CONSTELLATION_COUNT] = {0};
+    double nominal = 0, pos[NG_PVT_COLUMNS] = {0}, matrix[64][NG_PVT_COLUMNS], rhs[64];
+    double correction[NG_PVT_COLUMNS];
     double lat = 0, lon = 0, height = 0, residual = 0;
     memset(s, 0, sizeof(*s));
     s->epoch = epoch;
@@ -224,40 +321,31 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
         return;
     for (k = 0; k < 64; ++k) {
         const TNgTrackingSnapshot *t = &channels[k];
-        const TNgNavigationSnapshot *nav = &t->navigation;
-        const TNgBroadcast *b = &nav->broadcast;
-        double time;
-        if (!t->active || !t->pll || t->epoch != epoch || !nav->towValid ||
-            !b->ephemeridesReceived || b->eph.health || b->eph.galileoDataValidity ||
-            (t->constellation == 2 && b->satelliteId && (unsigned)b->satelliteId != t->prn) ||
-            sample < t->endSample || (double)(sample - t->endSample) / fs > 0.01 ||
-            !isfinite(nav->transmitTimeSeconds) || !isfinite(t->codeRateHz) ||
-            !isfinite(t->dopplerHz) || (t->constellation != 1 && t->constellation != 2))
+        const TNgBroadcast *b = &t->navigation.broadcast;
+        double native, time;
+        if (!Align(t, epoch, sample, fs, &native, &time, &rates[n]))
             continue;
-        time = nav->transmitTimeSeconds +
-               (double)(sample - t->endSample) / fs * t->codeRateHz / 1023000.0;
-        if (n)
-            time = tx[0] + Week(time - tx[0]);
-        if (!NgPvtSatellite(b, t->constellation, time, satellite[n], velocity[n], &clocks[n],
+        if (!NgPvtSatellite(b, t->constellation, native, satellite[n], velocity[n], &clocks[n],
                             &drifts[n]))
             continue;
+        if (n)
+            time = tx[0] + Week(time - tx[0]);
         tx[n] = time;
-        doppler[n] = t->dopplerHz;
         systems[n] = t->constellation;
         broadcasts[n] = b;
         prns[n] = t->prn;
         if (!n || time > nominal)
             nominal = time;
-        if (t->constellation == 1)
-            gps++;
-        else
-            galileo++;
+        counts[t->constellation - 1]++;
         n++;
     }
     s->satellites = n;
-    s->gps = gps;
-    s->galileo = galileo;
-    cols = gps && galileo ? 5u : 4u;
+    s->gps = counts[NG_CONSTELLATION_GPS - 1];
+    s->galileo = counts[NG_CONSTELLATION_GALILEO - 1];
+    s->beidou = counts[NG_CONSTELLATION_BEIDOU - 1];
+    for (k = 0; k < NG_CONSTELLATION_COUNT; ++k)
+        if (counts[k])
+            clockColumn[k] = cols++;
     if (n < cols)
         return;
     nominal += 0.07;
@@ -271,11 +359,11 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
         memset(matrix, 0, sizeof(matrix));
         for (k = 0; k < n; ++k) {
             double rotated[3], range, angle, elevation = 0, tropo = 0, iono = 0;
-            unsigned clockIndex = cols == 5 && systems[k] == 2 ? 4u : 3u;
+            unsigned clockIndex = clockColumn[systems[k] - 1];
             range = hypot(hypot(satellite[k][0] - pos[0], satellite[k][1] - pos[1]),
                           satellite[k][2] - pos[2]);
             for (j = 0; j < 2; ++j) {
-                angle = NG_OMEGA * range / NG_C;
+                angle = EarthRotation(systems[k]) * range / NG_C;
                 rotated[0] = cos(angle) * satellite[k][0] + sin(angle) * satellite[k][1];
                 rotated[1] = -sin(angle) * satellite[k][0] + cos(angle) * satellite[k][1];
                 rotated[2] = satellite[k][2];
@@ -307,8 +395,11 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
             return;
         for (j = 0; j < cols; ++j)
             pos[j] += correction[j];
+        double maximumClockStep = 0;
+        for (j = 3; j < cols; ++j)
+            maximumClockStep = fmax(maximumClockStep, fabs(correction[j]));
         if (hypot(hypot(correction[0], correction[1]), correction[2]) < 1e-4 &&
-            fabs(correction[3]) < 1e-4 && (cols != 5 || fabs(correction[4]) < 1e-4))
+            maximumClockStep < 1e-4)
             break;
     }
     if (iteration == 20)
@@ -317,8 +408,12 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
     if (!isfinite(s->height) || fabs(s->height) > 1e6)
         return;
     memcpy(s->ecef, pos, sizeof(s->ecef));
-    s->clockGps = gps ? pos[3] : 0;
-    s->clockGalileo = galileo ? pos[cols == 5 ? 4 : 3] : 0;
+    if (s->gps)
+        s->clockGps = pos[clockColumn[NG_CONSTELLATION_GPS - 1]];
+    if (s->galileo)
+        s->clockGalileo = pos[clockColumn[NG_CONSTELLATION_GALILEO - 1]];
+    if (s->beidou)
+        s->clockBeidou = pos[clockColumn[NG_CONSTELLATION_BEIDOU - 1]];
     s->residualRms = sqrt(residual / n);
     s->available = 1;
     memset(matrix, 0, sizeof(matrix));
@@ -327,23 +422,23 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
         double range = hypot(hypot(satellite[k][0] - pos[0], satellite[k][1] - pos[1]),
                              satellite[k][2] - pos[2]);
         for (j = 0; j < 2; ++j) {
-            angle = NG_OMEGA * range / NG_C;
+            angle = EarthRotation(systems[k]) * range / NG_C;
             rotated[0] = cos(angle) * satellite[k][0] + sin(angle) * satellite[k][1];
             rotated[1] = -sin(angle) * satellite[k][0] + cos(angle) * satellite[k][1];
             rotated[2] = satellite[k][2];
             range = hypot(hypot(rotated[0] - pos[0], rotated[1] - pos[1]), rotated[2] - pos[2]);
         }
-        angle = NG_OMEGA * range / NG_C;
+        angle = EarthRotation(systems[k]) * range / NG_C;
         rotatedVelocity[0] = cos(angle) * velocity[k][0] + sin(angle) * velocity[k][1];
         rotatedVelocity[1] = -sin(angle) * velocity[k][0] + cos(angle) * velocity[k][1];
         rotatedVelocity[2] = velocity[k][2];
-        rhs[k] = -doppler[k] * NG_C / 1575420000.0 + NG_C * drifts[k];
+        rhs[k] = rates[k] + NG_C * drifts[k];
         for (j = 0; j < 3; ++j) {
             double unit = (rotated[j] - pos[j]) / range;
             matrix[k][j] = -unit;
             rhs[k] -= unit * rotatedVelocity[j];
         }
-        matrix[k][cols == 5 && systems[k] == 2 ? 4 : 3] = 1;
+        matrix[k][clockColumn[systems[k] - 1]] = 1;
         {
             TNgPvtSatelliteView *view = &s->sky[k];
             double east = matrix[k][0] * sin(s->longitude) - matrix[k][1] * cos(s->longitude);
@@ -363,7 +458,8 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
     }
     s->skyCount = n;
     {
-        double geometry[64][5], zero[64] = {0}, covariance[5][5], unused[5];
+        double geometry[64][NG_PVT_COLUMNS], zero[64] = {0};
+        double covariance[NG_PVT_COLUMNS][NG_PVT_COLUMNS], unused[NG_PVT_COLUMNS];
         double enu[3][3] = {{-sin(s->longitude), cos(s->longitude), 0},
                             {-sin(s->latitude) * cos(s->longitude),
                              -sin(s->latitude) * sin(s->longitude), cos(s->latitude)},
@@ -385,10 +481,8 @@ void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64
         }
     }
     /* Doppler uses one common clock drift, independent of the code-bias columns. */
-    for (k = 0; k < n; ++k) {
+    for (k = 0; k < n; ++k)
         matrix[k][3] = 1;
-        matrix[k][4] = 0;
-    }
     if (Solve(matrix, rhs, n, 4, correction, NULL)) {
         memcpy(s->velocity, correction, sizeof(s->velocity));
         s->clockDrift = correction[3];

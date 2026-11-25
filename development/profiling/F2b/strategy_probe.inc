@@ -22,6 +22,12 @@ static const TNgAcquisitionSearchSpace *Space(void *workspace)
     return &search->space;
 }
 
+static int CoarseRow(void *workspace, unsigned prn, double doppler, int square,
+                     TNgSearchFftMode mode)
+{
+    return Coarse(workspace, prn, doppler, square, mode);
+}
+
 const TLabStrategy LAB_TABLE = {
-    Create, LAB_FREE, PrepareDirect, NoiseMap, &LAB_STRATEGY, Power, Space, LAB_ROWS
+    Create, LAB_FREE, PrepareDirect, NoiseMap, &LAB_STRATEGY, Power, Space, LAB_ROWS, CoarseRow
 };

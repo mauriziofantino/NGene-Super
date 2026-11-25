@@ -22,8 +22,8 @@ typedef struct {
     unsigned reservation[64];             /**< 0 shared, 1 GPS, 2 Galileo. */
     TNgChannel captures[2];               /**< Borrowed original acquisition registrations. */
     TNgAcquisition *acquisition[2];       /**< Borrowed workers. */
-    TNgAcquisitionResult accepted[2][32]; /**< Consumed seeds. */
-    TNgBroadcast broadcast[2][32]; /**< Classic satellite cache survives slot reacquisition. */
+    TNgAcquisitionResult accepted[NG_CONSTELLATION_COUNT][NG_SATELLITE_MAX_PRN]; /**< Consumed seeds. */
+    TNgBroadcast broadcast[NG_CONSTELLATION_COUNT][NG_SATELLITE_MAX_PRN]; /**< Classic satellite cache survives slot reacquisition. */
     TNgChannelDispatch *dispatch;  /**< One fixed pool for all slots. */
     uint64_t epoch, firstSample, expected; /**< Common-window identity. */
     size_t count;                          /**< Last window sample count. */
@@ -74,8 +74,8 @@ static void Refresh(TNgChannelPool *pool)
     unsigned k;
     for (k = 0; k < pool->config.channelCount; ++k) {
         NgTrackingRead(pool->tracking[k], &pool->slots[k]);
-        if (pool->slots[k].prn && pool->slots[k].constellation >= 1 &&
-            pool->slots[k].constellation <= 2) {
+        if (NgSatellitePrnValid((TNgConstellation)pool->slots[k].constellation,
+                                pool->slots[k].prn)) {
             const TNgBroadcast *b = &pool->slots[k].navigation.broadcast;
             if (b->subframe1Received || b->subframe2Received || b->subframe3Received)
                 pool->broadcast[pool->slots[k].constellation - 1][pool->slots[k].prn - 1] = *b;

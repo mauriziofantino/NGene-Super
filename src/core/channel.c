@@ -1,6 +1,24 @@
 /** @file channel.c @brief Shared channel transition contract, independent of engine/platform. */
 #include "ngene/channel.h"
 
+unsigned NgConstellationPrnLimit(TNgConstellation constellation)
+{
+    switch (constellation) {
+    case NG_CONSTELLATION_GPS:
+    case NG_CONSTELLATION_GALILEO:
+        return NG_LEGACY_MAX_PRN;
+    case NG_CONSTELLATION_BEIDOU:
+        return NG_SATELLITE_MAX_PRN;
+    default:
+        return 0;
+    }
+}
+
+int NgSatellitePrnValid(TNgConstellation constellation, unsigned prn)
+{
+    return prn >= 1 && prn <= NgConstellationPrnLimit(constellation);
+}
+
 /**
  * @brief Check a proposed receiver channel state transition.
  *

@@ -12,6 +12,7 @@ typedef struct {
     const double *(*power)(void *, size_t *);
     const TNgAcquisitionSearchSpace *(*space)(void *);
     unsigned rows;
+    int (*row)(void *, unsigned, double, int, TNgSearchFftMode);
 } TLabStrategy;
 
 extern const TLabStrategy labGps, labGalileo;

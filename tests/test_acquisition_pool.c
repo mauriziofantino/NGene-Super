@@ -170,6 +170,173 @@ static TNgAcquisitionSnapshot Budgeted(void)
     return snapshot;
 }
 
+typedef struct {
+    TNgConstellation system;
+    unsigned *order;
+    unsigned *count;
+    TNgAtomicInt block, entered, cancelled;
+} MockSubscription;
+
+static int MockSearch(void *context, const TNgAcquisitionCapture *capture, unsigned prn,
+                      const TNgAcquisitionConfig *config, TNgAcquisitionCancel cancel,
+                      void *cancelContext, TNgAcquisitionResult *result, TNgError *error)
+{
+    MockSubscription *mock = context;
+    (void)config;
+    (void)error;
+    CHECK(capture->count == 2048);
+    if (NgAtomicGet(&mock->block)) {
+        NgAtomicSet(&mock->entered, 1);
+        while (!cancel(cancelContext))
+            NgSleepMs(1);
+        NgAtomicSet(&mock->cancelled, 1);
+        return NG_ERROR;
+    }
+    if (mock->order)
+        mock->order[(*mock->count)++] = 100u * (unsigned)mock->system + prn;
+    if (prn == 63)
+        CHECK(capture->displayPrn == 63);
+    result->prn = prn;
+    result->epoch = capture->origin.epoch;
+    result->firstSample = capture->origin.firstSample;
+    result->dopplerHz = (double)mock->system;
+    result->confirmed = 1;
+    return NG_OK;
+}
+
+static const TNgAcquisitionStrategy mockStrategy = {MockSearch};
+
+static void FeedMock(TNgChannel *channel, uint64_t firstSample)
+{
+    TNgIq8 samples[2048] = {{0}};
+    TNgIqView view = {0};
+    TNgChannelState next;
+    TNgError error = {{0}};
+    view.samples = samples;
+    view.format = NG_FORMAT_CI8;
+    view.meta.count = 2048;
+    view.meta.epoch = 1;
+    view.meta.firstSample = firstSample;
+    CHECK(channel->ops->process(channel->context, &channel->id, channel->state, &view, &next,
+                                &error) == NG_OK);
+}
+
+static void WaitMock(TNgAcquisition *a, uint64_t searches)
+{
+    TNgAcquisitionSnapshot snapshot;
+    for (unsigned i = 0; i < 5000; ++i) {
+        NgAcquisitionRead(a, &snapshot);
+        if (snapshot.searches == searches && !snapshot.poolActive)
+            return;
+        NgSleepMs(1);
+    }
+    CHECK(0 && "mock acquisition timed out");
+}
+
+static void ThreeConstellations(void)
+{
+    TNgAcquisitionConfig config;
+    TNgStreamInfo stream = {0};
+    TNgError error = {{0}};
+    TNgAcquisition *a[4] = {0};
+    TNgChannel channels[4];
+    TNgAcquisitionSnapshot snapshot;
+    TNgAcquisitionResult results[NG_SATELLITE_MAX_PRN];
+    unsigned order[16], count = 0;
+    const unsigned expected[] = {131, 231, 331, 132, 232, 332, 333};
+    MockSubscription mocks[4] = {{0}};
+
+    stream.sampleRateHz = 2048000;
+    NgAcquisitionDefaults(&config);
+    config.firstPrn = 31;
+    for (unsigned i = 0; i < 4; ++i) {
+        TNgConstellation system = i < 3 ? (TNgConstellation)(i + 1) : NG_CONSTELLATION_GPS;
+        mocks[i].system = system;
+        mocks[i].order = order;
+        mocks[i].count = &count;
+        config.lastPrn = i == 2 ? 33 : 32;
+        CHECK(NgAcquisitionCreateForConstellation(&config, &stream, system, 1, &mockStrategy,
+                                                  &mocks[i], &a[i], &channels[i], &error) == NG_OK);
+        CHECK(channels[i].id.constellation == (uint32_t)system);
+        CHECK(channels[i].id.signal == NG_PRIMARY_SIGNAL);
+    }
+    CHECK(NgAcquisitionLink(a[0], a[1], &error) == NG_OK);
+    CHECK(NgAcquisitionLink(a[1], a[2], &error) == NG_OK);
+    CHECK(NgAcquisitionLink(a[2], a[3], &error) == NG_ERROR);
+    NgAcquisitionDestroy(a[3]);
+    NgAcquisitionRead(a[2], &snapshot);
+    CHECK(snapshot.parallelCapacity == 3);
+
+    NgAcquisitionSetParallelism(a[0], 0, 1, 0);
+    for (unsigned i = 0; i < 3; ++i)
+        FeedMock(&channels[i], 0);
+    NgAcquisitionSetParallelism(a[0], 1, 1, 1);
+    WaitMock(a[2], 3);
+    CHECK(count == sizeof(expected) / sizeof(*expected));
+    for (unsigned i = 0; i < count; ++i)
+        CHECK(order[i] == expected[i]);
+    for (unsigned i = 0; i < 3; ++i) {
+        NgAcquisitionReadResults(a[i], results);
+        CHECK(results[31].prn == 32 && results[31].dopplerHz == (double)mocks[i].system);
+        CHECK(results[32].prn == (i == 2 ? 33u : 0u));
+    }
+
+    NgAcquisitionDestroy(a[0]);
+    FeedMock(&channels[1], 2048);
+    FeedMock(&channels[2], 2048);
+    WaitMock(a[1], 4);
+    WaitMock(a[2], 6);
+    NgAcquisitionDestroy(a[1]);
+    NgAcquisitionDestroy(a[2]);
+}
+
+static void BeidouPrnLimits(void)
+{
+    TNgAcquisitionConfig config;
+    TNgStreamInfo stream = {0};
+    TNgError error = {{0}};
+    TNgChannel channel;
+    TNgAcquisition *a = NULL;
+    TNgAcquisitionSnapshot snapshot;
+    TNgAcquisitionResult results[NG_SATELLITE_MAX_PRN];
+    MockSubscription mock = {0};
+
+    mock.system = NG_CONSTELLATION_BEIDOU;
+    stream.sampleRateHz = 2048000;
+    NgAcquisitionDefaults(&config);
+    config.lastPrn = 63;
+    CHECK(NgAcquisitionValidate(&config, &error) == NG_ERROR);
+    config.firstPrn = 0;
+    CHECK(NgAcquisitionCreateForConstellation(&config, &stream, mock.system, 1, &mockStrategy,
+                                              &mock, &a, &channel, &error) == NG_ERROR);
+    config.firstPrn = 1;
+    config.lastPrn = 64;
+    CHECK(NgAcquisitionCreateForConstellation(&config, &stream, mock.system, 1, &mockStrategy,
+                                              &mock, &a, &channel, &error) == NG_ERROR);
+    config.lastPrn = 63;
+    CHECK(NgAcquisitionCreateForConstellation(&config, &stream, mock.system, 1, &mockStrategy,
+                                              &mock, &a, &channel, &error) == NG_OK);
+    NgAcquisitionSetAdmissionMask(a, UINT64_C(1) << 61, 0);
+    NgAcquisitionObserve(a, 63);
+    FeedMock(&channel, 0);
+    WaitMock(a, 62);
+    NgAcquisitionReadResults(a, results);
+    NgAcquisitionRead(a, &snapshot);
+    CHECK(snapshot.parallelCapacity == 1);
+    CHECK(results[0].prn == 1 && results[31].prn == 32 && results[32].prn == 33);
+    CHECK(results[61].prn == 0 && results[62].prn == 63 && snapshot.results[31].prn == 32);
+
+    NgAtomicSet(&mock.block, 1);
+    FeedMock(&channel, 2048);
+    for (unsigned i = 0; i < 5000 && !NgAtomicGet(&mock.entered); ++i)
+        NgSleepMs(1);
+    CHECK(NgAtomicGet(&mock.entered));
+    NgAcquisitionDestroy(a);
+    CHECK(NgAtomicGet(&mock.cancelled));
+}
+
+
+
 /** Every per-satellite decision must remain identical under concurrent PRN scheduling. */
 int main(void)
 {
@@ -187,6 +354,8 @@ int main(void)
               a->dopplerHz == b->dopplerHz && a->codePhaseChips == b->codePhaseChips &&
               a->peakRatio == b->peakRatio);
     }
+    ThreeConstellations();
+    BeidouPrnLimits();
     puts("native parallel pool preserves exact single-satellite results and pauses admission");
     return 0;
 }

@@ -11,6 +11,14 @@
 #include "pcps_lab.h"
 #endif
 
+#ifdef CI8_PCPS_PHASES
+void Ci8PcpsPrintPhases(void);
+#endif
+
+#ifdef F4_PCPS_BATCH
+#include "pcps_batch.h"
+#endif
+
 #define PRN 7u
 #define LANES 4u
 #define WARMUPS 3u
@@ -75,6 +83,23 @@ static uint64_t Fixture(TNgComplex *samples, const TNgAcquisitionCapture *captur
     const double rate = capture->stream.sampleRateHz;
     const int inverted = capture->stream.spectrumInverted;
     const double doppler = 1234;
+    double signalAmplitude = 12;
+#ifdef NGENE_PCPS_PROFILE
+    const char *amplitude = getenv("NGENE_F4_PCPS_AMPLITUDE");
+    const char *seedText = getenv("NGENE_F4_PCPS_SEED");
+    if (amplitude) {
+        char *end;
+        signalAmplitude = strtod(amplitude, &end);
+        Check(end != amplitude && !*end && signalAmplitude >= 0 && signalAmplitude <= 12,
+              "Invalid F4 signal amplitude");
+    }
+    if (seedText) {
+        char *end;
+        unsigned long value = strtoul(seedText, &end, 10);
+        Check(end != seedText && !*end && value <= UINT32_MAX, "Invalid F4 noise seed");
+        seed = (uint32_t)value;
+    }
+#endif
     FILE *code = NULL;
     if (galileo) {
         code = fopen(NGENE_TEST_SOURCE_DIR "/tests/data/galileo-e1b-prn7.bin", "rb");
@@ -88,7 +113,7 @@ static uint64_t Fixture(TNgComplex *samples, const TNgAcquisitionCapture *captur
         double phase = fmod(123.42 + t * 1023000.0 * (1 + doppler / 1575420000.0), length);
         double carrier = 6.283185307179586 * ((double)capture->stream.digitalIfHz + doppler) * t +
                          0.71;
-        double amplitude = 12 * chips[(unsigned)phase];
+        double amplitude = signalAmplitude * chips[(unsigned)phase];
         if (galileo && phase - floor(phase) >= 0.5)
             amplitude = -amplitude;
         if (scenario == 2 || (scenario == 3 && t >= (galileo ? 0.096 : 0.024)))
@@ -100,6 +125,45 @@ static uint64_t Fixture(TNgComplex *samples, const TNgAcquisitionCapture *captur
     }
     return Hash(UINT64_C(14695981039346656037), samples, capture->count * sizeof(*samples));
 }
+
+#ifdef NGENE_PCPS_PROFILE
+static uint64_t ReadReplayInteger(const char *name, uint64_t maximum)
+{
+    const char *text = getenv(name);
+    Check(text && *text >= '0' && *text <= '9', name);
+    char *end;
+    uint64_t value = strtoull(text, &end, 10);
+    Check(!*end && value <= maximum, name);
+    return value;
+}
+
+static uint64_t ReplayFixture(const char *path, TNgComplex *samples, TNgAcquisitionCapture *capture)
+{
+    uint64_t offset = ReadReplayInteger("NGENE_F4_PCPS_OFFSET", INT64_MAX / 2);
+    capture->displayPrn = (unsigned)ReadReplayInteger("NGENE_F4_PCPS_PRN", 32);
+    Check(capture->displayPrn != 0, "Invalid replay PRN");
+    capture->origin.firstSample = ReadReplayInteger("NGENE_F4_PCPS_FIRST_SAMPLE", INT64_MAX);
+    capture->stream.format = NG_FORMAT_CI8;
+    capture->stream.spectrumInverted = 0;
+    FILE *file = fopen(path, "rb");
+    Check(file && _fseeki64(file, (int64_t)(2 * offset), SEEK_SET) == 0,
+          "Cannot seek to the replay window");
+    int8_t bytes[8192];
+    for (size_t first = 0; first < capture->count;) {
+        size_t pairs = capture->count - first;
+        if (pairs > sizeof bytes / 2)
+            pairs = sizeof bytes / 2;
+        Check(fread(bytes, 2, pairs, file) == pairs, "Incomplete replay window");
+        for (size_t k = 0; k < pairs; ++k) {
+            samples[first + k].i = bytes[2 * k];
+            samples[first + k].q = bytes[2 * k + 1];
+        }
+        first += pairs;
+    }
+    Check(fclose(file) == 0, "Cannot close replay capture");
+    return Hash(UINT64_C(14695981039346656037), samples, capture->count * sizeof(*samples));
+}
+#endif
 
 typedef struct {
     const TLabStrategy *ops;
@@ -159,6 +223,7 @@ typedef struct {
     unsigned seen;
     double noise;
     uint64_t hash;
+    FILE *mapDump;
 } TMapTrace;
 
 static int Trace(void *context)
@@ -172,32 +237,74 @@ static int Trace(void *context)
             if (trace->seen == 0)
                 trace->noise += power[k];
         }
+        if (trace->mapDump)
+            Check(fwrite(power, sizeof(*power), size, trace->mapDump) == size,
+                  "Cannot write F4 coarse map");
         trace->hash = Hash(trace->hash, power, size * sizeof(*power));
     }
     ++trace->seen;
     return 0;
 }
 
+#ifdef F4_PCPS_BATCH
+static double ProcessCpuSeconds(void)
+{
+    FILETIME created, exited, kernel, user;
+    ULARGE_INTEGER userTicks, kernelTicks;
+    Check(GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user) != 0,
+          "Cannot measure process CPU time");
+    userTicks.LowPart = user.dwLowDateTime;
+    userTicks.HighPart = user.dwHighDateTime;
+    kernelTicks.LowPart = kernel.dwLowDateTime;
+    kernelTicks.HighPart = kernel.dwHighDateTime;
+    return (double)(userTicks.QuadPart + kernelTicks.QuadPart) * 1e-7;
+}
+#endif
+
 static void Verify(TLane *lane, TNgSearchFftMode mode, int scenario)
 {
-    TMapTrace trace = {lane->ops, lane->workspace, 0, 0, UINT64_C(14695981039346656037)};
+    TMapTrace trace = {lane->ops, lane->workspace, 0, 0, UINT64_C(14695981039346656037), NULL};
     TNgAcquisitionConfig config;
     TNgAcquisitionResult result;
     TNgError error = {{0}};
     NgAcquisitionDefaults(&config);
     config.fftMode = mode;
+#ifdef NGENE_PCPS_PROFILE
+    const char *dump = getenv("NGENE_F4_PCPS_MAP");
+    if (dump) {
+        trace.mapDump = fopen(dump, "wb");
+        Check(trace.mapDump != NULL, "Cannot open F4 coarse map");
+    }
+#endif
+#ifdef F4_PCPS_BATCH
+    double prepareStart = NgMonotonicSeconds();
+#endif
     Check(lane->ops->prepare(lane->workspace, &lane->capture, Never, NULL) == NG_OK,
           "Prepare failed in map verification");
-    Check(lane->ops->strategy->search(lane->workspace, &lane->capture, PRN, &config,
+#ifdef F4_PCPS_BATCH
+    Check(F4BatchPrepare(&lane->capture, Never, NULL) == NG_OK, "Batch prepare failed");
+    double cpuStart = ProcessCpuSeconds();
+    double searchStart = NgMonotonicSeconds();
+#endif
+    Check(lane->ops->strategy->search(lane->workspace, &lane->capture, lane->capture.displayPrn, &config,
                                      Trace, &trace, &result, &error) == NG_OK, error.message);
+#ifdef F4_PCPS_BATCH
+    double searchSeconds = NgMonotonicSeconds() - searchStart;
+    double searchCpu = ProcessCpuSeconds() - cpuStart;
+#endif
     if (trace.seen == lane->ops->rows)
         (void)Trace(&trace); /* Below threshold: search returns after the last coarse row. */
     Check(trace.seen > lane->ops->rows, "Incomplete coarse maps");
+    if (trace.mapDump)
+        Check(fclose(trace.mapDump) == 0, "Cannot close F4 coarse map");
     const TNgAcquisitionSearchSpace *space = lane->ops->space(lane->workspace);
     printf("verify,%d,%016" PRIx64 ",%a,%a,%a,%a,%a,%a,%a,%d,%u,%u\n",
            scenario, trace.hash, trace.noise, space->threshold, space->peakDopplerHz,
            space->peakCodePhaseChips, result.peakRatio, result.dopplerHz, result.codePhaseChips,
            result.confirmed, result.successes, trace.seen);
+#ifdef F4_PCPS_BATCH
+    F4BatchReport(searchStart - prepareStart, searchSeconds, searchCpu);
+#endif
 }
 
 int main(int argc, char **argv)
@@ -214,7 +321,11 @@ int main(int argc, char **argv)
     TNgAcquisitionCapture capture = {0};
     TNgError error = {{0}};
     TLane lanes[LANES] = {0};
-    Check((galileo || strcmp(argv[1], "gps") == 0) && (count == 1 || count == LANES) &&
+    Check((galileo || strcmp(argv[1], "gps") == 0) && (count == 1 || count == LANES
+#ifdef F4_PCPS_BATCH
+           || count == 2
+#endif
+          ) &&
           scenario >= 0 &&
 #ifdef NGENE_PCPS_LAB
           scenario <= 5 &&
@@ -234,7 +345,19 @@ int main(int argc, char **argv)
     TNgComplex *samples = calloc(capture.count, sizeof(*samples));
     Check(samples != NULL, "Cannot allocate capture");
     capture.samples = samples;
-    uint64_t hash = Fixture(samples, &capture, galileo, scenario);
+    uint64_t hash;
+#ifdef NGENE_PCPS_PROFILE
+    const char *replay = getenv("NGENE_F4_PCPS_REPLAY");
+    if (replay && *replay) {
+#ifdef F4_PCPS_BATCH
+        Check(scenario == 1, "Replay batch requires verification scenario");
+#else
+        Check(scenario == 1 && count == 1, "Replay requires serial verification scenario");
+#endif
+        hash = ReplayFixture(replay, samples, &capture);
+    } else
+#endif
+        hash = Fixture(samples, &capture, galileo, scenario);
     printf("fixture,%s,%u,%u,%d,%d,%u,%zu,%016" PRIx64 "\n", argv[1], rate, grid, ifHz, mode,
            count, capture.count, hash);
     size_t residentBefore = Resident();
@@ -258,7 +381,19 @@ int main(int argc, char **argv)
     } else
 #endif
     if (scenario) {
+#ifdef F4_PCPS_BATCH
+        void *workspaces[LANES];
+        for (unsigned k = 0; k < count; ++k)
+            workspaces[k] = lanes[k].workspace;
+        F4BatchConfigure(ops, workspaces, count);
+#endif
         Verify(&lanes[0], mode, scenario);
+#ifdef F4_PCPS_BATCH
+        F4BatchFree();
+#endif
+#ifdef CI8_PCPS_PHASES
+        Ci8PcpsPrintPhases();
+#endif
     } else {
         for (unsigned k = 0; k < count; ++k) {
             Check(ops->prepare(lanes[k].workspace, &capture, Never, NULL) == NG_OK,
