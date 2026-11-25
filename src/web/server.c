@@ -703,6 +703,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         cJSON_AddBoolToObject(p, "available", s->available);
         cJSON_AddBoolToObject(p, "velocity_available", s->velocityAvailable);
         Number(p, "satellites", s->satellites); Number(p, "gps", s->gps); Number(p, "galileo", s->galileo);
+        Number(p, "beidou", s->beidou);
         Counter(p, "epoch", s->epoch); Counter(p, "sample", s->sample);
         Number(p, "tow_seconds", s->towSeconds);
         cJSON_AddBoolToObject(p, "dop_available", s->dopAvailable);
@@ -724,6 +725,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             Number(p, "longitude_deg", s->longitude * 57.29577951308232);
             Number(p, "height_m", s->height); Number(p, "residual_rms_m", s->residualRms);
             Number(p, "clock_gps_m", s->clockGps); Number(p, "clock_galileo_m", s->clockGalileo);
+            if (s->beidou) Number(p, "clock_beidou_m", s->clockBeidou);
             Number(p, "velocity_x_mps", s->velocity[0]); Number(p, "velocity_y_mps", s->velocity[1]);
             Number(p, "velocity_z_mps", s->velocity[2]); Number(p, "clock_drift_mps", s->clockDrift);
         }

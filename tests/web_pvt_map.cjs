@@ -13,6 +13,9 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
  try {
   let bootstrap;for(let k=0;k<100;k++){try{bootstrap=await(await fetch(base+'/api/v1/bootstrap')).json();break;}catch{await delay(100);}}
   assert(bootstrap,'service starts');
+  const realStatus=await (await fetch(base+'/api/v1/status')).json();
+  assert.equal(realStatus.pvt.beidou,0,'Live API advertises zero BeiDou measurements without a producer');
+  assert.equal(realStatus.pvt.clock_beidou_m,undefined,'No BeiDou bias is invented');
   browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});
   const page=await browser.newPage({viewport:{width:1100,height:850}});let tiles=0;
   await page.route('**/app.js',route=>route.fulfill({contentType:'application/javascript',body:'/* Isolated workspace fixture; production modules and CSP are served unchanged. */'}));
@@ -20,7 +23,8 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   await page.goto(base);
   await page.evaluate(async()=>{
    const {createReceiverWorkspace}=await import('/workspace.js');
-   window.geometryWorkspace=createReceiverWorkspace();
+   window.channelInterest=[];
+   window.geometryWorkspace=createReceiverWorkspace({onChannelInterest:id=>window.channelInterest.push(id)});
    window.geometrySnapshot={connected:true,profile:{'receiver.channels':'2'},status:{state:'running',run_id:'geometry',tracking:[
     {channel_id:1,state:0,constellation:0,prn:0,active:false,cn0_valid:false,taps:[]},
     {channel_id:2,state:2,constellation:2,prn:7,active:true,pll:true,cn0_valid:true,cn0_db_hz:42.5,doppler_hz:1250,taps:[]}
@@ -58,6 +62,39 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   assert.deepEqual(await page.locator('.channel-list tbody tr').first().locator('td').evaluateAll(cells=>cells.map(c=>c.getBoundingClientRect().x)),positions,'Unassigned does not shift columns');
   await page.evaluate(()=>{window.geometryWorkspace.setView('pvt');window.geometrySnapshot.status.pvt={available:false};window.geometryWorkspace.update(window.geometrySnapshot);});
   assert.equal(await page.locator('[data-pvt-sky] circle').count(),0,'No fabricated sky positions without a fix');
+  await page.evaluate(()=>window.geometryWorkspace.setView('tracking'));
+  await page.getByRole('button',{name:'Preview BeiDou B1C'}).click();
+  assert.match(page.url(),/[?&]preview=beidou/);
+  assert(await page.locator('#trackingView [data-beidou-preview-notice]').isVisible());
+  const previewRows=page.locator('.channel-list tbody tr');
+  assert.equal(await previewRows.count(),7);
+  assert.match(await previewRows.nth(0).textContent(),/BeiDou B1C12Acquired/);
+  assert.match(await previewRows.nth(1).textContent(),/BeiDou B1C44Tracking/);
+  assert.match(await previewRows.nth(2).textContent(),/BeiDou B1C35Navigation/);
+  assert.match(await previewRows.nth(6).textContent(),/BeiDou B1C63Used in PVT/);
+  let cafRequests=0;
+  page.on('request',req=>{if(req.url().includes('/acquisition/search-space'))cafRequests++;});
+  await previewRows.nth(6).getByRole('link').click();
+  await page.locator('#trackingView [data-satellite-title]').filter({hasText:'BeiDou B1C 63'}).waitFor();
+  assert.match(await page.locator('[data-satellite-acquisition]').textContent(),/confirmed/);
+  assert.equal(await page.locator('[data-tracking-shape] [data-tap]').count(),3);
+  assert.equal(cafRequests,0,'Synthetic PRN 63 does not call the live search-space API');
+  assert((await page.evaluate(()=>window.channelInterest)).every(id=>id===0),'Preview never acquires a live observation lease');
+  await page.evaluate(()=>window.geometryWorkspace.setView('navigation'));
+  assert.match(await page.locator('[data-navigation-status]').textContent(),/BeiDou B1C 63.*B-CNAV1.*Page 3.*BDT/);
+  await page.evaluate(()=>{window.geometryWorkspace.setView('pvt');window.geometryWorkspace.update(window.geometrySnapshot);});
+  await page.setViewportSize({width:390,height:850});
+  assert(await page.locator('#pvtView [data-beidou-preview-notice]').isVisible());
+  assert.match(await page.locator('[data-pvt-counts]').textContent(),/BeiDou 4/);
+  assert.match(await page.locator('[data-pvt-values]').textContent(),/BeiDou clock bias27\.60 m/);
+  assert.match(await page.locator('[data-pvt-sky]').textContent(),/C63/);
+  assert(!(await page.locator('[data-pvt-map]').isVisible()),'Preview position is not displayed on the live map');
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Preview fits a mobile viewport');
+  await page.screenshot({path:path.resolve('build/beidou-ui-preview.png'),fullPage:true});
+  await page.getByRole('button',{name:'Exit BeiDou preview'}).click();
+  assert(!page.url().includes('preview=beidou'));
+  assert.equal(await page.locator('[data-pvt-sky] circle').count(),0);
+  await page.setViewportSize({width:1100,height:850});
   await page.evaluate(()=>window.geometryWorkspace.setView('tracking'));await delay(100);tiles=0;
   await page.evaluate(async()=>{
    const {createPvtMap,mercator}=await import('/pvt-map.js');
