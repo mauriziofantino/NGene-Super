@@ -53,7 +53,8 @@ struct TNgAcquisition {
     TNgAcquisitionResult highResults[NG_SATELLITE_MAX_PRN - NG_LEGACY_MAX_PRN];
     TNgAcquisitionSearchSpace *spaces;          /**< Completed display archives. */
     TNgAcquisitionPool *pool;                    /**< Shared scheduler. */
-    unsigned nextPrn, activeJobs; /**< Pool-mutex-protected capture cursor and borrowers. */
+    unsigned nextPrn, captureLastPrn, activeJobs; /**< Published capture cursor and borrowers. */
+    unsigned nextCapturePrn;    /**< Producer cursor for bounded B1C search batches. */
     unsigned quota;               /**< Free receiver slots, published under pool mutex. */
     uint32_t busyContexts;        /**< Pool-mutex-protected exclusive lanes. */
 };
@@ -174,7 +175,7 @@ static void RefreshJobs(TNgAcquisition *a)
             a->snapshot.activeSearches++;
         }
     a->snapshot.searching = a->snapshot.activeSearches != 0;
-    if (!a->activeJobs && a->nextPrn > a->config.lastPrn)
+    if (!a->activeJobs && a->nextPrn > a->captureLastPrn)
         NgAtomicSet(&a->slot, 0);
 }
 
@@ -193,11 +194,11 @@ static int Claim(TNgAcquisitionPool *pool, TNgAcquisitionJob *job)
         NgMutexLock(&a->mutex);
         if (NgAtomicGet(&a->stop) || a->paused ||
             NgAtomicGet(&a->generation) != a->captureGeneration)
-            a->nextPrn = a->config.lastPrn + 1;
-        while (a->nextPrn <= a->config.lastPrn &&
+            a->nextPrn = a->captureLastPrn + 1;
+        while (a->nextPrn <= a->captureLastPrn &&
                (a->excludedMask & (UINT64_C(1) << (a->nextPrn - 1))))
             ++a->nextPrn;
-        if (a->nextPrn > a->config.lastPrn) {
+        if (a->nextPrn > a->captureLastPrn) {
             RefreshJobs(a);
             NgMutexUnlock(&a->mutex);
             continue;
@@ -506,7 +507,14 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
             acquisition->captureGeneration = NgAtomicGet(&acquisition->generation);
             acquisition->filled = 0;
             acquisition->skipped += window->meta.count - take;
-            acquisition->nextPrn = acquisition->config.firstPrn;
+            acquisition->nextPrn = acquisition->nextCapturePrn;
+            acquisition->captureLastPrn = acquisition->config.lastPrn;
+            if (acquisition->strategy == &ngBeidouAcquisitionStrategy &&
+                acquisition->captureLastPrn - acquisition->nextPrn >= 4)
+                acquisition->captureLastPrn = acquisition->nextPrn + 3;
+            acquisition->nextCapturePrn =
+                acquisition->captureLastPrn == acquisition->config.lastPrn
+                    ? acquisition->config.firstPrn : acquisition->captureLastPrn + 1;
 #ifdef NGENE_PROFILE_ACQUISITION_JOBS
             acquisition->capturePublished = NgMonotonicSeconds();
 #endif
@@ -531,7 +539,7 @@ static void FreeContexts(TNgAcquisition *a, unsigned first)
 {
     unsigned k;
     for (k = first; k < a->contextCount; ++k) {
-        if (a->strategy == &ngGalileoAcquisitionStrategy)
+        if (a->strategy == &ngGalileoAcquisitionStrategy || a->strategy == &ngBeidouAcquisitionStrategy)
             NgAcquisitionGalileoFree(a->contexts[k]);
         else if (a->strategy == &ngGpsAcquisitionStrategy)
             NgAcquisitionGpsFree(a->contexts[k]);
@@ -579,15 +587,20 @@ static int CreateWithDuration(const TNgAcquisitionConfig *config, const TNgStrea
     a->capture.stream = *stream;
     a->contexts[0] = context;
     a->contextCount = 1;
-    wanted = native ? Capacity() : 1;
+    wanted = native || strategy == &ngBeidouAcquisitionStrategy ? Capacity() : 1;
+    if (strategy == &ngBeidouAcquisitionStrategy && wanted > 4)
+        wanted = 4;
     if (wanted > config->lastPrn - config->firstPrn + 1)
         wanted = config->lastPrn - config->firstPrn + 1;
     for (k = 1; k < wanted; ++k) {
-        int result = strategy == &ngGpsAcquisitionStrategy
-                         ? NgAcquisitionGpsWorkspace(stream, config->fftMode, &a->contexts[k],
-                                                     error)
-                         : NgAcquisitionGalileoWorkspace(stream, config->fftSize, config->fftMode,
-                                                         &a->contexts[k], error);
+        int result;
+        if (strategy == &ngGpsAcquisitionStrategy)
+            result = NgAcquisitionGpsWorkspace(stream, config->fftMode, &a->contexts[k], error);
+        else if (strategy == &ngGalileoAcquisitionStrategy)
+            result = NgAcquisitionGalileoWorkspace(stream, config->fftSize, config->fftMode,
+                                                   &a->contexts[k], error);
+        else
+            result = NgAcquisitionBeidouWorkspace(stream, &a->contexts[k], error);
         if (result != NG_OK) {
             FreeContexts(a, 1);
             NgMutexDestroy(&a->mutex);
@@ -599,7 +612,8 @@ static int CreateWithDuration(const TNgAcquisitionConfig *config, const TNgStrea
         a->contextCount++;
     }
     a->quota = wanted;
-    a->nextPrn = config->firstPrn;
+    a->nextPrn = a->nextCapturePrn = config->firstPrn;
+    a->captureLastPrn = config->lastPrn;
     a->snapshot.enabled = 1;
     a->pool = CreatePool(&a, 1, error);
     if (!a->pool) {
@@ -679,6 +693,31 @@ int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStre
     else {
         (*out)->ownsContext = 1;
         channel->id.instanceId = 1;
+    }
+    return status;
+}
+
+int NgAcquisitionValidateBeidou(const TNgAcquisitionConfig *config, TNgError *error)
+{
+    return ValidateForConstellation(config, NG_CONSTELLATION_BEIDOU, error);
+}
+
+int NgAcquisitionCreateBeidou(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
+                              TNgAcquisition **out, TNgChannel *channel, TNgError *error)
+{
+    void *workspace = NULL;
+    *out = NULL;
+    if (ValidateForConstellation(config, NG_CONSTELLATION_BEIDOU, error) != NG_OK)
+        return NG_ERROR;
+    if (config->enabled && NgAcquisitionBeidouWorkspace(stream, &workspace, error) != NG_OK)
+        return NG_ERROR;
+    int status = CreateWithDuration(config, stream, &ngBeidouAcquisitionStrategy, workspace,
+                                    out, channel, error, NG_CONSTELLATION_BEIDOU, 570);
+    if (*out) {
+        (*out)->ownsContext = 1;
+        channel->id.instanceId = NG_CONSTELLATION_BEIDOU - 1;
+    } else {
+        NgAcquisitionGalileoFree(workspace);
     }
     return status;
 }

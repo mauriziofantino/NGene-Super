@@ -277,6 +277,12 @@ histogram_update_hz=20
     // The original configuration validation remains usable in its new workspace.
     await select('setup');
     await page.locator('[data-settings="receiver"]').click();
+    const beidou = page.locator('[name="beidou_acquisition.enabled"]');
+    assert(await beidou.isEnabled(), 'BeiDou B1C data can be selected in the receiver profile');
+    assert.equal(await beidou.inputValue(), 'false');
+    await beidou.selectOption('true');
+    assert.equal(await beidou.inputValue(), 'true');
+    await beidou.selectOption('false');
     const ring = page.locator('[name="buffer.ring_blocks"]');
     assert(await ring.isEnabled(), 'Implemented receiver buffers remain editable alongside unavailable GNSS controls');
     await ring.fill('32'); await ring.blur();

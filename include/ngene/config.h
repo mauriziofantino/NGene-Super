@@ -91,6 +91,7 @@ typedef struct {
     TNgTrackingConfig tracking; /**< Frozen per-run tracking module settings. */
     /** Independently enabled Galileo E1-B acquisition settings. */
     TNgAcquisitionConfig galileoAcquisition;
+    TNgAcquisitionConfig beidouAcquisition;
     /** Capture filename prefix; CLI may include a path when no directory is set. */
     char recordingPrefix[512];
     /** Optional receiver-side directory; empty preserves legacy CLI prefix paths. */

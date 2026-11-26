@@ -115,28 +115,67 @@ con 28 ritardi e il banco di tracking B3 con PRN 1, 33 e 63. I 60 casi B3
 con eco includono i falsi lock già osservati. I CSV sono in
 `build/b8-synthetic-20261126`.
 
-Il ricevitore operativo alimenta soltanto GPS/Galileo. La qualifica B8 della
-catena B1C richiede l'integrazione delle strategie B2–B4 e del loro collegamento a
-B5–B7, oltre a una cattura B1C verificata. B2 deve verificare la scala del
-correlatore e lo stimatore del rumore rispetto alla legge di soglia comune;
-il profilo operativo e le variazioni decisionali seguono il criterio di
-approvazione del piano. [Verifica tecnica](../../../docs/service/CONSOLIDAMENTO_GNSS.md)
+Il profilo legacy continua a selezionare GPS e Galileo. Il ricevitore può
+abilitare anche BeiDou B1C con `[beidou_acquisition]` e `enabled=true`.
+La cattura HackRF consente di misurare separatamente conferma B1C, tracking,
+trame B-CNAV1 e osservazioni BDT usate dal PVT. La qualifica completa
+richiede il riferimento indipendente e le ripetizioni previste dal banco.
+[Verifica tecnica](../../../docs/service/CONSOLIDAMENTO_GNSS.md)
 
 Il decoder B4 ora espone anche l'ingresso streaming `NgBcnv1Push`. Riceve
 simboli morbidi da prompt dati completi e conserva l'indice campione di SF1
 per B5–B6. Il test ripete polarità, frame traslata, discontinuità e cambio di
-epoca, con indici superiori a 2⁵³. Il collegamento ai prompt del tracker
-operativo resta aperto. I cinque CTest mirati a B1C, PVT e replay hanno
+epoca, con indici superiori a 2⁵³. I cinque CTest mirati a B1C, PVT e replay hanno
 superato la verifica Windows x64 in `b1c-stream.xml`.
 
 ## B9 · RF sul dispositivo
 
-L'enumerazione del ricevitore multisdr ha restituito zero HackRF, RTL-SDR e
-bladeRF. Il tentativo RX con il profilo HackRF è terminato all'apertura
-con `Expected one HackRF; found 0`. La prova RF e il replay della nuova
-cattura restano in attesa del frontend e della catena B1C operativa. La
-campagna dovrà registrare antenna, sito o traiettoria di riferimento, guadagni,
-banda analogica, campionamento, durata e componente del pilota correlata.
+La HackRF collegata all'antenna GNSS è disponibile su Windows. La cattura
+è stata eseguita in sola ricezione a 1575,42 MHz, con campionamento nominale
+di 16.367.600 coppie/s, filtro da 15 MHz e formato CI8 interlacciato. Il
+controllo iniziale a 40/42 dB LNA/VGA ha rilevato campioni agli estremi
+dell'ADC. La cattura di riferimento usa 32/34 dB, amplificatore RF e
+alimentazione antenna dalla HackRF disattivati.
+
+Il file `captures/b1c-hackrf-20261126-163658-reference/hackrf-gnss-l1_000000.cs8`
+contiene 1.963.999.216 coppie I/Q, pari a 119,993 s al rate nominale.
+L'indice è continuo e il ricevitore ha riportato zero gap e zero perdite
+durante la cattura. All'arresto sono state scartate 114.704 coppie ancora
+in coda, successive all'ultimo campione scritto. Su cinque finestre
+distribuite lungo il file non sono stati osservati valori agli estremi
+dell'ADC. Profilo, metadati, indice, log e SHA-256 sono nella stessa cartella.
+Il replay Windows ha riletto tutte le coppie senza gap né perdite. Nel
+riepilogo finale dell'acquisizione risultano confermati 11 PRN GPS e
+12 Galileo.
+
+La qualifica B9 della catena BeiDou B1C richiede una verifica di acquisizione,
+tracking e decodifica sulla cattura e un riferimento indipendente per valutare
+l'errore di posizione.
+
+La build Windows con HackRF ha inoltre elaborato 130.944.000 coppie in ricezione
+diretta con BeiDou abilitato, quattro ricerche completate, zero gap e zero
+perdite durante la prova breve. Profilo e binario locali in
+`build/b1c-hackrf-release`, stato del ricevitore in
+`build/b1c-hackrf-live-smoke/status.json`.
+
+### Replay della catena B1C
+
+Il replay Windows di 115 s sulla cattura HackRF ha elaborato 1.882.274.000
+coppie senza gap né perdite. Il profilo della prova assegna 20 slot (10
+riservati a Galileo e 6 a BeiDou), 4 worker di tracking e 4 core di budget
+per l'acquisizione. Le ricerche sono limitate ai PRN B1C 11–42 e Galileo
+6–28 dopo la ricognizione RF iniziale. Il profilo operativo predefinito
+ricerca i PRN B1C 1–63 quando abilitato.
+
+- Acquisizione e tracking B1C osservati per i PRN 11, 27, 29, 30, 36, 39 e 42.
+- Trame B-CNAV1 con CRC validi osservate sui PRN 11 e 42.
+- Tredici soluzioni distinte per campione con una misura BeiDou marcata come
+  usata. La prima a 30,005 s usa C11 con cinque Galileo. Le soluzioni
+  successive con C42 usano otto Galileo.
+
+Evidenze locali in `build/b1c-rf-operational-07` con hash degli ingressi,
+profilo effettivo, timeline e snapshot PVT misto. La posizione di riferimento
+e la verifica ripetuta di un fix a tre costellazioni restano aperte.
 
 ## B10 · Canali, messaggi e PVT
 
@@ -149,8 +188,7 @@ dell'issue. Il PVT mostra conteggi, bias per costellazione e skyplot.
 Playwright con Edge su Windows verifica PRN 63, omonimia tra costellazioni,
 stato parziale, telemetria storica, reset di epoca, nuova assegnazione e il
 layout mobile in `web_pvt_map.cjs` e `web_workspace.cjs`. La scelta Preview BeiDou B1C attiva una fixture a tre
-costellazioni con etichetta visibile. La selezione B1C operativa resta in attesa
-dell'integrazione DSP. [Contratto web](../../../docs/service/WEBGUI.md#states)
+costellazioni con etichetta visibile. La scelta operativa **BeiDou B1C** è in Receiver configuration, Channel allocation. [Contratto web](../../../docs/service/WEBGUI.md#states)
 
 ## Verifiche native
 

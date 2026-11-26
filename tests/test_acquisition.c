@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "acquisition/grid.h"
+#include "acquisition/workspace.h"
+#include "ngene/dsp/beidou_b1c.h"
 #include "acquisition/noise_policy.h"
 #define CHECK(condition)                                                                           \
     do {                                                                                           \
@@ -599,9 +601,63 @@ static int NativeGridContract(void)
     return 0;
 }
 
+static int NeverCancel(void *context)
+{
+    (void)context;
+    return 0;
+}
+
+/** Exercise the operational B1C search at the HackRF reference sample rate. */
+static int BeidouScenario(void)
+{
+    const unsigned rate = 16367600, prn = 63;
+    const double phase = 3241.37, doppler = 1013.0;
+    const double codeRate = 1023000 * (1 + doppler / 1575420000.0);
+    const size_t count = (size_t)rate * 57 / 100;
+    TNgComplex *samples = calloc(count, sizeof(*samples));
+    int8_t chips[NG_BEIDOU_B1C_LENGTH];
+    TNgAcquisitionCapture capture = {0};
+    TNgAcquisitionConfig config;
+    TNgAcquisitionResult result;
+    TNgError error = {{0}};
+    uint32_t random = 331u;
+    void *workspace = NULL;
+    CHECK(samples);
+    CHECK(NgBeidouB1cGenerate(prn, NG_BEIDOU_B1C_DATA, chips, &error) == NG_OK);
+    for (size_t n = 0; n < count; ++n) {
+        double time = (double)n / rate;
+        double code = phase + time * codeRate;
+        double carrier = 6.283185307179586 * doppler * time + 0.37;
+        float replica = NgBeidouB1cDataAt(chips, (uint64_t)(code * NG_BEIDOU_B1C_SUBCHIPS));
+        double symbol = (uint64_t)(code / NG_BEIDOU_B1C_LENGTH) % 2 ? -1 : 1;
+        samples[n].i = (float)(5 * symbol * replica * cos(carrier) + 20 * Noise(&random));
+        samples[n].q = (float)(5 * symbol * replica * sin(carrier) + 20 * Noise(&random));
+    }
+    capture.count = count;
+    capture.samples = samples;
+    capture.stream.sampleRateHz = rate;
+    capture.origin.epoch = 9;
+    capture.origin.firstSample = 8173921;
+    NgAcquisitionDefaults(&config);
+    CHECK(NgAcquisitionBeidouWorkspace(&capture.stream, &workspace, &error) == NG_OK);
+    CHECK(ngBeidouAcquisitionStrategy.search(workspace, &capture, prn, &config,
+          NeverCancel, NULL, &result, &error) == NG_OK);
+    CHECK(result.confirmed && result.prn == prn && result.epoch == 9 &&
+          result.firstSample == capture.origin.firstSample);
+    CHECK(fabs(result.codePhaseChips - phase) < 0.15);
+    if (fabs(result.dopplerHz - doppler) > 7)
+        fprintf(stderr, "B1C recovered %.1f Hz for %.1f Hz\n", result.dopplerHz, doppler);
+    CHECK(fabs(result.dopplerHz - doppler) <= 7);
+    NgAcquisitionGalileoFree(workspace);
+    free(samples);
+    return 0;
+}
+
 /** Run RF formats/rates, sinusoidal/square mixing, noise and independent confirmation cases. */
 int main(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "--verify-beidou") == 0)
+        return BeidouScenario();
     if (argc == 2 && strcmp(argv[1], "--benchmark") == 0)
         return BenchmarkFft();
     if (argc == 2 && strcmp(argv[1], "--benchmark-pcps") == 0)
@@ -612,6 +668,7 @@ int main(int argc, char **argv)
         CHECK(GridGeometryContract() == 0);
         return NativeGridContract();
     }
+    CHECK(BeidouScenario() == 0);
     CHECK(Kernels() == 0);
     CHECK(NoisePolicy() == 0);
     CHECK(GalileoScenario(4096000, 0, 0, 1, 1, 0, 1, 0) == 0);

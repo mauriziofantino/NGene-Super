@@ -121,9 +121,11 @@ B8 adds a repeatable, out-of-process replay matrix with input hashes, cold
 starts and an explicit continuity break. Windows replay covers the existing
 GPS/Galileo chain. B10 exposes confirmation, tracking, decoding and PVT use as
 independent states and exercises BeiDou PRN 63 in a labelled mixed-constellation
-preview. Live B1C selection and B8/B9 qualification await the operational
-acquisition, tracking and decoder connection, reference I/Q and physical RF.
-Native Linux and macOS verification of these changes is pending.
+preview. The receiver configuration also enables the B1C signal on live
+or recorded input. The shared channel pool accepts B1C acquisition results,
+and the tracking data prompt feeds B-CNAV1. Healthy, matched BDT observations
+are eligible for the mixed PVT solve. Native Linux and macOS verification
+and full B8/B9 qualification are pending.
 [B8–B10 evidence](../../development/profiling/B8/README.md).
 
 The F6 mixed GPS/Galileo replay matrix measures the existing tracking pool

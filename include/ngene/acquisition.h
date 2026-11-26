@@ -30,7 +30,7 @@ typedef struct {
     unsigned prn;            /**< PRN in the runner constellation. */
     int confirmed;           /**< Nonzero only after 3 successes out of 4 independent attempts. */
     double dopplerHz;        /**< Physical Doppler, excluding digital IF. */
-    double codePhaseChips;   /**< Local replica phase at firstSample, modulo 1023. */
+    double codePhaseChips;   /**< Local replica phase at firstSample, modulo the primary code length. */
     double peakRatio;        /**< Coarse power divided by its statistical threshold. */
     unsigned successes;      /**< Confirmation successes, 0..4. */
     uint64_t epoch;          /**< Common-ring continuity generation. */
@@ -118,6 +118,7 @@ unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *acquisition, uint64_t epoch,
 void NgAcquisitionSetParallelism(TNgAcquisition *acquisition, unsigned totalLimit, unsigned quota,
                                  unsigned executionLimit);
 /** Validate PRNs and boolean options without allocating or opening hardware. */
+int NgAcquisitionValidateBeidou(const TNgAcquisitionConfig *config, TNgError *error);
 int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error);
 /** Create the default Classic-derived PCPS strategy. Allocates before reception.
  * stream must contain the actual opened source metadata; supports CI8 and CI16 common streams.
@@ -129,6 +130,9 @@ int NgAcquisitionCreate(const TNgAcquisitionConfig *config, const TNgStreamInfo 
  * Both registrations may share an engine; callers may override instance identities. */
 int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                                TNgAcquisition **out, TNgChannel *channel, TNgError *error);
+/** Register the primary data component of BeiDou B1C. */
+int NgAcquisitionCreateBeidou(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
+                              TNgAcquisition **out, TNgChannel *channel, TNgError *error);
 /** Create a runner using caller-owned strategy/context. Same ring and cancellation contract. */
 int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                                     const TNgAcquisitionStrategy *strategy, void *context,

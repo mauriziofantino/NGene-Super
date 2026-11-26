@@ -1,5 +1,6 @@
 /** @file test_beidou_bcnv1.c @brief Independent B-CNAV1 framing/FEC/CRC vectors. */
 #include "ngene/beidou_bcnv1.h"
+#include "ngene/tracking.h"
 #include "ngene/dsp/beidou_b1c.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -153,6 +154,58 @@ static void CheckDataBridge(void)
     free(replica);
 }
 
+/** The production tracker must turn complete primary periods into B-CNAV1 symbols. */
+static void CheckTrackedFrame(void)
+{
+    enum { count = 20480, warmup = 120 };
+    int8_t chips[NG_BEIDOU_B1C_LENGTH], pilot[NG_BEIDOU_B1C_LENGTH];
+    int8_t symbols[NG_BCNV1_SYNC_SYMBOLS];
+    TNgIq8 replica[count], block[count];
+    TNgTrackingConfig config;
+    TNgTracking *tracking = NULL;
+    TNgTrackingSnapshot snapshot;
+    TNgStreamInfo stream = {0};
+    TNgIqView window = {0};
+    TNgAcquisitionResult seed = {0};
+    TNgError error = {{0}};
+    NgTrackingDefaults(&config);
+    stream.sampleRateHz = 2048000;
+    stream.format = NG_FORMAT_CI8;
+    seed.prn = 33;
+    seed.confirmed = 1;
+    seed.epoch = 5;
+    CHECK(NgBeidouB1cGenerate(seed.prn, NG_BEIDOU_B1C_DATA, chips, &error) == NG_OK);
+    CHECK(NgBeidouB1cGenerate(seed.prn, NG_BEIDOU_B1C_PILOT, pilot, &error) == NG_OK);
+    CHECK(NgTrackingCreate(&config, &stream, NG_CONSTELLATION_BEIDOU, &tracking, &error) == NG_OK);
+    CHECK(NgTrackingSeed(tracking, &seed, &error) == NG_OK);
+    Unpack(clean, symbols, NG_BCNV1_FRAME_SYMBOLS, 0);
+    Unpack(nextHeader, symbols + NG_BCNV1_FRAME_SYMBOLS, NG_BCNV1_HEADER_SYMBOLS, 0);
+    for (unsigned n = 0; n < count; ++n) {
+        uint64_t phase = (uint64_t)n * NG_BEIDOU_B1C_SUBCHIPS * NG_BEIDOU_B1C_RATE_HZ /
+                         stream.sampleRateHz;
+        replica[n].i = (int8_t)(100 * NgBeidouB1cDataAt(chips, phase));
+        replica[n].q = (int8_t)(100 * NgBeidouB1cPilotAt(pilot, phase).q);
+    }
+    window.format = NG_FORMAT_CI8;
+    window.meta.epoch = seed.epoch;
+    window.meta.count = count;
+    window.samples = block;
+    for (unsigned period = 0; period < warmup + NG_BCNV1_SYNC_SYMBOLS; ++period) {
+        int sign = (period >= warmup && symbols[period - warmup] < 0) ? -1 : 1;
+        for (unsigned n = 0; n < count; ++n) {
+            block[n].i = (int8_t)(replica[n].i * sign);
+            block[n].q = period % 2 ? (int8_t)-replica[n].q : replica[n].q;
+        }
+        window.meta.firstSample = (uint64_t)period * count;
+        CHECK(NgTrackingProcess(tracking, &window, &error) == NG_OK);
+    }
+    NgTrackingRead(tracking, &snapshot);
+    CHECK(snapshot.active && snapshot.pll && snapshot.prn == 33);
+    CHECK(snapshot.navigation.validSubframes == 1);
+    CHECK(!snapshot.navigation.towValid); /* The fixture carries unhealthy, unmatched data. */
+    NgTrackingDestroy(tracking);
+}
+
 /** Verify sliding framing and original sample timing after both forms of discontinuity. */
 static void CheckStream(const int8_t *symbols, size_t prefix, int inverted)
 {
@@ -169,6 +222,17 @@ static void CheckStream(const int8_t *symbols, size_t prefix, int inverted)
     }
     CheckPayload(&frame, inverted);
     CHECK(anchor == first + 20480 * prefix + prefix / 2);
+    CHECK(stream.elapsedSymbols == NG_BCNV1_SYNC_SYMBOLS);
+    for (size_t n = NG_BCNV1_HEADER_SYMBOLS; n < NG_BCNV1_FRAME_SYMBOLS; ++n) {
+        const uint64_t end = sample + 20480 + (prefix + NG_BCNV1_FRAME_SYMBOLS + n) % 2;
+        const int result = NgBcnv1Push(&stream, 33, 7, sample, end, symbols[prefix + n],
+                                      &frame, &anchor);
+        CHECK(result == (n + 1 == NG_BCNV1_FRAME_SYMBOLS ? NG_OK : NG_END));
+        sample = end;
+    }
+    CHECK(frame.soh == 0 && stream.elapsedSymbols == NG_BCNV1_FRAME_SYMBOLS);
+    size_t next = prefix + NG_BCNV1_FRAME_SYMBOLS;
+    CHECK(anchor == first + 20480 * next + next / 2);
     CHECK(NgBcnv1Push(&stream, 33, 7, sample + 1, sample + 20481, 80,
                        &frame, &anchor) == NG_END && stream.count == 1);
     CHECK(NgBcnv1Push(&stream, 33, 8, sample + 20481, sample + 40961, 80,
@@ -178,6 +242,7 @@ static void CheckStream(const int8_t *symbols, size_t prefix, int inverted)
 /** Test header error correction, both FEC paths, both CRCs and wrapped SOH alignment. */
 int main(void)
 {
+    CheckTrackedFrame();
     enum { prefix = 19, span = prefix + NG_BCNV1_FRAME_SYMBOLS + NG_BCNV1_HEADER_SYMBOLS };
     int8_t symbols[span];
     TNgBcnv1Frame frame;

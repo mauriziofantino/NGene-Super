@@ -264,7 +264,9 @@ static int Align(const TNgTrackingSnapshot *t, uint64_t epoch, uint64_t sample, 
         !NgSatellitePrnValid((TNgConstellation)system, t->prn) ||
         (system != NG_CONSTELLATION_GPS && b->satelliteId &&
          (unsigned)b->satelliteId != t->prn) ||
-        sample < t->endSample || (double)(sample - t->endSample) / fs > 0.01 ||
+        sample < t->endSample ||
+        (double)(sample - t->endSample) >
+            (system == NG_CONSTELLATION_BEIDOU ? ceil(0.01 * fs) : 0.01 * fs) ||
         !isfinite(nav->transmitTimeSeconds) || !(t->codeRateHz > 0) ||
         !isfinite(t->codeRateHz) || !isfinite(t->dopplerHz))
         return 0;

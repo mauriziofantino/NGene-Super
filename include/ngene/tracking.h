@@ -11,6 +11,7 @@ typedef struct {
     double galileoSpacingChips; /**< Galileo adjacent tap delay, central BOC lobe. */
     unsigned gpsChannels;       /**< Slots reserved for GPS; remaining slots are shared. */
     unsigned galileoChannels;   /**< Slots reserved for Galileo; remaining slots are shared. */
+    unsigned beidouChannels;    /**< Slots reserved for BeiDou; zero uses shared slots. */
     unsigned autoPriority;      /**< Shared slot preference: 0 first confirmed, 1 GPS, 2 Galileo. */
     unsigned workers;           /**< Fixed tracking worker pool, 1..16. */
     int enabled;                /**< Track confirmed acquisition results when nonzero. */

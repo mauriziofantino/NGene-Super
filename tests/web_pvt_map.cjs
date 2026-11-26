@@ -13,9 +13,9 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
  try {
   let bootstrap;for(let k=0;k<100;k++){try{bootstrap=await(await fetch(base+'/api/v1/bootstrap')).json();break;}catch{await delay(100);}}
   assert(bootstrap,'service starts');
-  assert.equal(bootstrap.beidou_b1c_operational,false);
+  assert.equal(bootstrap.beidou_b1c_operational,true);
   const realStatus=await (await fetch(base+'/api/v1/status')).json();
-  assert.equal(realStatus.pvt.beidou,0,'Live API advertises zero BeiDou measurements without a producer');
+  assert.equal(realStatus.pvt.beidou,0,'Live API advertises zero BeiDou measurements while the receiver is stopped');
   assert.equal(realStatus.pvt.clock_beidou_m,undefined,'No BeiDou bias is invented');
   browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});
   const page=await browser.newPage({viewport:{width:1100,height:850}});let tiles=0;

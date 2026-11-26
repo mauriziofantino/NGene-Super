@@ -20,8 +20,8 @@ typedef struct {
     TNgChannel jobs[64];                  /**< Stable identities independent of constellation. */
     TNgTrackingSnapshot slots[64];        /**< Copied observation state. */
     unsigned reservation[64];             /**< 0 shared, 1 GPS, 2 Galileo. */
-    TNgChannel captures[2];               /**< Borrowed original acquisition registrations. */
-    TNgAcquisition *acquisition[2];       /**< Borrowed workers. */
+    TNgChannel captures[NG_CONSTELLATION_COUNT];               /**< Borrowed original acquisition registrations. */
+    TNgAcquisition *acquisition[NG_CONSTELLATION_COUNT];       /**< Borrowed workers. */
     TNgAcquisitionResult accepted[NG_CONSTELLATION_COUNT][NG_SATELLITE_MAX_PRN]; /**< Consumed seeds. */
     TNgBroadcast broadcast[NG_CONSTELLATION_COUNT][NG_SATELLITE_MAX_PRN]; /**< Classic satellite cache survives slot reacquisition. */
     TNgChannelDispatch *dispatch;  /**< One fixed pool for all slots. */
@@ -108,8 +108,9 @@ static unsigned FreeSlot(const TNgChannelPool *pool, unsigned system, int forDis
 /** Process the common interval once, then admit confirmed results in completion order. */
 static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
 {
-    TNgAcquisitionSnapshot searches[2];
-    uint32_t mask[2] = {0, 0};
+    TNgAcquisitionSnapshot searches[NG_CONSTELLATION_COUNT];
+    TNgAcquisitionResult beidouResults[NG_SATELLITE_MAX_PRN];
+    uint64_t mask[NG_CONSTELLATION_COUNT] = {0};
     unsigned k, system, active = 0;
     if (pool->haveWindow && pool->epoch == window->meta.epoch &&
         pool->firstSample == window->meta.firstSample && pool->count == window->meta.count)
@@ -169,24 +170,28 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
     pool->expected = window->meta.firstSample + window->meta.count;
     pool->haveWindow = 1;
     Refresh(pool);
-    for (system = 0; system < 2; ++system)
+    for (system = 0; system < NG_CONSTELLATION_COUNT; ++system)
         NgAcquisitionRead(pool->acquisition[system], &searches[system]);
+    NgAcquisitionReadResults(pool->acquisition[NG_CONSTELLATION_BEIDOU - 1], beidouResults);
     for (k = 0; k < pool->config.channelCount; ++k)
         if (pool->slots[k].active)
-            mask[pool->slots[k].constellation - 1] |= UINT32_C(1) << (pool->slots[k].prn - 1);
+            mask[pool->slots[k].constellation - 1] |= UINT64_C(1) << (pool->slots[k].prn - 1);
     for (;;) {
         const TNgAcquisitionResult *best = NULL;
         unsigned bestSystem = 0, bestSlot = 0, prn;
-        for (system = 0; system < 2; ++system) {
+        for (system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
             unsigned slot = FreeSlot(pool, system + 1, 0);
             if (slot == pool->config.channelCount)
                 continue;
-            for (prn = 1; prn <= 32; ++prn) {
-                const TNgAcquisitionResult *seed = &searches[system].results[prn - 1];
+            const int beidou = system + 1 == NG_CONSTELLATION_BEIDOU;
+            const unsigned lastPrn = beidou ? NG_SATELLITE_MAX_PRN : NG_LEGACY_MAX_PRN;
+            const TNgAcquisitionResult *results = beidou ? beidouResults : searches[system].results;
+            for (prn = 1; prn <= lastPrn; ++prn) {
+                const TNgAcquisitionResult *seed = &results[prn - 1];
                 const TNgAcquisitionResult *used = &pool->accepted[system][prn - 1];
                 if (!seed->confirmed || seed->epoch != window->meta.epoch ||
                     seed->firstSample > window->meta.firstSample ||
-                    (mask[system] & (UINT32_C(1) << (prn - 1))) ||
+                    (mask[system] & (UINT64_C(1) << (prn - 1))) ||
                     (used->confirmed && used->epoch == seed->epoch &&
                      used->firstSample >= seed->firstSample))
                     continue;
@@ -212,14 +217,14 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         NgTrackingRestoreBroadcast(pool->tracking[bestSlot],
                                    &pool->broadcast[bestSystem][best->prn - 1]);
         pool->accepted[bestSystem][best->prn - 1] = *best;
-        mask[bestSystem] |= UINT32_C(1) << (best->prn - 1);
+        mask[bestSystem] |= UINT64_C(1) << (best->prn - 1);
         Refresh(pool);
     }
     active = 0;
     for (k = 0; k < pool->config.channelCount; ++k)
         if (pool->slots[k].active)
             ++active;
-    for (system = 0; system < 2; ++system) {
+    for (system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
         unsigned slot = FreeSlot(pool, system + 1, 1);
         unsigned quota = 0, totalLimit = pool->config.channelCount - active;
         unsigned capacity = searches[system].parallelCapacity;
@@ -251,13 +256,13 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
                          : pool->trackingLoad > 0.55 ? 1u
                                                      : 0u;
         NgAcquisitionSetBudget(pool->acquisition[system], delay);
-        NgAcquisitionSetAdmission(pool->acquisition[system], mask[system],
+        NgAcquisitionSetAdmissionMask(pool->acquisition[system], mask[system],
                                   slot == pool->config.channelCount);
         for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane) {
             unsigned prn = searches[system].currentPrns[lane];
             slot = FreeSlot(pool, system + 1, 1);
             if (!prn || slot == pool->config.channelCount ||
-                (mask[system] & (UINT32_C(1) << (prn - 1))))
+                (mask[system] & (UINT64_C(1) << (prn - 1))))
                 continue;
             pool->slots[slot].state = 1;
             pool->slots[slot].constellation = system + 1;
@@ -398,7 +403,9 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
     for (k = 0; k < config->channelCount; ++k) {
         pool->reservation[k] = k < config->gpsChannels                             ? 1u
                                : k < config->gpsChannels + config->galileoChannels ? 2u
-                                                                                   : 0u;
+                               : k < config->gpsChannels + config->galileoChannels +
+                                         config->beidouChannels ? 3u
+                                                               : 0u;
         if (NgTrackingCreate(config, stream, 1, &pool->tracking[k], error) != NG_OK) {
             NgTrackingBankDestroy(bank);
             return NG_ERROR;
@@ -489,12 +496,19 @@ int NgTrackingBankLink(TNgTrackingBank *gps, TNgTrackingBank *galileo, TNgError 
     if (gps->pool->config.channelCount != galileo->pool->config.channelCount ||
         gps->pool->config.gpsChannels != galileo->pool->config.gpsChannels ||
         gps->pool->config.galileoChannels != galileo->pool->config.galileoChannels ||
+        gps->pool->config.beidouChannels != galileo->pool->config.beidouChannels ||
         gps->pool->config.autoPriority != galileo->pool->config.autoPriority)
         return NgFail(error, "Both signal subscribers must share the receiver channel allocation");
-    gps->pool->captures[1] = galileo->pool->captures[1];
-    gps->pool->acquisition[1] = galileo->pool->acquisition[1];
+    const unsigned target = galileo->system;
+    if (gps->pool->acquisition[target])
+        return NgFail(error, "Duplicate signal subscriber");
+    if (NgAcquisitionLink(gps->pool->acquisition[gps->system],
+                          galileo->pool->acquisition[target], error) != NG_OK)
+        return NG_ERROR;
+    gps->pool->captures[target] = galileo->pool->captures[target];
+    gps->pool->acquisition[target] = galileo->pool->acquisition[target];
     DestroyPool(galileo->pool);
     galileo->pool = gps->pool;
     galileo->ownsPool = 0;
-    return NgAcquisitionLink(gps->pool->acquisition[0], gps->pool->acquisition[1], error);
+    return NG_OK;
 }

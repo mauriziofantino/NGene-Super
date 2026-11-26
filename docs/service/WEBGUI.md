@@ -152,9 +152,12 @@ tracking assignment. The PVT indicator checks constellation and PRN against
 the solved `pvt.sky` entries, requires the same continuity epoch, and requires
 the solution sample to follow the start of the current assignment. Historical
 snapshots without `tracking_start_sample` use the epoch and satellite identity.
-The BeiDou B1C preview opens synthetic channel, B-CNAV1 and mixed PVT
-snapshots, including C63. The preview uses no live tap subscription, search map,
-or position map. The current build reports `beidou_b1c_operational=false`.
+Enable BeiDou B1C in Receiver configuration under Channel allocation,
+then apply the profile before starting reception. BeiDou can use shared
+slots or a configured reservation. Confirmation, tracking, CRC-validated
+B-CNAV1 and use in the mixed PVT solution appear in the existing channel
+and navigation views. The separately labelled preview uses synthetic
+telemetry, including C63.
 
 Plot refresh and pause are browser runtime settings. The observation module's
 parameters use the `/analysis/config` runtime API described in [ANALYSIS.md](ANALYSIS.md).

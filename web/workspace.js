@@ -352,8 +352,8 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       notice.hidden = !connected || beidouPreview || capabilities?.beidou_b1c_operational === true;
     let channelRows=display?.tracking||[];
     if(!channelRows.length && connected && display?.state==='stopped') {
-      const total=Number(profile['receiver.channels']||16),gps=Number(profile['receiver.gps_reserved']||0),gal=Number(profile['receiver.galileo_reserved']||0);
-      channelRows=Array.from({length:total},(_,k)=>({channel_id:k+1,reservation:k<gps?1:k<gps+gal?2:0,state:0,constellation:0,prn:0,active:false,taps:[]}));
+      const total=Number(profile['receiver.channels']||16),gps=Number(profile['receiver.gps_reserved']||0),gal=Number(profile['receiver.galileo_reserved']||0),bds=Number(profile['receiver.beidou_reserved']||0);
+      channelRows=Array.from({length:total},(_,k)=>({channel_id:k+1,reservation:k<gps?1:k<gps+gal?2:k<gps+gal+bds?3:0,state:0,constellation:0,prn:0,active:false,taps:[]}));
     }
     updateTracking(channelRows, display?.run_id, display);
     const navigationTable=document.querySelector('[data-navigation-status]');navigationTable.replaceChildren();

@@ -11,4 +11,6 @@ void NgAcquisitionGpsFree(void *context);
 void NgAcquisitionGalileoFree(void *context);
 extern const TNgAcquisitionStrategy ngGpsAcquisitionStrategy;
 extern const TNgAcquisitionStrategy ngGalileoAcquisitionStrategy;
+int NgAcquisitionBeidouWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error);
+extern const TNgAcquisitionStrategy ngBeidouAcquisitionStrategy;
 #endif

@@ -10,6 +10,16 @@
           "note": "Choose total channels and reservations. Fixed 6 GPS + 4 Galileo: total 10, GPS 6, Galileo 4. Automatic pool: total 12, both reservations 0. Preference applies when confirmed results compete for shared capacity.",
           "fields": [
             {
+              "key": "beidou_acquisition.enabled",
+              "label": "BeiDou B1C",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {"value": "false", "label": "Disabled"},
+                {"value": "true", "label": "Enabled · B1C"}
+              ]
+            },
+            {
               "key": "receiver.channels",
               "label": "Total receiver channels",
               "type": "number",
@@ -37,6 +47,15 @@
               "max": 32
             },
             {
+              "key": "receiver.beidou_reserved",
+              "label": "Slots reserved for BeiDou",
+              "type": "number",
+              "default": 0,
+              "integer": true,
+              "min": 0,
+              "max": 63
+            },
+            {
               "key": "receiver.auto_priority",
               "label": "Automatic channel preference",
               "type": "select",
@@ -53,7 +72,8 @@
                 {
                   "value": "2",
                   "label": "Prefer Galileo"
-                }
+                },
+                {"value": "3", "label": "Prefer BeiDou"}
               ]
             }
           ]
@@ -65,12 +85,14 @@
           "keys": [
             "receiver.channels",
             "receiver.gps_reserved",
-            "receiver.galileo_reserved"
+            "receiver.galileo_reserved",
+            "receiver.beidou_reserved"
           ],
           "left": "receiver.gps_reserved",
           "right": "receiver.galileo_reserved",
+          "extra": "receiver.beidou_reserved",
           "total": "receiver.channels",
-          "message": "GPS and Galileo reservations must fit within the total receiver channels."
+          "message": "Constellation reservations must fit within the total receiver channels."
         }
       ]
     },

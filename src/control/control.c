@@ -49,7 +49,8 @@ struct TNgControl {
     TNgAnalysis *analysis;
     /** Receiver-worker-owned acquisition; accessed only on its ordered callbacks. */
     TNgAcquisition *acquisition;
-    TNgTrackingBank *trackingBanks[2];                 /**< Run-owned composite registrations. */
+    TNgTrackingBank *trackingBanks[NG_CONSTELLATION_COUNT];                 /**< Run-owned composite registrations. */
+    TNgAcquisition *beidouAcquisition;
     TNgAcquisition *galileoAcquisition;                /**< Galileo run-owned worker. */
     TNgAcquisitionSearchSpace galileoSearchSpaces[32]; /**< Archived Galileo maps. */
     TNgAcquisitionSearchSpace searchSpaces[32]; /**< Heap-owned display archive, mutex-protected. */
@@ -421,6 +422,8 @@ static void Progress(void *context, const TNgReceiverStats *stats)
         c->status.receiver = *stats;
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
         NgAcquisitionRead(c->galileoAcquisition, &c->status.galileoAcquisition);
+        NgAcquisitionRead(c->beidouAcquisition, &c->status.beidouAcquisition);
+        NgAcquisitionReadResults(c->beidouAcquisition, c->status.beidouResults);
         NgTrackingBankReadAll(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               c->status.tracking);
         NgTrackingBankReadPvt(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
@@ -457,7 +460,7 @@ static void ReceiverWorker(void *context)
     c->runConfig.galileoAcquisition.enabled = 1;
     c->runConfig.tracking.enabled = 1;
     TNgFrontend source;
-    TNgChannel acquisitionChannels[2];
+    TNgChannel acquisitionChannels[NG_CONSTELLATION_COUNT];
     size_t acquisitionCount = 0;
     TNgConditioner conditioner = NgConditionerBypass();
     TNgReceiverHooks hooks = {c, 1, Started, Block, Progress, RawBlock, Backpressure};
@@ -471,6 +474,8 @@ static void ReceiverWorker(void *context)
     memset(c->searchSpaces, 0, sizeof(c->searchSpaces));
     memset(c->galileoSearchSpaces, 0, sizeof(c->galileoSearchSpaces));
     memset(&c->status.galileoAcquisition, 0, sizeof(c->status.galileoAcquisition));
+    memset(&c->status.beidouAcquisition, 0, sizeof(c->status.beidouAcquisition));
+    memset(c->status.beidouResults, 0, sizeof(c->status.beidouResults));
     NgMutexUnlock(&c->mutex);
     c->workerResult = NgFrontendOpen(&c->runConfig, &source, &c->workerError);
     if (c->workerResult == NG_OK) {
@@ -513,6 +518,19 @@ static void ReceiverWorker(void *context)
         if (c->workerResult == NG_OK)
             c->workerResult =
                 NgTrackingBankLink(c->trackingBanks[0], c->trackingBanks[1], &c->workerError);
+        if (c->workerResult == NG_OK && !c->runConfig.recordOnly &&
+            c->runConfig.beidouAcquisition.enabled) {
+            c->workerResult = NgAcquisitionCreateBeidou(
+                &c->runConfig.beidouAcquisition, &source.info, &c->beidouAcquisition,
+                &acquisitionChannels[acquisitionCount], &c->workerError);
+            if (c->workerResult == NG_OK)
+                c->workerResult = NgTrackingBankCreate(
+                    &c->runConfig.tracking, &source.info, c->beidouAcquisition,
+                    &acquisitionChannels[acquisitionCount++], &c->trackingBanks[2], &c->workerError);
+            if (c->workerResult == NG_OK)
+                c->workerResult = NgTrackingBankLink(c->trackingBanks[0], c->trackingBanks[2],
+                                                     &c->workerError);
+        }
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
             c->workerResult = NgReceiverRunEx(
                 &c->runConfig, &source, &conditioner, acquisitionCount ? acquisitionChannels : NULL,
@@ -521,6 +539,8 @@ static void ReceiverWorker(void *context)
         NgMutexLock(&c->mutex);
         NgAcquisitionRead(c->acquisition, &c->status.acquisition);
         NgAcquisitionRead(c->galileoAcquisition, &c->status.galileoAcquisition);
+        NgAcquisitionRead(c->beidouAcquisition, &c->status.beidouAcquisition);
+        NgAcquisitionReadResults(c->beidouAcquisition, c->status.beidouResults);
         NgTrackingBankReadAll(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               c->status.tracking);
         NgTrackingBankReadPvt(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
@@ -530,10 +550,15 @@ static void ReceiverWorker(void *context)
         c->status.acquisition.currentPrn = 0;
         c->status.galileoAcquisition.searching = 0;
         c->status.galileoAcquisition.currentPrn = 0;
+        c->status.beidouAcquisition.searching = 0;
+        c->status.beidouAcquisition.currentPrn = 0;
         NgMutexUnlock(&c->mutex);
-        NgTrackingBankDestroy(c->trackingBanks[0]);
-        NgTrackingBankDestroy(c->trackingBanks[1]);
-        c->trackingBanks[0] = c->trackingBanks[1] = NULL;
+        for (unsigned system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
+            NgTrackingBankDestroy(c->trackingBanks[system]);
+            c->trackingBanks[system] = NULL;
+        }
+        NgAcquisitionDestroy(c->beidouAcquisition);
+        c->beidouAcquisition = NULL;
         NgAcquisitionDestroy(c->acquisition);
         c->acquisition = NULL;
         NgAcquisitionDestroy(c->galileoAcquisition);

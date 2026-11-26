@@ -44,6 +44,8 @@ typedef struct {
     TNgAcquisitionSnapshot acquisition;
     /** Independent Galileo E1-B telemetry. */
     TNgAcquisitionSnapshot galileoAcquisition;
+    TNgAcquisitionSnapshot beidouAcquisition;
+    TNgAcquisitionResult beidouResults[NG_SATELLITE_MAX_PRN];
     TNgTrackingSnapshot tracking[64]; /**< Copied completed integrations. */
     TNgPvtSnapshot pvt; /**< Copied common-epoch broadcast solution. */
     /** Cumulative written pairs including completed capture sessions. */

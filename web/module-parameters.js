@@ -39,7 +39,7 @@ export function moduleParameters(schema) {
       for (const rule of rules) {
         if (!rule.keys.includes(key) || !matches(rule.when, values)) continue;
         const get = v => typeof v === 'string' ? Number(values[v]) : v;
-        const valid = rule.kind === 'sumAtMost' ? get(rule.left)+get(rule.right)<=get(rule.total) : rule.kind === 'lessEqual' ? get(rule.left) <= get(rule.right) :
+        const valid = rule.kind === 'sumAtMost' ? get(rule.left) + get(rule.right) + get(rule.extra ?? 0) <= get(rule.total) : rule.kind === 'lessEqual' ? get(rule.left) <= get(rule.right) :
           rule.kind === 'minimum' ? get(rule.key) >= rule.value :
           (get(rule.numerator) * (rule.scale ?? 1) / get(rule.denominator)) < rule.limit;
         if (!valid) return rule.message;

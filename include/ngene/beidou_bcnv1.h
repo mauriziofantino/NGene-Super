@@ -37,6 +37,8 @@ typedef struct {
     uint64_t firstSamples[NG_BCNV1_SYNC_SYMBOLS]; /**< Absolute start of each symbol. */
     uint64_t epoch, nextSample; /**< Continuity and expected next start sample. */
     unsigned prn; /**< Identity of the buffered symbols. */
+    unsigned elapsedSymbols; /**< Periods from the returned SF1 start through this input. */
+    unsigned nextFrame, lastSoh; /**< Aligned decode countdown following a validated frame. */
 } TNgBcnv1Stream;
 
 /** Feed one complete 10-ms data prompt as a soft symbol with its input sample range.

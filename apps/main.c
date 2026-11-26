@@ -70,12 +70,13 @@ int main(int argc, char **argv)
     TNgFrontend frontend;
     TNgReceiverStats stats;
     TNgAcquisition *acquisition = NULL;
-    TNgTrackingBank *trackingBanks[2] = {NULL, NULL};
+    TNgTrackingBank *trackingBanks[NG_CONSTELLATION_COUNT] = {NULL};
     TNgAcquisition *galileoAcquisition = NULL;
-    TNgChannel acquisitionChannels[2];
+    TNgAcquisition *beidouAcquisition = NULL;
+    TNgChannel acquisitionChannels[NG_CONSTELLATION_COUNT];
     size_t acquisitionCount = 0;
     TNgConditioner conditioner = NgConditionerBypass();
-    int result;
+    int result = NG_ERROR;
     int web = 0;
     int k;
     unsigned port = 8080;
@@ -244,29 +245,27 @@ int main(int argc, char **argv)
     }
     if (galileoAcquisition)
         acquisitionCount++;
+    if (!config.recordOnly && config.beidouAcquisition.enabled) {
+        if (NgAcquisitionCreateBeidou(&config.beidouAcquisition, &frontend.info, &beidouAcquisition,
+                                      &acquisitionChannels[acquisitionCount], &error) != NG_OK)
+            goto cleanup;
+        ++acquisitionCount;
+    }
     {
         size_t trackingIndex = 0;
-        TNgAcquisition *workers[2] = {acquisition, galileoAcquisition};
+        TNgAcquisition *workers[NG_CONSTELLATION_COUNT] = {acquisition, galileoAcquisition, beidouAcquisition};
         unsigned system;
-        for (system = 0; system < 2; ++system) {
+        for (system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
             if (!workers[system]) continue;
             if (NgTrackingBankCreate(&config.tracking, &frontend.info, workers[system],
                 &acquisitionChannels[trackingIndex++], &trackingBanks[system], &error) != NG_OK) {
-                fprintf(stderr, "%s\n", error.message);
-                NgTrackingBankDestroy(trackingBanks[0]);
-                NgTrackingBankDestroy(trackingBanks[1]);
-                NgAcquisitionDestroy(acquisition);
-                NgAcquisitionDestroy(galileoAcquisition);
-                NgFrontendDestroy(&frontend);
-                return 1;
+                goto cleanup;
             }
         }
-    }    if (NgTrackingBankLink(trackingBanks[0],trackingBanks[1],&error) != NG_OK) {
-        fprintf(stderr,"%s\n",error.message);
-        NgTrackingBankDestroy(trackingBanks[0]); NgTrackingBankDestroy(trackingBanks[1]);
-        NgAcquisitionDestroy(acquisition); NgAcquisitionDestroy(galileoAcquisition);
-        NgFrontendDestroy(&frontend); return 1;
     }
+    if (NgTrackingBankLink(trackingBanks[0], trackingBanks[1], &error) != NG_OK ||
+        NgTrackingBankLink(trackingBanks[0], trackingBanks[2], &error) != NG_OK)
+        goto cleanup;
     result =
         NgReceiverRun(&config, &frontend, &conditioner, acquisitionCount ? acquisitionChannels : NULL,
                       acquisitionCount, ShouldStop, NULL, &stats, &error);
@@ -307,8 +306,10 @@ int main(int argc, char **argv)
                        found->epoch, found->firstSample);
         }
     }
-    NgTrackingBankDestroy(trackingBanks[0]);
-    NgTrackingBankDestroy(trackingBanks[1]);
+cleanup:
+    for (unsigned system = 0; system < NG_CONSTELLATION_COUNT; ++system)
+        NgTrackingBankDestroy(trackingBanks[system]);
+    NgAcquisitionDestroy(beidouAcquisition);
     NgAcquisitionDestroy(acquisition);
     NgAcquisitionDestroy(galileoAcquisition);
     NgFrontendDestroy(&frontend);

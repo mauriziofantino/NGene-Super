@@ -61,6 +61,11 @@ static void TestConfig(void)
     CHECK(Parse("[galileo_acquisition]\nfirst_prn=9\nlast_prn=7\n", &c) == NG_ERROR);
     CHECK(Parse("[galileo_acquisition]\nlast_prn=33\n", &c) == NG_ERROR);
     CHECK(Parse("[galileo_acquisition]\nenabled=maybe\n", &c) == NG_ERROR);
+    CHECK(Parse("[beidou_acquisition]\nenabled=true\nfirst_prn=33\nlast_prn=63\n"
+                "[receiver]\nbeidou_reserved=4\n", &c) == NG_OK);
+    CHECK(c.beidouAcquisition.enabled && c.beidouAcquisition.firstPrn == 33 &&
+          c.beidouAcquisition.lastPrn == 63 && c.tracking.beidouChannels == 4);
+    CHECK(Parse("[beidou_acquisition]\nlast_prn=64\n", &c) == NG_ERROR);
     CHECK(Parse("[frontend]\nsample_rate_hz=-1\n", &c) == NG_ERROR);
     CHECK(Parse("[frontend]\nsample_rate_hz=10junk\n", &c) == NG_ERROR);
     CHECK(Parse("[frontend]\nsample_rate_hz=16000000\nsample_rate_hz=8000000\n", &c) == NG_ERROR);

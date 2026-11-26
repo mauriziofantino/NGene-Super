@@ -814,6 +814,38 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             cJSON_AddItemToArray(results, item);
         }
     }
+    {
+        const TNgAcquisitionSnapshot *snapshot = &status.beidouAcquisition;
+        cJSON *acquisition = cJSON_AddObjectToObject(object, "beidou_acquisition");
+        cJSON *results = cJSON_AddArrayToObject(acquisition, "results");
+        cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
+        cJSON_AddBoolToObject(acquisition, "enabled", snapshot->enabled);
+        cJSON_AddBoolToObject(acquisition, "searching", snapshot->searching);
+        Number(acquisition, "active_searches", snapshot->activeSearches);
+        Number(acquisition, "current_prn", snapshot->currentPrn);
+        Counter(acquisition, "searches", snapshot->searches);
+        Counter(acquisition, "skipped_samples", snapshot->skippedSamples);
+        Counter(acquisition, "gaps", snapshot->gaps);
+        String(acquisition, "message", snapshot->message);
+        for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
+            if (snapshot->currentPrns[lane])
+                cJSON_AddItemToArray(prns, cJSON_CreateNumber(snapshot->currentPrns[lane]));
+        for (unsigned prn = 0; prn < NG_SATELLITE_MAX_PRN; ++prn) {
+            const TNgAcquisitionResult *found = &status.beidouResults[prn];
+            if (!found->prn)
+                continue;
+            cJSON *item = cJSON_CreateObject();
+            Number(item, "prn", found->prn);
+            cJSON_AddBoolToObject(item, "confirmed", found->confirmed);
+            Number(item, "doppler_hz", found->dopplerHz);
+            Number(item, "code_phase_chips", found->codePhaseChips);
+            Number(item, "peak_ratio", found->peakRatio);
+            Number(item, "successes", found->successes);
+            Counter(item, "epoch", found->epoch);
+            Counter(item, "first_sample", found->firstSample);
+            cJSON_AddItemToArray(results, item);
+        }
+    }
     Number(object, "hardware_frequency_hz", (double)status.hardwareFrequencyHz);
     Number(object, "signal_frequency_hz", (double)status.signalFrequencyHz);
     Number(object, "digital_if_hz", (double)status.digitalIfHz);
@@ -1492,7 +1524,7 @@ static int Handle(struct mg_connection *connection, void *context)
             cJSON_AddBoolToObject(reply, "tracking", 1);
             cJSON_AddBoolToObject(reply, "gps_acquisition", 1);
             cJSON_AddBoolToObject(reply, "galileo_acquisition", 1);
-            cJSON_AddBoolToObject(reply, "beidou_b1c_operational", 0);
+            cJSON_AddBoolToObject(reply, "beidou_b1c_operational", 1);
             String(reply, "fft_backend", NgFftBackend());
             return JsonReply(connection, 200, reply);
         }

@@ -329,6 +329,7 @@ int NgBcnv1Push(TNgBcnv1Stream *stream, unsigned prn, uint64_t epoch, uint64_t f
         return NG_ERROR;
     if (prn != stream->prn || epoch != stream->epoch || firstSample != stream->nextSample) {
         stream->count = stream->writeIndex = 0;
+        stream->nextFrame = 0;
         stream->prn = prn;
         stream->epoch = epoch;
     }
@@ -341,11 +342,32 @@ int NgBcnv1Push(TNgBcnv1Stream *stream, unsigned prn, uint64_t epoch, uint64_t f
         ++stream->count;
     if (stream->count < NG_BCNV1_SYNC_SYMBOLS)
         return NG_END;
+    if (stream->nextFrame) {
+        if (--stream->nextFrame)
+            return NG_END;
+        size_t start = stream->writeIndex + NG_BCNV1_HEADER_SYMBOLS;
+        TNgBcnv1Frame aligned;
+        int status = NgBcnv1Decode(stream->symbols + start, prn, &aligned);
+        if (status == NG_ERROR)
+            return status;
+        if (status == NG_OK && aligned.soh == (stream->lastSoh + 1) % 200) {
+            stream->lastSoh = aligned.soh;
+            stream->nextFrame = NG_BCNV1_FRAME_SYMBOLS;
+            *frame = aligned;
+            stream->elapsedSymbols = NG_BCNV1_FRAME_SYMBOLS;
+            *frameStartSample = stream->firstSamples[start % NG_BCNV1_SYNC_SYMBOLS];
+            return NG_OK;
+        }
+    }
     size_t offset;
     const int result = NgBcnv1Find(stream->symbols + stream->writeIndex, stream->count,
                                    prn, &offset, frame);
-    if (result == NG_OK)
+    if (result == NG_OK) {
         *frameStartSample = stream->firstSamples[(stream->writeIndex + offset) %
                                                 NG_BCNV1_SYNC_SYMBOLS];
+        stream->elapsedSymbols = NG_BCNV1_SYNC_SYMBOLS;
+        stream->lastSoh = frame->soh;
+        stream->nextFrame = NG_BCNV1_FRAME_SYMBOLS - NG_BCNV1_HEADER_SYMBOLS;
+    }
     return result;
 }
