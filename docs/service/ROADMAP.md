@@ -36,6 +36,11 @@ GPS/Galileo DLL/FLL/PLL, multi-correlator tracking, bounded slot allocation and 
 below retain their platform and RF validation requirements even where adapter or replay
 support exists.
 
+For BeiDou B1C, the interface and replay matrix are available. The end-to-end
+replay and RF milestones require the B2–B4 operational connection to the
+broadcast and PVT libraries. [BeiDou increments](PIANO_INCREMENTALE_EVO.md#6-beidou-b1c--incrementi-approvabili) ·
+[B8–B10 evidence](../../development/profiling/B8/README.md)
+
 1. **GNSS DSP contracts and kernels:** expand Galileo PRN coverage and validate recorded/live Galileo separately; port useful NCO, replicas, and correlations from the archive; define scaling/ranges and a C reference before x86/ARM SIMD. Compare safe historical XOR, candidate SAD, and products against the acquisition/channel requirements; do not presume a winner. Approximate arithmetic remains experimental.
 2. **Tracking:** adapt NGene algorithms behind the APIs, with private scratch and explicit integration. Implement tracking, HOLDOVER and fast reacquisition; revisit the channel contract as real algorithms are connected.
 3. **Navigation and assistance:** demodulation during tracking, message cache, signal/network updates, almanac, previous position, and visibility-guided search.

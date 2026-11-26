@@ -298,7 +298,7 @@ int NgBcnv1Decode(const int8_t symbols[NG_BCNV1_FRAME_SYMBOLS], unsigned prn,
 int NgBcnv1Find(const int8_t *symbols, size_t count, unsigned prn, size_t *offset,
                 TNgBcnv1Frame *frame)
 {
-    const size_t needed = NG_BCNV1_FRAME_SYMBOLS + NG_BCNV1_HEADER_SYMBOLS;
+    const size_t needed = NG_BCNV1_SYNC_SYMBOLS;
     if (!symbols || !offset || !frame || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn))
         return NG_ERROR;
     if (count < needed)
@@ -317,4 +317,35 @@ int NgBcnv1Find(const int8_t *symbols, size_t count, unsigned prn, size_t *offse
         }
     }
     return NG_END;
+}
+
+/** Evaluate each complete framing window once and preserve its SF1 sample anchor. */
+int NgBcnv1Push(TNgBcnv1Stream *stream, unsigned prn, uint64_t epoch, uint64_t firstSample,
+                uint64_t endSample, int8_t symbol, TNgBcnv1Frame *frame,
+                uint64_t *frameStartSample)
+{
+    if (!stream || !frame || !frameStartSample || endSample <= firstSample ||
+        !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn))
+        return NG_ERROR;
+    if (prn != stream->prn || epoch != stream->epoch || firstSample != stream->nextSample) {
+        stream->count = stream->writeIndex = 0;
+        stream->prn = prn;
+        stream->epoch = epoch;
+    }
+    const size_t index = stream->writeIndex;
+    stream->symbols[index] = stream->symbols[index + NG_BCNV1_SYNC_SYMBOLS] = symbol;
+    stream->firstSamples[index] = firstSample;
+    stream->writeIndex = (index + 1) % NG_BCNV1_SYNC_SYMBOLS;
+    stream->nextSample = endSample;
+    if (stream->count < NG_BCNV1_SYNC_SYMBOLS)
+        ++stream->count;
+    if (stream->count < NG_BCNV1_SYNC_SYMBOLS)
+        return NG_END;
+    size_t offset;
+    const int result = NgBcnv1Find(stream->symbols + stream->writeIndex, stream->count,
+                                   prn, &offset, frame);
+    if (result == NG_OK)
+        *frameStartSample = stream->firstSamples[(stream->writeIndex + offset) %
+                                                NG_BCNV1_SYNC_SYMBOLS];
+    return result;
 }

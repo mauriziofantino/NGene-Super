@@ -36,7 +36,7 @@ typedef struct {
     unsigned channelId;       /**< Stable slot identity, independent of assigned PRN. */
     unsigned state;           /**< 0 waiting, 1 acquisition, 2 tracking. */
     unsigned prn;             /**< Zero while unassigned. */
-    unsigned constellation;   /**< 1 GPS, 2 Galileo E1-B. */
+    unsigned constellation;   /**< TNgConstellation for the assigned signal. */
     int active;               /**< NCO and loop state valid in current epoch. */
     int pll;              /**< FLL convergence passed; does not establish navigation eligibility. */
     uint64_t epoch;       /**< Continuity generation. */
@@ -51,6 +51,7 @@ typedef struct {
     double offset[NG_TRACKING_MAX_TAPS]; /**< Replica delay in chips. */
     double i[NG_TRACKING_MAX_TAPS];      /**< Mean coherent I. */
     double q[NG_TRACKING_MAX_TAPS];      /**< Mean coherent Q. */
+    uint64_t trackingStartSample;      /**< First input sample accepted for this assignment. */
 } TNgTrackingSnapshot;
 /** Opaque private tracking state; no shared mutable DSP buffers. */
 typedef struct TNgTracking TNgTracking;

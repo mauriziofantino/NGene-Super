@@ -7,6 +7,11 @@ This is the concise, current project handoff for contributors. The roadmap conta
 the accepted direction; subsystem documents contain detailed contracts and evidence.
 Historical increment reports describe only the revisions and environments they name.
 
+The [GNSS design review](CONSOLIDAMENTO_GNSS.md) records how Classic acquisition,
+per-cell detection, coherent dwell, data/pilot timing and real-time scheduling
+map onto the current code. Its actions are integrated into the existing B and F
+increments in [the incremental plan](PIANO_INCREMENTALE_EVO.md).
+
 ## Current state
 
 NGene EVO is a portable C11 GNSS receiver foundation with native HackRF, RTL-SDR,
@@ -100,8 +105,9 @@ and half-chip seed rejection. Offline C/N0 moments agree within 1.124 dB
 on the AWGN fixture. Strong coherent echoes can bypass the guard veto.
 The closed-loop two-ray test reproduces false PLL locks on strong echoes.
 Adding two guard taps does not improve those cases. RF remains pending.
-B4 adds a standalone B-CNAV1 decoder and a synthetic SIMD I/Q data bridge.
-Tracker integration and replay remain pending.
+B4 adds a B-CNAV1 decoder with streaming symbol framing and sample-anchored
+frame output, plus a synthetic SIMD I/Q data bridge. Tracker integration and
+replay remain pending.
 [B-CNAV1 decoder](BEIDOU_BCNV1.md).
 B5–B7 adds matched B-CNAV1 broadcast caches, BDT code-time observation
 building, and a three-system QR PVT with independent code biases. All seven
@@ -110,6 +116,15 @@ B1C tracking integration and RF qualification remain pending.
 [BeiDou broadcast and PVT](BEIDOU_PVT.md).
 [B3 tracking lab](../../development/profiling/B3/README.md).
 [BeiDou incremental plan](PIANO_INCREMENTALE_EVO.md#6-beidou-b1c--incrementi-approvabili).
+
+B8 adds a repeatable, out-of-process replay matrix with input hashes, cold
+starts and an explicit continuity break. Windows replay covers the existing
+GPS/Galileo chain. B10 exposes confirmation, tracking, decoding and PVT use as
+independent states and exercises BeiDou PRN 63 in a labelled mixed-constellation
+preview. Live B1C selection and B8/B9 qualification await the operational
+acquisition, tracking and decoder connection, reference I/Q and physical RF.
+Native Linux and macOS verification of these changes is pending.
+[B8–B10 evidence](../../development/profiling/B8/README.md).
 
 The F6 mixed GPS/Galileo replay matrix measures the existing tracking pool
 and acquisition permits at fixed precision. More acquisition permits reduced

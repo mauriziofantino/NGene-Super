@@ -5,6 +5,7 @@
 
 #define NG_BCNV1_FRAME_SYMBOLS 1800u
 #define NG_BCNV1_HEADER_SYMBOLS 72u
+#define NG_BCNV1_SYNC_SYMBOLS (NG_BCNV1_FRAME_SYMBOLS + NG_BCNV1_HEADER_SYMBOLS)
 #define NG_BCNV1_SF2_BYTES 75u
 #define NG_BCNV1_SF3_BYTES 33u
 
@@ -27,4 +28,22 @@ int NgBcnv1Decode(const int8_t symbols[NG_BCNV1_FRAME_SYMBOLS], unsigned prn,
  * On NG_OK, writes the symbol offset and the first validated frame. */
 int NgBcnv1Find(const int8_t *symbols, size_t count, unsigned prn, size_t *offset,
                 TNgBcnv1Frame *frame);
+
+/** Per-channel framing state. Zero-initialize on assignment or loss of symbol timing.
+ * The caller owns the state and serializes calls. */
+typedef struct {
+    int8_t symbols[2 * NG_BCNV1_SYNC_SYMBOLS]; /**< Mirrored circular window. */
+    size_t writeIndex, count; /**< Next slot and number of contiguous symbols. */
+    uint64_t firstSamples[NG_BCNV1_SYNC_SYMBOLS]; /**< Absolute start of each symbol. */
+    uint64_t epoch, nextSample; /**< Continuity and expected next start sample. */
+    unsigned prn; /**< Identity of the buffered symbols. */
+} TNgBcnv1Stream;
+
+/** Feed one complete 10-ms data prompt as a soft symbol with its input sample range.
+ * A new PRN, epoch or discontinuous range discards partial framing. On NG_OK, returns
+ * the CRC-validated frame and its first sample. On NG_END, neither output is modified.
+ * NG_ERROR indicates an invalid argument or decoder resource failure. */
+int NgBcnv1Push(TNgBcnv1Stream *stream, unsigned prn, uint64_t epoch, uint64_t firstSample,
+                uint64_t endSample, int8_t symbol, TNgBcnv1Frame *frame,
+                uint64_t *frameStartSample);
 #endif

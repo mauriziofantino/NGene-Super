@@ -109,11 +109,11 @@ Prefix: `/api/v1`. Responses are JSON; 64-bit counters and revisions are **decim
 
 | Method and path | Content / effect |
 |---|---|
-| GET `/bootstrap` | Version, OS/architecture, compiled frontend availability, single-source capability, FFT backend, and server-session token |
+| GET `/bootstrap` | Version, OS/architecture, compiled frontend availability, single-source capability, FFT backend, server-session token, and `beidou_b1c_operational` |
 | GET `/config` | `{revision, ini, mutability:"stopped"}` |
 | POST `/config/validate` | `{revision:"…", ini:"…"}`; checks syntax and bounds without applying |
 | POST `/config` | Same body; checks revision/state, saves, and returns the normalized configuration |
-| GET `/status` | State, commands, counters, directory, recording information, and diagnostic snapshot |
+| GET `/status` | State, commands, counters, directory, recording information, diagnostic snapshots, acquisition results, tracking and PVT |
 | POST `/receiver/start`, `/receiver/stop` | `{revision:"…"}`; 202 response with command_id |
 | POST `/recording/start`, `/recording/stop` | `{revision:"…"}`; same asynchronous contract |
 | GET `/files` | Revision/directory and up to 200 selected files, sizes, closed and truncated flags |
@@ -142,7 +142,22 @@ Host/Origin are restricted to the local listener; the token changes on restart. 
 
 Receiver: `stopped → starting → running → stopping → stopped`; errors lead to `error`. Stop during Starting cancels/cleans up startup. Recording: `off → starting → recording → stopping → off`. Stop recording drains the writer while the receiver continues. Stop receiver closes both; the console remains active. A writer error stops the run and remains visible.
 
-The plots and counters show actual runtime results. Spectrum, waterfall, and histograms are implemented; satellite acquisition/tracking/PVT remain to be integrated. Plot refresh and pause are browser runtime settings; the observation module's parameters use the `/analysis/config` runtime API described in [ANALYSIS.md](ANALYSIS.md).
+The Channels table and satellite page show confirmation, tracking, decoding and
+PVT use independently. A confirmed seed can precede the first coherent
+integration. Validated message parts establish decoding. Valid TOW and
+consistent ephemerides have their own fields in Navigation data.
+
+`tracking_start_sample` is the first input sample accepted for the current
+tracking assignment. The PVT indicator checks constellation and PRN against
+the solved `pvt.sky` entries, requires the same continuity epoch, and requires
+the solution sample to follow the start of the current assignment. Historical
+snapshots without `tracking_start_sample` use the epoch and satellite identity.
+The BeiDou B1C preview opens synthetic channel, B-CNAV1 and mixed PVT
+snapshots, including C63. The preview uses no live tap subscription, search map,
+or position map. The current build reports `beidou_b1c_operational=false`.
+
+Plot refresh and pause are browser runtime settings. The observation module's
+parameters use the `/analysis/config` runtime API described in [ANALYSIS.md](ANALYSIS.md).
 
 ## Optional browser test
 

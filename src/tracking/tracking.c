@@ -394,6 +394,7 @@ int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
             (double)(window->meta.firstSample - t->seed.firstSample) / t->stream.sampleRateHz;
         t->codePhase = fmod(t->seed.codePhaseChips + elapsed * t->initialCode, t->period);
         t->expected = window->meta.firstSample;
+        t->snapshot.trackingStartSample = window->meta.firstSample;
         t->started = 1;
     }
     while (position < window->meta.count) {

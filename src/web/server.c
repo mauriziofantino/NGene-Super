@@ -681,6 +681,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             Counter(row, "epoch", t->epoch);
             Counter(row, "first_sample", t->firstSample);
             Counter(row, "end_sample", t->endSample);
+            Counter(row, "tracking_start_sample", t->trackingStartSample);
             Counter(row, "integrations", t->integrations);
             Number(row, "doppler_hz", t->dopplerHz);
             Number(row, "code_rate_hz", t->codeRateHz);
@@ -1491,6 +1492,7 @@ static int Handle(struct mg_connection *connection, void *context)
             cJSON_AddBoolToObject(reply, "tracking", 1);
             cJSON_AddBoolToObject(reply, "gps_acquisition", 1);
             cJSON_AddBoolToObject(reply, "galileo_acquisition", 1);
+            cJSON_AddBoolToObject(reply, "beidou_b1c_operational", 0);
             String(reply, "fft_backend", NgFftBackend());
             return JsonReply(connection, 200, reply);
         }

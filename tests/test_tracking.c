@@ -199,7 +199,7 @@ static void Cn0Reference(void)
     CHECK(NgTrackingSeed(tracking, &seed, &error) == NG_OK);
     view.samples = samples;
     view.meta.count = 2048;
-    for (ms = 0; ms < 30000; ++ms) {
+    for (ms = 1; ms <= 30000; ++ms) {
         for (n = 0; n < 2048; ++n) {
             double phase = fmod(0.25 + (double)n * 1023000 / 2048000, 1023);
             samples[n].i = (int8_t)lround((double)chips[(size_t)phase] * ((ms / 20) % 2 ? -1 : 1) + 8 * Gaussian(&random));
@@ -209,12 +209,13 @@ static void Cn0Reference(void)
         CHECK(NgTrackingProcess(tracking, &view, &error) == NG_OK);
     }
     NgTrackingRead(tracking, &snapshot);
+    CHECK(snapshot.trackingStartSample == 2048 && snapshot.firstSample > 2048);
     double reference = 10 * log10(2048000.0 / (2 * 8 * 8));
     fprintf(stderr, "C/N0 estimated %.3f, reference %.3f dB-Hz\n", snapshot.cn0DbHz, reference);
     CHECK(snapshot.cn0Valid && fabs(snapshot.cn0DbHz - reference) < 3);
     /* A previously coherent channel must release its slot after Classic's
        one-second relock timeout, rather than keep a stale PLL flag forever. */
-    for (; ms < 31500; ++ms) {
+    for (; ms <= 31500; ++ms) {
         for (n = 0; n < 2048; ++n) {
             samples[n].i = (int8_t)lround(8 * Gaussian(&random));
             samples[n].q = (int8_t)lround(8 * Gaussian(&random));
@@ -224,6 +225,11 @@ static void Cn0Reference(void)
     }
     NgTrackingRead(tracking, &snapshot);
     CHECK(!snapshot.active && !snapshot.navigation.towValid);
+    CHECK(NgTrackingSeed(tracking, &seed, &error) == NG_OK);
+    view.meta.firstSample = (uint64_t)ms * 2048;
+    CHECK(NgTrackingProcess(tracking, &view, &error) == NG_OK);
+    NgTrackingRead(tracking, &snapshot);
+    CHECK(snapshot.trackingStartSample == view.meta.firstSample);
     NgTrackingDestroy(tracking);
 }
 

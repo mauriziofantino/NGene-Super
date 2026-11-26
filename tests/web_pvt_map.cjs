@@ -13,6 +13,7 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
  try {
   let bootstrap;for(let k=0;k<100;k++){try{bootstrap=await(await fetch(base+'/api/v1/bootstrap')).json();break;}catch{await delay(100);}}
   assert(bootstrap,'service starts');
+  assert.equal(bootstrap.beidou_b1c_operational,false);
   const realStatus=await (await fetch(base+'/api/v1/status')).json();
   assert.equal(realStatus.pvt.beidou,0,'Live API advertises zero BeiDou measurements without a producer');
   assert.equal(realStatus.pvt.clock_beidou_m,undefined,'No BeiDou bias is invented');
@@ -27,7 +28,7 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
    window.geometryWorkspace=createReceiverWorkspace({onChannelInterest:id=>window.channelInterest.push(id)});
    window.geometrySnapshot={connected:true,profile:{'receiver.channels':'2'},status:{state:'running',run_id:'geometry',tracking:[
     {channel_id:1,state:0,constellation:0,prn:0,active:false,cn0_valid:false,taps:[]},
-    {channel_id:2,state:2,constellation:2,prn:7,active:true,pll:true,cn0_valid:true,cn0_db_hz:42.5,doppler_hz:1250,taps:[]}
+    {channel_id:2,state:2,constellation:2,prn:7,active:true,pll:true,cn0_valid:true,cn0_db_hz:42.5,doppler_hz:1250,integrations:'1',epoch:'1',taps:[]}
    ],pvt:{available:true,latitude_deg:45,longitude_deg:8,height_m:100,residual_rms_m:2,tow_seconds:100,epoch:'1',sample:'10',satellites:4,gps:2,galileo:2,dop_available:true,gdop:2.4,hdop:1.2,vdop:1.8,sky:[
     {constellation:1,prn:1,azimuth_deg:0,elevation_deg:30},
     {constellation:2,prn:7,azimuth_deg:90,elevation_deg:60}
@@ -54,6 +55,31 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   await page.setViewportSize({width:1100,height:850});
   await page.screenshot({path:path.resolve('build/pvt-geometry-preview.png'),fullPage:true});
   await page.evaluate(()=>{window.geometryWorkspace.setView('tracking');window.geometryWorkspace.update(window.geometrySnapshot);});
+  const channelRows=page.locator('.channel-list tbody tr');
+  const stages=async row=>{
+   const cells=await row.locator('td').allTextContents();
+   return [cells[3],cells[4],cells[9],cells[11]];
+  };
+  assert(await page.locator('#trackingView [data-beidou-availability]').isVisible());
+  assert.deepEqual(await stages(channelRows.nth(1)),['Confirmed','Tracking','—','Used in PVT'],
+    'Historical telemetry can still match constellation, PRN and continuity epoch');
+  await page.evaluate(()=>{
+   const t=window.geometrySnapshot.status.tracking[1];
+   t.tracking_start_sample='10';
+   t.valid_subframes='1';
+   t.tow_valid=false;
+   window.geometryWorkspace.update(window.geometrySnapshot);
+  });
+  assert.deepEqual(await stages(channelRows.nth(1)),['Confirmed','Tracking','Decoded','—'],
+    'An old fix cannot be attributed to a replacement assignment in the same epoch');
+  await page.evaluate(()=>{
+   const t=window.geometrySnapshot.status.tracking[1];
+   t.tracking_start_sample='9';
+   t.epoch='2';
+   window.geometryWorkspace.update(window.geometrySnapshot);
+  });
+  assert.deepEqual(await stages(channelRows.nth(1)),['Confirmed','Tracking','Decoded','—'],
+    'A fix from before a gap cannot supply PVT membership');
   assert.equal(await page.locator('.channel-cn0 meter').count(),2);
   assert.equal(await page.locator('.channel-cn0 meter').nth(1).getAttribute('value'),'42.5');
   assert.equal(await page.locator('.workspace-nav-dot').count(),0,'No ambiguous module status lights');
@@ -67,15 +93,18 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   assert.match(page.url(),/[?&]preview=beidou/);
   assert(await page.locator('#trackingView [data-beidou-preview-notice]').isVisible());
   const previewRows=page.locator('.channel-list tbody tr');
-  assert.equal(await previewRows.count(),7);
-  assert.match(await previewRows.nth(0).textContent(),/BeiDou B1C12Acquired/);
-  assert.match(await previewRows.nth(1).textContent(),/BeiDou B1C44Tracking/);
-  assert.match(await previewRows.nth(2).textContent(),/BeiDou B1C35Navigation/);
-  assert.match(await previewRows.nth(6).textContent(),/BeiDou B1C63Used in PVT/);
+  assert.equal(await previewRows.count(),9);
+  assert.deepEqual(await stages(previewRows.nth(0)),['Confirmed','—','—','—'],
+    'GPS PRN 12 membership does not include BeiDou PRN 12');
+  assert.deepEqual(await stages(previewRows.nth(1)),['Confirmed','Tracking','—','—']);
+  assert.deepEqual(await stages(previewRows.nth(2)),['Confirmed','Tracking','Decoded','—']);
+  assert.deepEqual(await stages(previewRows.nth(6)),['Confirmed','Tracking','Decoded','Used in PVT']);
+  assert.deepEqual(await stages(previewRows.nth(7)),['Confirmed','Tracking','Decoded','Used in PVT']);
   let cafRequests=0;
   page.on('request',req=>{if(req.url().includes('/acquisition/search-space'))cafRequests++;});
   await previewRows.nth(6).getByRole('link').click();
   await page.locator('#trackingView [data-satellite-title]').filter({hasText:'BeiDou B1C 63'}).waitFor();
+  assert.match(await page.locator('[data-satellite-stages]').textContent(),/Confirmed.*Tracking.*Decoded.*Used in PVT/);
   assert.match(await page.locator('[data-satellite-acquisition]').textContent(),/confirmed/);
   assert.equal(await page.locator('[data-tracking-shape] [data-tap]').count(),3);
   assert.equal(cafRequests,0,'Synthetic PRN 63 does not call the live search-space API');
@@ -85,9 +114,11 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   await page.evaluate(()=>{window.geometryWorkspace.setView('pvt');window.geometryWorkspace.update(window.geometrySnapshot);});
   await page.setViewportSize({width:390,height:850});
   assert(await page.locator('#pvtView [data-beidou-preview-notice]').isVisible());
-  assert.match(await page.locator('[data-pvt-counts]').textContent(),/BeiDou 4/);
+  assert.match(await page.locator('[data-pvt-counts]').textContent(),/Used measurements: 6 \(GPS 1, Galileo 1, BeiDou 4\)/);
   assert.match(await page.locator('[data-pvt-values]').textContent(),/BeiDou clock bias27\.60 m/);
+  assert.match(await page.locator('[data-pvt-values]').textContent(),/GPS clock bias30\.20 mGalileo clock bias33\.50 m/);
   assert.match(await page.locator('[data-pvt-sky]').textContent(),/C63/);
+  assert.match(await page.locator('[data-pvt-sky]').textContent(),/G12.*E24/);
   assert(!(await page.locator('[data-pvt-map]').isVisible()),'Preview position is not displayed on the live map');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Preview fits a mobile viewport');
   await page.screenshot({path:path.resolve('build/beidou-ui-preview.png'),fullPage:true});

@@ -163,7 +163,7 @@ histogram_update_hz=20
       fs.mkdirSync(process.env.NGENE_WORKSPACE_SCREENSHOTS, {recursive:true});
       await page.screenshot({path:path.join(process.env.NGENE_WORKSPACE_SCREENSHOTS, name), fullPage:true});
     };
-    const configurationTopics = ['source', 'receiver', 'acquisition', 'tracking', 'navigation', 'recording', 'analysis', 'display', 'profile'];
+    const configurationTopics = ['source', 'receiver', 'acquisition', 'tracking', 'dsp', 'navigation', 'recording', 'analysis', 'display', 'profile'];
     const referenceTopics = ['receiver', 'acquisition', 'tracking', 'navigation'];
     const referenceOnlyTopics = ['navigation'];
     const referencesDisabled = async () => {
@@ -180,7 +180,7 @@ histogram_update_hz=20
         assert.equal(await page.locator(`[data-receiver-settings="${reference}"]`).isVisible(), reference === topic,
           `Only the selected GNSS configuration section is displayed (${topic}/${reference})`);
       }
-      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'tracking', 'recording'].includes(topic),
+      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'tracking', 'dsp', 'recording'].includes(topic),
         'Only topics with real receiver parameters expose the operational form');
       await referencesDisabled();
     };
@@ -195,7 +195,8 @@ histogram_update_hz=20
     const beforeBrowsing = writes.length;
     for (const key of Object.keys(views)) await select(key);
     await select('tracking');
-    assert.equal(await page.locator('.channel-list thead th').count(),10);
+    assert.deepEqual(await page.locator('.channel-list thead th').allTextContents(),
+      ['Channel','Signal','PRN','Acquisition','Tracking','Loop','C/N0 (dB-Hz)','Doppler (Hz)','Allocation','Decoding','TOW (s)','PVT']);
     assert((await page.locator('.channel-list tbody tr').count())>0);
     assert.equal(await page.locator('.channel-status-grid').count(),0);
     await page.screenshot({path:path.resolve('build/channel-list.png'),fullPage:true});

@@ -153,6 +153,28 @@ static void CheckDataBridge(void)
     free(replica);
 }
 
+/** Verify sliding framing and original sample timing after both forms of discontinuity. */
+static void CheckStream(const int8_t *symbols, size_t prefix, int inverted)
+{
+    TNgBcnv1Stream stream = {0};
+    TNgBcnv1Frame frame;
+    const uint64_t first = UINT64_C(9007199254740993);
+    uint64_t sample = first, anchor = 0;
+    for (size_t n = 0; n < prefix + NG_BCNV1_SYNC_SYMBOLS; ++n) {
+        const uint64_t end = sample + 20480 + n % 2;
+        const int result = NgBcnv1Push(&stream, 33, 7, sample, end, symbols[n],
+                                      &frame, &anchor);
+        CHECK(result == (n + 1 == prefix + NG_BCNV1_SYNC_SYMBOLS ? NG_OK : NG_END));
+        sample = end;
+    }
+    CheckPayload(&frame, inverted);
+    CHECK(anchor == first + 20480 * prefix + prefix / 2);
+    CHECK(NgBcnv1Push(&stream, 33, 7, sample + 1, sample + 20481, 80,
+                       &frame, &anchor) == NG_END && stream.count == 1);
+    CHECK(NgBcnv1Push(&stream, 33, 8, sample + 20481, sample + 40961, 80,
+                       &frame, &anchor) == NG_END && stream.count == 1);
+}
+
 /** Test header error correction, both FEC paths, both CRCs and wrapped SOH alignment. */
 int main(void)
 {
@@ -169,6 +191,7 @@ int main(void)
         CheckPayload(&frame, inverted);
         CHECK(frame.correctedBits[0] == 0 && frame.correctedBits[1] == 0 &&
               frame.correctedBits[2] == 0);
+        CheckStream(symbols, prefix, inverted);
         CHECK(NgBcnv1Find(symbols, span - 1, 33, &offset, &frame) == NG_END);
         Unpack(nextHeader, start + NG_BCNV1_FRAME_SYMBOLS, NG_BCNV1_HEADER_SYMBOLS, !inverted);
         CHECK(NgBcnv1Find(symbols, span, 33, &offset, &frame) == NG_END);

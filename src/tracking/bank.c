@@ -262,6 +262,7 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
             pool->slots[slot].state = 1;
             pool->slots[slot].constellation = system + 1;
             pool->slots[slot].prn = prn;
+            pool->slots[slot].epoch = window->meta.epoch;
         }
     }
     return NG_OK;
