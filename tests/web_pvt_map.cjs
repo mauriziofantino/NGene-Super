@@ -104,6 +104,11 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   page.on('request',req=>{if(req.url().includes('/acquisition/search-space'))cafRequests++;});
   await previewRows.nth(6).getByRole('link').click();
   await page.locator('#trackingView [data-satellite-title]').filter({hasText:'BeiDou B1C 63'}).waitFor();
+  assert.equal(await page.locator('[data-tracking-component]').count(),0);
+  assert.equal(await page.locator('[data-tracking-shape] circle[data-tap="P"]').count(),1);
+  assert.equal(await page.locator('[data-tracking-scatter] circle').count(),1);
+  assert(Number(await page.locator('[data-tracking-prompt] circle').getAttribute('cy'))<125,
+   'Positive prompt I is plotted above zero');
   assert.match(await page.locator('[data-satellite-stages]').textContent(),/Confirmed.*Tracking.*Decoded.*Used in PVT/);
   assert.match(await page.locator('[data-satellite-acquisition]').textContent(),/confirmed/);
   assert.equal(await page.locator('[data-tracking-shape] [data-tap]').count(),3);

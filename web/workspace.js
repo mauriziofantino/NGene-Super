@@ -106,9 +106,10 @@ function journeyMarkup() {
 function trackingMarkup() {
   return heading('GNSS / RECEIVER', 'Channels', 'One receiver pool: reserved slots and first-confirmed assignments share the same channel state machine.', settingsButton('receiver', 'Channel allocation') + previewButton) + previewNotice + beidouAvailability +
     '<section class="card tracking-panel" data-channel-overview><div data-tracking-table></div><p>Select a channel to open its satellite page.</p></section>' +
-    '<section data-satellite-view hidden><div class="card tracking-panel"><button type="button" data-channel-back>Back to channels</button><h2 data-satellite-title>Satellite</h2><p data-satellite-stages></p><div class="caf-controls"><label>Channel <select data-tracking-channel aria-label="Tracking channel"></select></label><label>Component <select data-tracking-component aria-label="Correlator component"><option value="magnitude">Magnitude</option><option value="i">I</option><option value="q">Q</option></select></label><label>Vertical range (ADC units) <input data-tracking-range type="number" min="0.000001" step="any" aria-label="Correlator vertical range"></label><button type="button" data-tracking-autoscale>Fit observed range</button></div><p data-tracking-detail></p><p data-satellite-acquisition></p></div>' +
-    '<div class="workspace-grid"><section class="card tracking-panel"><h2>Measured correlators</h2><p>Raw coherent values on a common ADC axis. All tap positions follow the code delay relative to the acquisition prediction.</p><svg data-tracking-shape viewBox="0 0 640 260" role="img" aria-label="Measured correlation points"></svg></section><section class="card tracking-panel"><h2>Correlators versus signal time</h2><p>Actual coherent values; breaks mark missing display epochs.</p><svg data-tracking-history viewBox="0 0 640 260" role="img" aria-label="Correlation history in signal seconds"></svg></section></div>' +
-    '<section class="card tracking-panel"><h2>Acquisition of this satellite</h2><div data-channel-search-space></div></section></section>';
+    '<section data-satellite-view hidden><div class="card tracking-panel"><button type="button" data-channel-back>Back to channels</button><h2 data-satellite-title>Satellite</h2><p data-satellite-stages></p><div class="caf-controls"><label>Channel <select data-tracking-channel aria-label="Tracking channel"></select></label><label>Vertical range (ADC units) <input data-tracking-range type="number" min="0.000001" step="any" aria-label="Correlator vertical range"></label><button type="button" data-tracking-autoscale>Automatic range</button></div><p data-tracking-detail></p><p data-satellite-acquisition></p></div>' +
+    '<section class="card tracking-panel"><h2>Acquisition of this satellite</h2><div data-channel-search-space></div></section>' +
+    '<div class="workspace-grid"><section class="card tracking-panel"><h2>Measured correlators</h2><p>Magnitude in ADC units per sample, with a range fitted to the channel.</p><svg data-tracking-shape viewBox="0 0 640 260" role="img" aria-label="Measured correlation points"></svg></section><section class="card tracking-panel"><h2>Correlators versus signal time</h2><p>Magnitude over a rolling 20 s window.</p><svg data-tracking-history viewBox="0 0 640 260" role="img" aria-label="Correlation history in signal seconds"></svg></section></div>' +
+    '<div class="workspace-grid"><section class="card tracking-panel"><h2>Prompt I/Q scatter</h2><svg data-tracking-scatter viewBox="0 0 640 260" role="img" aria-label="Prompt I versus Q"></svg></section><section class="card tracking-panel"><h2>Signed prompt I versus time</h2><p>Coherent prompt samples received by the GUI.</p><svg data-tracking-prompt viewBox="0 0 640 260" role="img" aria-label="Signed prompt I in signal seconds"></svg></section></div></section>';
 }
 function navigationMarkup() {
   return heading('NAVIGATION DATA', 'Broadcast navigation messages',
@@ -451,6 +452,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
 
 const trackingHistory = new Map();
 const trackingRanges = new Map();
+const trackingWindowSeconds = 20;
 let trackingRun;
 
 function acquisitionResult(channel, status) {
@@ -496,9 +498,11 @@ function updateTracking(channels, run, status) {
     if(!t.active || !Number(t.integrations))continue;
     const key=String(t.channel_id);
     let history=trackingHistory.get(key)||[];
-    if(history.length && (history.at(-1).prn!==t.prn || history.at(-1).constellation!==t.constellation))history=[];
+    if(history.length && (history.at(-1).prn!==t.prn || history.at(-1).constellation!==t.constellation || history.at(-1).epoch!==t.epoch || history.at(-1).tracking_start_sample!==t.tracking_start_sample))history=[];
     const last=history.at(-1);
-    if(!last || last.epoch!==t.epoch || last.end_sample!==t.end_sample){history.push(t);if(history.length>240)history.shift();}
+    if(!last || last.epoch!==t.epoch || last.end_sample!==t.end_sample){history.push(t);}
+    const cutoff=Number(t.end_sample)-trackingWindowSeconds*t.sample_rate_hz;
+    while(history.length>1 && Number(history[0].end_sample)<cutoff)history.shift();
     trackingHistory.set(key,history);
   }
   const table=document.querySelector('[data-tracking-table]');table.replaceChildren();
@@ -546,13 +550,12 @@ function updateTracking(channels, run, status) {
     const t=channels.find(t=>String(t.channel_id)===picker.value);
     renderTracking(t,trackingHistory.get(picker.value)||[],status);
   };
-  document.querySelector('[data-tracking-component]').onchange=render;
   document.querySelector('[data-tracking-range]').onchange=()=>{
-    const key=`${run}:${picker.value}:${document.querySelector('[data-tracking-component]').value}`;
+    const key=`${run}:${picker.value}`;
     trackingRanges.set(key,Number(document.querySelector('[data-tracking-range]').value));render();
   };
   document.querySelector('[data-tracking-autoscale]').onclick=()=>{
-    trackingRanges.delete(`${run}:${picker.value}:${document.querySelector('[data-tracking-component]').value}`);render();
+    trackingRanges.delete(`${run}:${picker.value}`);render();
   };
   render();
 }
@@ -564,7 +567,9 @@ export function trackingPlotPoints(t,component,range) {
 }
 function renderTracking(t,history,status) {
   const shape=document.querySelector('[data-tracking-shape]'),time=document.querySelector('[data-tracking-history]');
-  const detail=document.querySelector('[data-tracking-detail]');shape.replaceChildren();time.replaceChildren();
+  const detail=document.querySelector('[data-tracking-detail]');
+  const scatter=document.querySelector('[data-tracking-scatter]'),prompt=document.querySelector('[data-tracking-prompt]');
+  for(const svg of [shape,time,scatter,prompt])svg.replaceChildren();
   const system=t?.constellation===2?'galileo':t?.constellation===3?'beidou':'gps';
   document.querySelector('[data-satellite-title]').textContent=t?`Channel ${t.channel_id} | ${CONSTELLATIONS[t.constellation]?.name || 'Unassigned'} ${t.prn||''}`:'Channel unavailable';
   const acq=status?.[CONSTELLATIONS[t?.constellation]?.acquisition];
@@ -584,31 +589,31 @@ function renderTracking(t,history,status) {
     detail.textContent=t?`${t.active?'Waiting for first coherent integration':stages.acquisition==='Confirmed'?'Waiting for tracking assignment':t.state===1?'Acquisition in progress':'Waiting for an eligible search'} | C/N0 unavailable`:'No configured channels.';return;
   }
   detail.textContent=`${status?.state!=='running'?'Receiver stopped; last observation | ':''}${t.pll?'PLL':'FLL pull-in'} / DLL | Doppler ${t.doppler_hz.toFixed(2)} Hz | code ${t.code_rate_hz.toFixed(3)} chip/s | C/N0 ${t.cn0_valid?`${t.cn0_db_hz.toFixed(1)} dB-Hz`:'unavailable'} | ${t.constellation!==1?(t.main_peak_verified?'BOC main peak verified':'BOC peak not yet consistent with the acquisition handoff'):'GPS C/A'} | epoch ${t.epoch}, samples ${t.first_sample}-${t.end_sample}`;
-  const component=document.querySelector('[data-tracking-component]').value;
-  const key=`${trackingRun}:${t.channel_id}:${component}`;
-  let range=trackingRanges.get(key);
-  if(!(range>0)) {
-    const maximum=Math.max(1e-6,...history.flatMap(h=>(h.taps||[]).map(p=>component==='magnitude'?Math.hypot(p.i,p.q):Math.abs(p[component]))));
-    range=2**Math.ceil(Math.log2(maximum*1.5));trackingRanges.set(key,range);
-  }
-  document.querySelector('[data-tracking-range]').value=String(range);
+  const component='magnitude';
+  const key=`${trackingRun}:${t.channel_id}`;
+  const manual=trackingRanges.get(key);
+  const limit=(samples)=>1.15*samples.reduce((max,h)=>
+    h.taps.reduce((peak,p)=>Math.max(peak,Math.hypot(p.i,p.q)),max),1e-6);
+  const shapeRange=manual>0 && Number.isFinite(manual)?manual:limit([t]);
+  const range=manual>0 && Number.isFinite(manual)?manual:limit(history);
+  document.querySelector('[data-tracking-range]').value=Number(shapeRange.toPrecision(4));
   const element=(svg,tag,attrs,text)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,String(v));if(text)e.textContent=text;svg.append(e);return e;};
   const colors=['#60a5fa','#34d399','#fb923c','#c084fc','#f472b6'];
-  const points=trackingPlotPoints(t,component,range);
+  const points=trackingPlotPoints(t,component,shapeRange);
   const center=(t.code_delay_chips||0)*(t.constellation===2?2:1);
   const extent=Math.max(0.25,...points.map(p=>Math.abs(p.x-center)))*1.35;
   const x=d=>45+(d-center+extent)/(2*extent)*580;
-  const axis=(svg,label)=>{
+  const axis=(svg,label,range,signed=false)=>{
     element(svg,'path',{d:'M45 15V225H625',stroke:'#64748b',fill:'none'});
-    element(svg,'text',{x:48,y:12,fill:'currentColor','font-size':11},`${component} (ADC units/sample)`);
+    element(svg,'text',{x:48,y:12,fill:'currentColor','font-size':11},`${signed?"Prompt I":"Magnitude"} (ADC units/sample)`);
     element(svg,'text',{x:190,y:252,fill:'currentColor','font-size':11},label);
-    for(const value of component==='magnitude'?[0,range/2,range]:[-range,0,range]) {
-      const y=component==='magnitude'?225-200*value/range:125-100*value/range;
+    for(const value of signed?[-range,0,range]:[0,range/2,range]) {
+      const y=signed?125-100*value/range:225-200*value/range;
       element(svg,'path',{d:`M45 ${y}H625`,stroke:'#263c52','stroke-dasharray':'3 4'});
       element(svg,'text',{x:2,y:y+4,fill:'currentColor','font-size':10},value.toPrecision(3));
     }
   };
-  axis(shape,`Code delay relative to acquisition (${t.constellation===2?'slots = ? chip':'chips'})`);axis(time,'Signal time (seconds within epoch)');
+  axis(shape,`Code delay relative to acquisition (${t.constellation===2?'half-chip slots':'chips'})`,shapeRange);axis(time,'Signal time (s)',range);axis(prompt,'Signal time (s)',range,true);
   element(shape,'polyline',{points:points.map(p=>`${x(p.x)},${p.y}`).join(' '),fill:'none',stroke:'#6ecbdd','stroke-width':2});
   for(let n=0;n<points.length;++n) {
     const p=points[n],mid=points.length>>1,name=n===mid?'P':n===mid-1?'E':n===mid+1?'L':String(n);
@@ -619,17 +624,34 @@ function renderTracking(t,history,status) {
   for(const d of[center-extent,center,center+extent])element(shape,'text',{x:x(d),y:240,fill:'currentColor','font-size':10},d.toFixed(2));
   const recent=history.filter(h=>h.epoch===t.epoch&&h.prn===t.prn&&h.taps.length===points.length);
   if(!recent.length||!t.sample_rate_hz)return;
-  const first=Number(recent[0].first_sample)/t.sample_rate_hz,last=Number(t.end_sample)/t.sample_rate_hz;
-  for(let n=0;n<points.length;++n) {
+  const end=Number(t.end_sample)/t.sample_rate_hz;
+  const signalX=h=>625-580*(Number(t.end_sample)-Number(h.end_sample))/t.sample_rate_hz/trackingWindowSeconds;
+  const plot=(svg,value,colour)=>{
     let path='',previous;
-    for(const h of recent) {
-      const p=trackingPlotPoints(h,component,range)[n];
-      const px=45+580*(Number(h.end_sample)/t.sample_rate_hz-first)/Math.max(last-first,1e-6);
-      element(time,'circle',{cx:px,cy:p.y,r:2,fill:colors[n%colors.length]});
-      path+=`${!previous||previous.end_sample!==h.first_sample?'M':'L'}${px} ${p.y} `;previous=h;
+    for(const h of recent){
+      const px=signalX(h),y=value(h);
+      if(px<45 || y<25 || y>225)continue;
+      element(svg,'circle',{cx:px,cy:y,r:2,fill:colour});
+      path+=(previous?.end_sample===h.first_sample?'L':'M')+px+' '+y+' ';
+      previous=h;
     }
-    element(time,'path',{d:path,fill:'none',stroke:colors[n%colors.length],'stroke-width':1.5});
+    if(path)element(svg,'path',{d:path,fill:'none',stroke:colour,'stroke-width':1.5});
+  };
+  for(let n=0;n<points.length;++n)
+    plot(time,h=>225-200*Math.hypot(h.taps[n].i,h.taps[n].q)/range,colors[n%colors.length]);
+  const mid=points.length>>1,colour=colors[mid%colors.length];
+  plot(prompt,h=>125-100*h.taps[mid].i/range,colour);
+  for(const svg of [time,prompt])for(let n=0;n<=4;n++){
+    const seconds=end-(4-n)*trackingWindowSeconds/4;
+    if(seconds>=0)element(svg,'text',{x:45+145*n,y:240,'text-anchor':n===4?'end':'start',fill:'currentColor','font-size':10},seconds.toFixed(2));
   }
-  element(time,'text',{x:45,y:240,fill:'currentColor','font-size':10},first.toFixed(3));
-  element(time,'text',{x:570,y:240,fill:'currentColor','font-size':10},last.toFixed(3));
+  element(scatter,'path',{d:'M220 125H420 M320 25V225',stroke:'#64748b',fill:'none'});
+  for(const [x,y,label] of [[424,129,'I'],[324,21,'Q'],[220,239,(-range).toPrecision(3)],[396,239,range.toPrecision(3)]])
+    element(scatter,'text',{x,y,fill:'currentColor','font-size':11},label);
+  for(const h of recent){
+    const p=h.taps[mid];
+    if(Math.abs(p.i)<=range && Math.abs(p.q)<=range)
+      element(scatter,'circle',{cx:320+100*p.i/range,cy:125-100*p.q/range,r:2.5,
+        fill:colour,opacity:h===recent.at(-1)?1:0.45});
+  }
 }

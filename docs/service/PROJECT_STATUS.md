@@ -104,15 +104,16 @@ The lab also exercises fade recovery, gap reset with an injected new seed,
 and half-chip seed rejection. Offline C/N0 moments agree within 1.124 dB
 on the AWGN fixture. Strong coherent echoes can bypass the guard veto.
 The closed-loop two-ray test reproduces false PLL locks on strong echoes.
-Adding two guard taps does not improve those cases. RF remains pending.
+Adding two guard taps does not improve those cases. Qualification of the
+tracked code delay on RF remains open.
 B4 adds a B-CNAV1 decoder with streaming symbol framing and sample-anchored
-frame output, plus a synthetic SIMD I/Q data bridge. Tracker integration and
-replay remain pending.
+frame output, plus a synthetic SIMD I/Q data bridge. The operational
+tracker feeds the data prompt to this decoder on replay.
 [B-CNAV1 decoder](BEIDOU_BCNV1.md).
 B5–B7 adds matched B-CNAV1 broadcast caches, BDT code-time observation
 building, and a three-system QR PVT with independent code biases. All seven
-constellation combinations are exercised on synthetic observations. Producer-side
-B1C tracking integration and RF qualification remain pending.
+constellation combinations are exercised on synthetic observations. Real-signal
+accuracy of the code, Doppler and mixed solution remains under investigation.
 [BeiDou broadcast and PVT](BEIDOU_PVT.md).
 [B3 tracking lab](../../development/profiling/B3/README.md).
 [BeiDou incremental plan](PIANO_INCREMENTALE_EVO.md#6-beidou-b1c--incrementi-approvabili).
@@ -124,8 +125,14 @@ independent states and exercises BeiDou PRN 63 in a labelled mixed-constellation
 preview. The receiver configuration also enables the B1C signal on live
 or recorded input. The shared channel pool accepts B1C acquisition results,
 and the tracking data prompt feeds B-CNAV1. Healthy, matched BDT observations
-are eligible for the mixed PVT solve. Native Linux and macOS verification
-and full B8/B9 qualification are pending.
+are eligible for the mixed PVT solve. B8 recovered three-system fixes after
+a replay gap. Against the LNIKS antenna reference, the RTL-SDR cold runs
+gave 12.67 and 12.64 m 3D RMS on fixes using BeiDou, and the post-gap run
+gave 256.76 m. The next increment traces B1C code phase from acquisition
+through the pilot, data-symbol timing and per-satellite pseudorange at the
+common PVT epoch. B9 uses the existing HackRF RF trial. B10 was verified on
+Windows. Native Linux and macOS qualification remains pending.
+[BeiDou analysis and test plan](PIANO_INCREMENTALE_EVO.md#piano-operativo-di-verifica-beidou-b1c).
 [B8–B10 evidence](../../development/profiling/B8/README.md).
 
 The F6 mixed GPS/Galileo replay matrix measures the existing tracking pool

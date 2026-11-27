@@ -41,14 +41,14 @@ export function buildWaterfallMesh(history,columns,capacity,lo,hi){
   }
  }
  // Fixed view: the time edges exactly span the pane. Taper only at those edges;
- // 0.32 gain keeps projected movement monotonic for every permitted power level.
- const matrix=new Float32Array([1,0,0,0,0,c/s,-s/4,0,0,-1,-c/4,0,0,0,0,1]);
+ // Power relief leaves the horizontal time coordinate unchanged.
+ const matrix=new Float32Array([0,0.86,0,0,0,0.7,-s/4,0,1,0,-c/4,0,0,0,0,1]);
  return {rows,gridRows,columns,positions,normals,levels,matrix};
 }
 export function projectSurfacePoint(frequency,level,age,mesh){
  age=Math.max(0,Math.min(1,age));
  const h=(level-0.5)*surfaceHeight*edgeHeight(age),z=1-2*age,m=mesh.matrix;
- return {x:frequency,y:m[5]*h+m[9]*z+m[13],depth:m[6]*h+m[10]*z};
+ return {x:z,y:m[1]*frequency+m[5]*h,depth:m[6]*h+m[10]*z};
 }
 export function createWaterfallSurface(canvas){
  const gl=canvas.getContext('webgl',{alpha:true,antialias:true,preserveDrawingBuffer:true});

@@ -36,9 +36,10 @@ GPS/Galileo DLL/FLL/PLL, multi-correlator tracking, bounded slot allocation and 
 below retain their platform and RF validation requirements even where adapter or replay
 support exists.
 
-For BeiDou B1C, the interface and replay matrix are available. The end-to-end
-replay and RF milestones require the B2–B4 operational connection to the
-broadcast and PVT libraries. [BeiDou increments](PIANO_INCREMENTALE_EVO.md#6-beidou-b1c--incrementi-approvabili) ·
+For BeiDou B1C, acquisition, tracking, B-CNAV1 and the mixed PVT are connected
+on replay. B8 accuracy qualification starts with per-satellite code timing
+and pseudorange on the common sample, using the existing least-squares PVT
+as the benchmark. [BeiDou analysis and test plan](PIANO_INCREMENTALE_EVO.md#piano-operativo-di-verifica-beidou-b1c) ·
 [B8–B10 evidence](../../development/profiling/B8/README.md)
 
 1. **GNSS DSP contracts and kernels:** expand Galileo PRN coverage and validate recorded/live Galileo separately; port useful NCO, replicas, and correlations from the archive; define scaling/ranges and a C reference before x86/ARM SIMD. Compare safe historical XOR, candidate SAD, and products against the acquisition/channel requirements; do not presume a winner. Approximate arithmetic remains experimental.

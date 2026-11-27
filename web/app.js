@@ -795,38 +795,50 @@ const waterfall3DBitmap=document.createElement('canvas');
 let waterfallSurface=null;
 let waterfallRender={mode:'2d',rows:0,columns:0};
 function drawColourBar(s,palette,lo,hi){
-  const {ctx,top,bottom}=s,x=9,width=12,height=bottom-top;
+  const {ctx,top,bottom,right}=s,x=right+4,width=8,height=bottom-top;
   for(let j=0;j<height;j++){
     const colour=palette[Math.round(255*(1-j/Math.max(1,height-1)))];
     ctx.fillStyle=`rgb(${colour.join(',')})`;ctx.fillRect(x,top+j,width,1);
   }
-  ctx.fillStyle='#9eb6c9';ctx.fillText(String(hi),24,top+9);ctx.fillText(String(lo),24,bottom);
+  ctx.fillStyle='#9eb6c9';ctx.fillText(String(hi),right-30,top-4);ctx.fillText(String(lo),right-65,top-4);
+}
+function waterfallAxes(s,relief=false){
+  const {ctx,left,right,top,bottom}=s,[lo,hi]=frequencyRange();
+  const duration=(historyRows()-1)/Math.max(0.1,Math.min(30,Number($("waterfallRate").value)));
+  ctx.fillStyle="#8fa6ba";ctx.textAlign="right";
+  for(let j=0;j<=4;j++){
+    const y=(top+bottom)/2+(0.5-j/4)*(bottom-top)*(relief?0.86:1);
+    ctx.fillText((lo+j*(hi-lo)/4).toFixed($("frequencyReference").value==="rf"?3:1),left-4,y+3);
+    const x=left+j*(right-left)/4;
+    ctx.fillText(j===4?"0 s":"-"+(duration*(1-j/4)).toFixed(1)+" s",Math.max(left+32,x),bottom+18);
+  }
+  ctx.textAlign="left";ctx.fillText(frequencyUnit(),left,top-4);
 }
 function drawWaterfall(rowOffset=waterfallScroll.offset(performance.now())){
   if(!(diagnosticMask()&1)||!plotEnabled('waterfall'))return;
-  $('waterfallInfo').textContent='Newest at top · '+waterfallHistory.length+' snapshots';
+  $('waterfallInfo').textContent='Newest at right · '+waterfallHistory.length+' snapshots';
   const [lo,hi]=range(true);
   $('colourLegend').textContent=`Global colours ${lo} … ${hi} ${analysisSnapshot?.config.units==='dbfs_hz'?'dBFS/Hz':'dBFS/bin'}`;
   const s=surface('waterfall');if(!s)return;
   waterfallRender={mode:'2d',rows:0,columns:0};++plotWork.waterfall;
   const {ctx,left,right,top,bottom}=s;
   const rows=historyRows(),available=Math.min(rows,waterfallHistory.length),columns=analysisSnapshot?.dbfs.length||1024;
-  waterfallBitmap.width=columns;waterfallBitmap.height=rows;
-  const bitmap=waterfallBitmap.getContext('2d'),pixels=bitmap.createImageData(columns,rows);
+  waterfallBitmap.width=rows;waterfallBitmap.height=columns;
+  const bitmap=waterfallBitmap.getContext('2d'),pixels=bitmap.createImageData(rows,columns);
   for(let j=0;j<rows&&available;j++){
     const row=waterfallHistory[Math.min(j,available-1)];
     for(let k=0;k<columns;k++){
       const level=Math.max(0,Math.min(255,Math.round(255*(row.values[k]-lo)/(hi-lo))));
-      const colour=waterfallPalette[level],offset=4*(j*columns+k);
+      const colour=waterfallPalette[level],offset=4*((columns-1-k)*rows+rows-1-j);
       pixels.data[offset]=colour[0];pixels.data[offset+1]=colour[1];pixels.data[offset+2]=colour[2];pixels.data[offset+3]=255;
     }
   }
   bitmap.putImageData(pixels,0,0);ctx.imageSmoothingEnabled=false;
-  const shift=Math.min(rows-1,rowOffset)*(bottom-top)/rows;
+  const step=(right-left)/(rows-1),shift=Math.min(rows-1,rowOffset)*step;
   ctx.save();ctx.beginPath();ctx.rect(left,top,right-left,bottom-top);ctx.clip();
-  ctx.drawImage(waterfallBitmap,0,0,columns,rows,left,top-shift,right-left,bottom-top);
-  if(shift>0)ctx.drawImage(waterfallBitmap,0,rows-1,columns,1,left,bottom-shift,right-left,shift);
-  ctx.restore();drawColourBar(s,waterfallPalette,lo,hi);frequencyAxes(s);
+  ctx.drawImage(waterfallBitmap,left-step/2+shift,top,rows*step,bottom-top);
+  if(shift>step/2)ctx.drawImage(waterfallBitmap,0,0,1,columns,left,top,shift-step/2,bottom-top);
+  ctx.restore();drawColourBar(s,waterfallPalette,lo,hi);waterfallAxes(s);
   waterfallRender={mode:'2d',rows:available,gridRows:rows,rowOffset,columns,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
 }
 /** Project the shared history as a solid frequency/time/power surface. */
@@ -835,11 +847,12 @@ function drawWaterfall3D(rowOffset=waterfallScroll.offset(performance.now())){
   const s=surface('waterfall3D');if(!s)return;++plotWork.waterfall3D;
   const {ctx,left,right,top,bottom}=s,[lo,hi]=range(true);
   const rows=historyRows(),columns=analysisSnapshot?.dbfs.length||1024;
+  const imageColumns=Math.max(2,Math.round(right-left));
   const imageRows=Math.max(2,Math.round(bottom-top));
   let geometry;
   try{
     waterfallSurface??=createWaterfallSurface(waterfall3DBitmap);
-    geometry=waterfallSurface.draw(waterfallHistory,columns,rows,lo,hi,columns,imageRows,rowOffset);
+    geometry=waterfallSurface.draw(waterfallHistory,columns,rows,lo,hi,imageColumns,imageRows,rowOffset);
   }catch(error){$('waterfall3DInfo').textContent=error.message;ctx.fillStyle='#ffb4b8';ctx.fillText(error.message,left+15,top+25);return;}
   const floor=ctx.createLinearGradient(0,top,0,bottom);floor.addColorStop(0,'#071b42');floor.addColorStop(1,'#031344');
   ctx.fillStyle=floor;ctx.fillRect(left,top,right-left,bottom-top);ctx.imageSmoothingEnabled=true;
@@ -849,8 +862,8 @@ function drawWaterfall3D(rowOffset=waterfallScroll.offset(performance.now())){
     ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
     ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();
   }
-  ctx.drawImage(waterfall3DBitmap,0,0,columns,imageRows,left,top,right-left,bottom-top);
-  drawColourBar(s,reliefPalette,lo,hi);frequencyAxes(s);
+  ctx.drawImage(waterfall3DBitmap,left,top,right-left,bottom-top);
+  drawColourBar(s,reliefPalette,lo,hi);waterfallAxes(s,true);
   $('waterfall3DInfo').textContent='Frontal 3D | '+waterfallHistory.length+' snapshots | live scroll | synchronized with 2D';
   waterfall3DRender={mode:'3d',...geometry,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
 }

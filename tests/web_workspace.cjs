@@ -282,7 +282,6 @@ histogram_update_hz=20
     assert.equal(await beidou.inputValue(), 'false');
     await beidou.selectOption('true');
     assert.equal(await beidou.inputValue(), 'true');
-    await beidou.selectOption('false');
     const ring = page.locator('[name="buffer.ring_blocks"]');
     assert(await ring.isEnabled(), 'Implemented receiver buffers remain editable alongside unavailable GNSS controls');
     await ring.fill('32'); await ring.blur();
@@ -307,6 +306,8 @@ histogram_update_hz=20
     await page.locator('#apply').click();
     await until(() => page.locator('#configBadge').textContent().then(value => /^r\d+$/.test(value)), 'valid profile saved');
     const applied = await get('config');
+    assert.match(applied.ini, /^\[beidou_acquisition\]\r?\nenabled=true(?:\r?\n|$)/m,
+      'The BeiDou choice is saved in the operational profile');
     assert.match(applied.ini, /ring_blocks=32(?:\r?\n|$)/, 'Implemented receiver buffer change reaches the service');
     const referenceNames = await page.locator('[data-reference-param]').evaluateAll(controls => controls.map(control => control.dataset.referenceParam));
     for (const name of referenceNames) assert(!applied.ini.includes(`${name}=`), `Reference parameter ${name} must never enter the INI`);
@@ -321,6 +322,7 @@ histogram_update_hz=20
     await until(async () => (await get('status')).state === 'running', 'sample pipeline running');
     await until(async () => (await snapshot()).history.length >= 3, 'real waterfall history');
     const first = await get('status');
+    assert.equal(first.beidou_acquisition.enabled, true, 'The receiver enables B1C on start');
     assert(sequence(first) > 0n && histogramSequence(first) > 0n, 'Both real diagnostic producers must advance');
     assert(Math.abs(first.analysis.peak_hz - 240000) <= first.analysis.bin_hz / 2 + 1, 'RF spectrum must reflect the deterministic CI8 input');
     await screenshot('workspace-rf-real-replay.png');

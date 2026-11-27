@@ -14,10 +14,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
  const low=projectSurfacePoint(0,.2,.5,mesh),high=projectSurfacePoint(0,.8,.5,mesh);
  assert(high.y>low.y,'Power must change vertex height');assert.notEqual(high.depth,low.depth,'Power must participate in 3D depth');
  const near=projectSurfacePoint(-.6,.5,0,mesh),far=projectSurfacePoint(-.6,.5,1,mesh);
- assert.equal(near.x,far.x,'Frontal view must not introduce lateral rotation');assert(near.depth<far.depth,'New observations must occupy the front');assert(near.y<far.y,'Old observations must recede');
- let min=Infinity,max=-Infinity;
- for(let i=0;i<mesh.levels.length;i++){const p=projectSurfacePoint(mesh.positions[3*i],mesh.levels[i],mesh.positions[3*i+2],mesh);min=Math.min(min,p.y);max=Math.max(max,p.y);}
- assert(Math.abs(min+1)<1e-6&&Math.abs(max-1)<1e-6,'Time edges must fill the whole pane');
+ assert.equal(near.x,1);assert.equal(far.x,-1);
+ assert.equal(near.y,far.y,'Time must not change the displayed frequency');
+ assert.equal(low.x,high.x,'Power must not move the sample in time');
  assert.equal(JSON.stringify(history),before,'Mesh preparation must not modify observations');
  const short=buildWaterfallMesh(history.slice(0,16),1024,128,-100,-40);
  assert.equal(short.rows,16);assert.equal(short.gridRows,128);
@@ -26,14 +25,14 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
  const extreme=buildWaterfallMesh([{values:Array(1024).fill(0)}],1024,128,-250,0);
  assert.deepEqual(extreme.matrix,mesh.matrix,'Changing power extrema must not refit the camera');
  for(const level of [0,.25,.5,.75,1]){
-  let previous=-Infinity;
-  for(let j=0;j<=1000;j++){const p=projectSurfacePoint(0,level,j/1000,mesh);assert(p.y>=previous-1e-7,'A moving feature must never reverse vertically');previous=p.y;}
+  let previous=Infinity;
+  for(let j=0;j<=1000;j++){const p=projectSurfacePoint(0,level,j/1000,mesh);assert(p.x<=previous+1e-7,'A moving feature must never reverse horizontally');previous=p.x;}
  }
- const timeline=createWaterfallScroll(180);let index=16,last2D=-Infinity,last3D=-Infinity;
+ const timeline=createWaterfallScroll(180);let index=16,last2D=Infinity,last3D=Infinity;
  for(let now=0;now<=1000;now+=10){
   if(now%50===0){const before=index-timeline.offset(now);timeline.push(now);index++;assert(Math.abs(index-timeline.offset(now)-before)<1e-10,'An arrival must not restart or jump existing motion');}
-  const age=(index-timeline.offset(now))/127,y2D=age*500,y3D=projectSurfacePoint(0,.8,age,mesh).y;
-  assert(y2D>=last2D-1e-7&&y3D>=last3D-1e-7,'Both views must move monotonically during overlapping updates');last2D=y2D;last3D=y3D;
+  const age=(index-timeline.offset(now))/127,y2D=(1-age)*500,y3D=(1+projectSurfacePoint(0,.8,age,mesh).x)*250;
+  assert(y2D<=last2D+1e-7&&y3D<=last3D+1e-7,'Both views must move left');assert(Math.abs(y2D-y3D)<1e-7,'Both views must use the same horizontal position');last2D=y2D;last3D=y3D;
  }
  const frozen=timeline.offset(1010);timeline.pause(1010);assert.equal(timeline.offset(5010),frozen);timeline.resume(5010);assert.equal(timeline.offset(5010),frozen);
  assert.equal(timeline.offset(5210),0);timeline.reset();assert.equal(timeline.offset(0),0);

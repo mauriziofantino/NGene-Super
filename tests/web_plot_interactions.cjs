@@ -11,7 +11,7 @@ let analysisRevision=1;
 const analysis={spectrum_enabled:true,histogram_enabled:true,units:'dbfs_bin',window:'hann',averages:1,spectrum_source:'post',histogram_source:'post'};
 const server=http.createServer((request,response)=>{
   response.setHeader('Content-Security-Policy',policy);
-  for(const name of ['module-parameters.js','frequency-units.js','waterfall-relief.js'])assets.set('/'+name,[name,'text/javascript']);
+  for(const name of ['module-parameters.js','frequency-units.js','waterfall-relief.js','acquisition-search-space.js','acquisition-table.js','pvt-map.js'])assets.set('/'+name,[name,'text/javascript']);
   const asset=assets.get(request.url);
   if(asset){response.setHeader('Content-Type',asset[1]);response.end(fs.readFileSync(path.join(root,'web',asset[0])));return;}
   response.setHeader('Content-Type','application/json');
@@ -51,7 +51,7 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
         const stats={mean:0,std:10,rms:10,min:-32,max:32,clipping_count:0,zero_count:0};
         window.publishMotionFrame=sequence=>{
           const dbfs=Array(256).fill(-65);
-          if(sequence===40)for(let k=125;k<=131;k++)dbfs[k]=-20;
+          if(sequence===40)for(let k=117;k<=139;k++)dbfs[k]=0;
           if(sequence>80){dbfs[12]=sequence%2?-200:-65;dbfs[16]=sequence%2?20:-30;}
           let checksum=2166136261;
           for(const value of dbfs){let word=Math.floor(value*1000+0.5)>>>0;for(let b=0;b<4;b++){checksum=Math.imul(checksum^(word&255),16777619)>>>0;word>>>=8;}}
@@ -60,13 +60,15 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
         for(let n=1;n<=80;n++)window.publishMotionFrame(n);
         window.sampleMotionMarker=()=>Object.fromEntries(['waterfall','waterfall3D'].map(id=>{
           const canvas=document.getElementById(id),w=canvas.width,h=canvas.height,d=Math.min(devicePixelRatio||1,2);
-          const left=52*d,right=w-18*d,x=Math.round(left+128/256*(right-left)),top=Math.ceil(16*d),bottom=Math.floor(h-32*d);
-          const pixels=canvas.getContext('2d').getImageData(x-4,top,9,bottom-top).data;let sum=0,count=0;
-          for(let y=0;y<bottom-top;y++)for(let k=0;k<9;k++){
-            const p=4*(y*9+k),red=pixels[p],green=pixels[p+1];
-            if(id==='waterfall'?red>200&&green<120:red>50){sum+=top+y;count++;}
+          const left=Math.ceil(52*d),right=Math.floor(w-18*d),top=Math.ceil(16*d),bottom=Math.floor(h-32*d);
+          const middle=Math.round((top+bottom)/2),height=Math.round((bottom-top)*0.44);
+          const width=right-left,pixels=canvas.getContext('2d').getImageData(left,middle-Math.floor(height/2),width,height).data;
+          let sum=0,count=0;
+          for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+            const p=4*(y*width+x),red=pixels[p],green=pixels[p+1];
+            if(id==='waterfall'?red>200&&green<120:green>110){sum+=x;count++;}
           }
-          return [id,count?sum/count:null];
+          return [id,count?sum/count/width:null];
         }));
       });
       await until(async()=>(await snapshot()).waterfall3D.scrollProgress===1,'Initial motion preload settled');
@@ -88,13 +90,13 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
         await page.evaluate(sequence=>window.publishMotionFrame(sequence),sequence);await sample();await delay(40);await sample();
       }
       await until(async()=>(await snapshot()).waterfall3D.scrollProgress===1,'Motion settled');await sample();
-      for(const row of samples)assert(row.waterfall!==null&&row.waterfall3D!==null,'The same marker must remain visible in both views');
+      for(const row of samples)assert(row.waterfall!==null&&row.waterfall3D!==null,'Marker visibility: '+JSON.stringify(row));
       for(let n=1;n<samples.length;n++){
-        assert(samples[n].waterfall>=samples[n-1].waterfall-0.8,'2D marker reversed direction');
-        assert(samples[n].waterfall3D<=samples[n-1].waterfall3D+0.8,'3D marker reversed direction');
+        assert(samples[n].waterfall<=samples[n-1].waterfall+0.004,'2D marker reversed direction');
+        assert(samples[n].waterfall3D<=samples[n-1].waterfall3D+0.004,'3D marker reversed direction');
       }
-      assert(samples.at(-1).waterfall-samples[0].waterfall>100,'2D must actually scroll');
-      assert(samples[0].waterfall3D-samples.at(-1).waterfall3D>100,'3D must actually scroll');
+      assert(samples[0].waterfall-samples.at(-1).waterfall>0.25,'2D must actually scroll');
+      assert(samples[0].waterfall3D-samples.at(-1).waterfall3D>0.25,'3D must actually scroll');
       const result=await snapshot();assert.equal(result.waterfall.gridRows,128);assert.equal(result.waterfall3D.gridRows,128);
       if(process.env.NGENE_SCREENSHOTS)fs.writeFileSync(path.join(process.env.NGENE_SCREENSHOTS,'motion-marker.json'),JSON.stringify(samples,null,2));
       if(process.env.NGENE_SCREENSHOTS)fs.writeFileSync(path.join(process.env.NGENE_SCREENSHOTS,'motion.webm'),Buffer.from(await page.evaluate(()=>window.finishMotionRecording()),'base64'));
