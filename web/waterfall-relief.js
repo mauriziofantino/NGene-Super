@@ -1,6 +1,6 @@
 /* Fixed 3D frequency/power/time mesh: real geometry, depth testing,
  * directional lighting and time traces. The global power scale is shared. */
-const surfaceTilt=35,surfaceHeight=0.5;
+const surfaceTilt=60,surfaceHeight=0.5;
 const stops=[[0,12,85],[0,34,145],[0,76,215],[0,141,245],[38,207,255],[197,247,255]];
 export const reliefPalette=Array.from({length:256},(_,n)=>{const x=n/255*5,i=Math.min(4,Math.floor(x)),f=x-i;return stops[i].map((v,k)=>Math.round(v+(stops[i+1][k]-v)*f));});
 const levelOf=(v,lo,hi)=>Number.isFinite(v)?Math.max(0,Math.min(1,(v-lo)/(hi-lo))):0;
