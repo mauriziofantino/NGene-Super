@@ -109,7 +109,7 @@ function trackingMarkup() {
     '<section data-satellite-view hidden><div class="card tracking-panel"><button type="button" data-channel-back>Back to channels</button><h2 data-satellite-title>Satellite</h2><p data-satellite-stages></p><div class="caf-controls"><label>Channel <select data-tracking-channel aria-label="Tracking channel"></select></label><label>Vertical range (ADC units) <input data-tracking-range type="number" min="0.000001" step="any" aria-label="Correlator vertical range"></label><button type="button" data-tracking-autoscale>Automatic range</button></div><p data-tracking-detail></p><p data-satellite-acquisition></p></div>' +
     '<section class="card tracking-panel"><h2>Acquisition of this satellite</h2><div data-channel-search-space></div></section>' +
     '<div class="workspace-grid"><section class="card tracking-panel"><h2>Measured correlators</h2><p>Magnitude in ADC units per sample, with a range fitted to the channel.</p><svg data-tracking-shape viewBox="0 0 640 260" role="img" aria-label="Measured correlation points"></svg></section><section class="card tracking-panel"><h2>Correlators versus signal time</h2><p>Magnitude over a rolling 20 s window.</p><svg data-tracking-history viewBox="0 0 640 260" role="img" aria-label="Correlation history in signal seconds"></svg></section></div>' +
-    '<div class="workspace-grid"><section class="card tracking-panel"><h2>Prompt I/Q scatter</h2><svg data-tracking-scatter viewBox="0 0 640 260" role="img" aria-label="Prompt I versus Q"></svg></section><section class="card tracking-panel"><h2>Signed prompt I versus time</h2><p>Coherent prompt samples received by the GUI.</p><svg data-tracking-prompt viewBox="0 0 640 260" role="img" aria-label="Signed prompt I in signal seconds"></svg></section></div></section>';
+    '<div class="workspace-grid"><section class="card tracking-panel"><h2>Prompt I/Q scatter</h2><svg data-tracking-scatter viewBox="0 0 640 260" role="img" aria-label="Prompt I versus Q"></svg></section><section class="card tracking-panel"><h2>Signed prompt correlator versus time</h2><p>Dominant I/Q component over the displayed window.</p><svg data-tracking-prompt viewBox="0 0 640 260" role="img" aria-label="Signed prompt correlator in signal seconds"></svg></section></div></section>';
 }
 function navigationMarkup() {
   return heading('NAVIGATION DATA', 'Broadcast navigation messages',
@@ -565,6 +565,15 @@ export function trackingPlotPoints(t,component,range) {
     value:component==='magnitude'?Math.hypot(p.i,p.q):p[component],
     i:p.i,q:p.q})).map(p=>({...p,y:component==='magnitude'?225-200*p.value/range:125-100*p.value/range}));
 }
+export function trackingPromptComponent(history,promptIndex) {
+  let iEnergy=0,qEnergy=0;
+  for(const sample of history){
+    const {i,q}=sample.taps[promptIndex];
+    iEnergy+=i*i;
+    qEnergy+=q*q;
+  }
+  return qEnergy>iEnergy?'q':'i';
+}
 function renderTracking(t,history,status) {
   const shape=document.querySelector('[data-tracking-shape]'),time=document.querySelector('[data-tracking-history]');
   const detail=document.querySelector('[data-tracking-detail]');
@@ -600,12 +609,16 @@ function renderTracking(t,history,status) {
   const element=(svg,tag,attrs,text)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,String(v));if(text)e.textContent=text;svg.append(e);return e;};
   const colors=['#60a5fa','#34d399','#fb923c','#c084fc','#f472b6'];
   const points=trackingPlotPoints(t,component,shapeRange);
+  const recent=history.filter(h=>h.epoch===t.epoch&&h.prn===t.prn&&h.taps.length>0&&h.taps.length===points.length);
+  const mid=points.length>>1,colour=colors[mid%colors.length];
+  const promptComponent=trackingPromptComponent(recent,mid);
   const center=(t.code_delay_chips||0)*(t.constellation===2?2:1);
   const extent=Math.max(0.25,...points.map(p=>Math.abs(p.x-center)))*1.35;
   const x=d=>45+(d-center+extent)/(2*extent)*580;
-  const axis=(svg,label,range,signed=false)=>{
+  const axis=(svg,label,range,promptComponent)=>{
+    const signed=Boolean(promptComponent);
     element(svg,'path',{d:'M45 15V225H625',stroke:'#64748b',fill:'none'});
-    element(svg,'text',{x:48,y:12,fill:'currentColor','font-size':11},`${signed?"Prompt I":"Magnitude"} (ADC units/sample)`);
+    element(svg,'text',{x:48,y:12,fill:'currentColor','font-size':11},`${signed?'Prompt '+promptComponent.toUpperCase():'Magnitude'} (ADC units/sample)`);
     element(svg,'text',{x:190,y:252,fill:'currentColor','font-size':11},label);
     for(const value of signed?[-range,0,range]:[0,range/2,range]) {
       const y=signed?125-100*value/range:225-200*value/range;
@@ -613,7 +626,7 @@ function renderTracking(t,history,status) {
       element(svg,'text',{x:2,y:y+4,fill:'currentColor','font-size':10},value.toPrecision(3));
     }
   };
-  axis(shape,`Code delay relative to acquisition (${t.constellation===2?'half-chip slots':'chips'})`,shapeRange);axis(time,'Signal time (s)',range);axis(prompt,'Signal time (s)',range,true);
+  axis(shape,`Code delay relative to acquisition (${t.constellation===2?'half-chip slots':'chips'})`,shapeRange);axis(time,'Signal time (s)',range);axis(prompt,'Signal time (s)',range,promptComponent);
   element(shape,'polyline',{points:points.map(p=>`${x(p.x)},${p.y}`).join(' '),fill:'none',stroke:'#6ecbdd','stroke-width':2});
   for(let n=0;n<points.length;++n) {
     const p=points[n],mid=points.length>>1,name=n===mid?'P':n===mid-1?'E':n===mid+1?'L':String(n);
@@ -622,7 +635,6 @@ function renderTracking(t,history,status) {
     element(shape,'text',{x:x(p.x)+4,y:p.y-8,fill:colors[n%colors.length],'font-size':11},name);
   }
   for(const d of[center-extent,center,center+extent])element(shape,'text',{x:x(d),y:240,fill:'currentColor','font-size':10},d.toFixed(2));
-  const recent=history.filter(h=>h.epoch===t.epoch&&h.prn===t.prn&&h.taps.length===points.length);
   if(!recent.length||!t.sample_rate_hz)return;
   const end=Number(t.end_sample)/t.sample_rate_hz;
   const signalX=h=>625-580*(Number(t.end_sample)-Number(h.end_sample))/t.sample_rate_hz/trackingWindowSeconds;
@@ -639,8 +651,7 @@ function renderTracking(t,history,status) {
   };
   for(let n=0;n<points.length;++n)
     plot(time,h=>225-200*Math.hypot(h.taps[n].i,h.taps[n].q)/range,colors[n%colors.length]);
-  const mid=points.length>>1,colour=colors[mid%colors.length];
-  plot(prompt,h=>125-100*h.taps[mid].i/range,colour);
+  plot(prompt,h=>125-100*h.taps[mid][promptComponent]/range,colour);
   for(const svg of [time,prompt])for(let n=0;n<=4;n++){
     const seconds=end-(4-n)*trackingWindowSeconds/4;
     if(seconds>=0)element(svg,'text',{x:45+145*n,y:240,'text-anchor':n===4?'end':'start',fill:'currentColor','font-size':10},seconds.toFixed(2));

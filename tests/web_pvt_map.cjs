@@ -131,6 +131,25 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   assert(!page.url().includes('preview=beidou'));
   assert.equal(await page.locator('[data-pvt-sky] circle').count(),0);
   await page.setViewportSize({width:1100,height:850});
+  await page.evaluate(()=>{
+   const snapshot=window.geometrySnapshot;
+   const t=snapshot.status.tracking[1];
+   const side={offset_chips:0.25,i:0.01,q:0.02};
+   const first={...t,sample_rate_hz:1000,first_sample:'29996',end_sample:'30000',code_rate_hz:1023000,
+    taps:[{...side,offset_chips:-0.25},{offset_chips:0,i:0.002,q:0.06},side]};
+   snapshot.status.tracking[1]=first;
+   window.geometryWorkspace.update(snapshot);
+   snapshot.status.tracking[1]={...first,first_sample:'30000',end_sample:'30004',taps:[first.taps[0],{offset_chips:0,i:0.003,q:-0.06},side]};
+   window.geometryWorkspace.update(snapshot);
+  });
+  await page.evaluate(()=>window.geometryWorkspace.setView('tracking'));
+  await channelRows.nth(1).getByRole('link').click();
+  await page.getByRole('heading',{name:'Signed prompt correlator versus time'}).waitFor();
+  const signedPrompt=page.locator('[data-tracking-prompt]');
+  assert.match(await signedPrompt.textContent(),/Prompt Q \(ADC units\/sample\)/);
+  const y=await signedPrompt.locator('circle').evaluateAll(dots=>dots.map(dot=>Number(dot.getAttribute('cy'))));
+  assert.equal(y.length,2);
+  assert(y[0]<100&&y[1]>150,'Both lobes of a vertical scatter appear with their Q sign');
   await page.evaluate(()=>window.geometryWorkspace.setView('tracking'));await delay(100);tiles=0;
   await page.evaluate(async()=>{
    const {createPvtMap,mercator}=await import('/pvt-map.js');

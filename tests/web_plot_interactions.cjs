@@ -187,8 +187,8 @@ async function until(predicate,message){for(let n=0;n<100;n++){if(await predicat
     assert(fixed.waterfall3D.rows>1&&fixed.waterfall3D.rows<=2048);
     assert(fixed.waterfall3D.columns>1&&fixed.waterfall3D.columns<=1024);
     assert.equal(await page.locator('#waterfallMode,#waterfallOrbit').count(),0);
-    assert.equal(fixed.waterfall3D.elevation,18,'Fixed low frontal elevation');
-    assert.equal(fixed.waterfall3D.azimuth,0,'Frontal FNIRSI view must not rotate laterally');
+    assert.equal(fixed.waterfall3D.elevation,35,'Fixed frequency-axis tilt');
+    assert.equal(fixed.waterfall3D.azimuth,0,'No lateral rotation of the time axis');
     await registered();
     if(process.env.NGENE_SCREENSHOTS){
       await page.locator('#spectrumPanel').screenshot({path:path.join(process.env.NGENE_SCREENSHOTS,'relief-desktop.png'),style:'.workspace-topbar{visibility:hidden!important}'});

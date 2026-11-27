@@ -1,6 +1,6 @@
-/* Fixed frontal 3D frequency/power/time mesh: real geometry, depth testing,
+/* Fixed 3D frequency/power/time mesh: real geometry, depth testing,
  * directional lighting and time traces. The global power scale is shared. */
-export const surfaceElevation=18*Math.PI/180,surfaceHeight=0.32;
+const surfaceTilt=35,surfaceHeight=0.5;
 const stops=[[0,12,85],[0,34,145],[0,76,215],[0,141,245],[38,207,255],[197,247,255]];
 export const reliefPalette=Array.from({length:256},(_,n)=>{const x=n/255*5,i=Math.min(4,Math.floor(x)),f=x-i;return stops[i].map((v,k)=>Math.round(v+(stops[i+1][k]-v)*f));});
 const levelOf=(v,lo,hi)=>Number.isFinite(v)?Math.max(0,Math.min(1,(v-lo)/(hi-lo))):0;
@@ -21,7 +21,7 @@ export function buildWaterfallMesh(history,columns,capacity,lo,hi){
  const rows=Math.min(capacity,history.length),gridRows=rows?capacity:0;
  if(columns<2||columns>1024||!Number.isInteger(capacity)||capacity<2||capacity>2048||!Number.isFinite(lo)||!Number.isFinite(hi)||lo>=hi)throw Error('Invalid 3D waterfall geometry.');
  const positions=new Float32Array((gridRows?gridRows+1:0)*columns*3),normals=new Float32Array(positions.length),levels=new Float32Array(positions.length/3);
- const c=Math.cos(surfaceElevation),s=Math.sin(surfaceElevation),step=1/(capacity-1);
+ const tilt=surfaceTilt*Math.PI/180,c=Math.cos(tilt),s=Math.sin(tilt),step=1/(capacity-1);
  const sample=(j,k)=>levelOf(history[Math.min(rows-1,j)].values[k],lo,hi);
  for(let j=0;j<gridRows;j++)for(let k=0;k<columns;k++){
   const i=j*columns+k,level=sample(j,k),age=j*step,h=(level-0.5)*surfaceHeight;
@@ -40,15 +40,16 @@ export function buildWaterfallMesh(history,columns,capacity,lo,hi){
    normals.set([0,1,0],3*i);levels[i]=sample(gridRows-1,k);
   }
  }
- // Fixed view: the time edges exactly span the pane. Taper only at those edges;
- // Power relief leaves the horizontal time coordinate unchanged.
- const matrix=new Float32Array([0,0.86,0,0,0,0.7,-s/4,0,1,0,-c/4,0,0,0,0,1]);
+ // Tilt the frequency/power plane around the horizontal time axis.
+ // Leave a small margin for relief at the upper and lower frequency edges.
+ const frequencyScale=0.98;
+ const matrix=new Float32Array([0,frequencyScale*c,frequencyScale*s,0,0,s,-c,0,1,0,0,0,0,0,0,1]);
  return {rows,gridRows,columns,positions,normals,levels,matrix};
 }
 export function projectSurfacePoint(frequency,level,age,mesh){
  age=Math.max(0,Math.min(1,age));
  const h=(level-0.5)*surfaceHeight*edgeHeight(age),z=1-2*age,m=mesh.matrix;
- return {x:z,y:m[1]*frequency+m[5]*h,depth:m[6]*h+m[10]*z};
+ return {x:z,y:m[1]*frequency+m[5]*h,depth:m[2]*frequency+m[6]*h};
 }
 export function createWaterfallSurface(canvas){
  const gl=canvas.getContext('webgl',{alpha:true,antialias:true,preserveDrawingBuffer:true});
@@ -82,6 +83,6 @@ export function createWaterfallSurface(canvas){
   gl.uniformMatrix4fv(projection,false,mesh.matrix);gl.uniform1f(offsetUniform,rowOffset);gl.uniform1f(ageStep,1/(capacity-1));
   gl.uniform1f(trace,0);gl.enable(gl.POLYGON_OFFSET_FILL);gl.polygonOffset(1,1);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,triangles);gl.drawElements(gl.TRIANGLES,triangleCount,gl.UNSIGNED_INT,0);
   gl.disable(gl.POLYGON_OFFSET_FILL);gl.uniform1f(trace,1);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,traces);gl.drawElements(gl.LINES,traceCount,gl.UNSIGNED_INT,0);gl.disable(gl.BLEND);
-  return {rows:mesh.rows,gridRows:mesh.gridRows,columns,imageRows:height,style:'mesh',azimuth:0,elevation:18,rowOffset,scrollProgress:1-Math.min(1,rowOffset),projection:Array.from(mesh.matrix),vertices:mesh.gridRows*columns,triangles:triangleCount/3};
+  return {rows:mesh.rows,gridRows:mesh.gridRows,columns,imageRows:height,style:'mesh',azimuth:0,elevation:surfaceTilt,rowOffset,scrollProgress:1-Math.min(1,rowOffset),projection:Array.from(mesh.matrix),vertices:mesh.gridRows*columns,triangles:triangleCount/3};
  }};
 }

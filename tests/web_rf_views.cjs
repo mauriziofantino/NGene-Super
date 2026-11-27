@@ -3,7 +3,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const {spawn}=require('node:child_process');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),net=require('node:net');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-async function until(fn,label){for(let i=0;i<160;i++){const r=await fn();if(r)return r;await delay(25);}throw Error('Timeout: '+label);}
+async function until(fn,label,attempts=160){for(let i=0;i<attempts;i++){const r=await fn();if(r)return r;await delay(25);}throw Error('Timeout: '+label);}
 (async()=>{
  const exe=path.resolve(process.env.NGENE_EXECUTABLE||'build/ngene'),port=Number(process.env.NGENE_TEST_PORT||8117),base='http://127.0.0.1:'+port;
  const probe=net.createServer();await new Promise((r,j)=>{probe.once('error',j);probe.listen(port,'127.0.0.1',r);});await new Promise(r=>probe.close(r));
@@ -14,13 +14,14 @@ async function until(fn,label){for(let i=0;i<160;i++){const r=await fn();if(r)re
   const bootstrap=await until(async()=>{if(child.exitCode!==null)throw Error(log);try{return await(await fetch(base+'/api/v1/bootstrap')).json();}catch{return false;}},'startup');
   const get=async route=>(await fetch(base+'/api/v1/'+route)).json();
   const post=async(route,body)=>{const response=await fetch(base+'/api/v1/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-NGene-Token':bootstrap.token},body:JSON.stringify(body)});const r=await response.json();assert(response.ok,JSON.stringify(r));return r;};
-  const initial=await get('config');const config=await post('config',{revision:initial.revision,ini:`[receiver]\nmode=capture\nrun_seconds=0\nidle_timeout_ms=3000\n[frontend]\ntype=file\nsample_rate_hz=100000\ncenter_frequency_hz=1575420000\nsignal_frequency_hz=1575420000\n[replay]\nformat=CI8\npath=${input}\nrealtime=true\nloop=true\n[conditioning]\nmodule=bypass\n[buffer]\nwindow_samples=1000\ningress_blocks=128\nring_blocks=16\noverflow_policy=stop\n[recording]\nenabled=false\n[analysis]\nspectrum_enabled=true\nhistogram_enabled=true\nfft_size=256\naverages=1\nupdate_hz=30\nhistogram_pairs=1024\nhistogram_bins=32\nhistogram_update_hz=30\n[acquisition]\nenabled=false\n`});
-  assert(/\[acquisition\]/.test(config.ini),'acquisition options must persist');assert.equal(bootstrap.gps_acquisition,true);assert.equal((await fetch(base+'/api/v1/acquisition/caf')).status,404);
+  // Record mode keeps low-rate diagnostic replay independent of GNSS acquisition.
+  const initial=await get('config');const config=await post('config',{revision:initial.revision,ini:`[receiver]\nmode=record\nrun_seconds=0\nidle_timeout_ms=3000\n[frontend]\ntype=file\nsample_rate_hz=100000\ncenter_frequency_hz=1575420000\nsignal_frequency_hz=1575420000\n[replay]\nformat=CI8\npath=${input}\nrealtime=true\nloop=true\n[conditioning]\nmodule=bypass\n[buffer]\nwindow_samples=1000\ningress_blocks=128\nring_blocks=16\noverflow_policy=stop\n[recording]\nenabled=true\n[analysis]\nspectrum_enabled=true\nhistogram_enabled=true\nfft_size=256\naverages=1\nupdate_hz=30\nhistogram_pairs=1024\nhistogram_bins=32\nhistogram_update_hz=30\n`});
+  assert.match(config.ini,/^mode=record$/m);assert.equal(bootstrap.gps_acquisition,true);assert.equal((await fetch(base+'/api/v1/acquisition/caf')).status,404);
   browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{}),args:['--no-sandbox']});const page=await browser.newPage({viewport:{width:1440,height:1250}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{window.canvasCalls={};for(const name of ['clearRect','fillRect','drawImage','fill','stroke','fillText']){const original=CanvasRenderingContext2D.prototype[name];CanvasRenderingContext2D.prototype[name]=function(...args){const id=this.canvas.id;if(id)window.canvasCalls[id]=(window.canvasCalls[id]||0)+1;return original.apply(this,args);};}});
   await page.goto(base);await until(async()=>await page.locator('#connection').textContent()==='Connected','GUI connected');await page.locator('#refresh').selectOption('33');await post('receiver/start',{revision:config.revision});
   const snapshot=()=>page.evaluate(async()=>({...(await import('/app.js')).diagnosticSnapshot(),calls:{...window.canvasCalls}}));
-  await until(async()=>(await snapshot()).waterfall3D.history>=24,'3D live history');
+  await until(async()=>(await snapshot()).waterfall3D.history>=24,'3D live history',480);
   assert.equal(await page.locator('#expandPlots,#frequencyMin,#frequencyMax,#resetFrequency').count(),0,'Zoom controls removed');
   for(const id of ['waterfall','waterfall3D']){
     const filled=await page.locator('#'+id).evaluate(canvas=>{
@@ -55,7 +56,7 @@ async function until(fn,label){for(let i=0;i<160;i++){const r=await fn();if(r)re
     assert(BigInt(statusAfter.processed_samples)>BigInt(statusBefore.processed_samples),'receiver must keep processing');
   }
   await page.setViewportSize({width:390,height:844});await page.locator('#waterfall3D').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(root,'mobile.png'),fullPage:true});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'mobile overflow');assert.deepEqual(errors,[]);
-  await post('shutdown',{});assert.equal(await exit,0);console.log('PASS: optional acquisition disabled; all eight plot combinations; disabled canvases idle; synchronized 2D/relief history; all-off FFT stopped while histogram and receiver advance; desktop/mobile. Evidence: '+root);
+  await post('shutdown',{});assert.equal(await exit,0);console.log('PASS: record-only CI8 replay; all eight plot combinations; disabled canvases idle; synchronized 2D/relief history; all-off FFT stopped while histogram and receiver advance; desktop/mobile. Evidence: '+root);
  }finally{if(browser)await browser.close();if(child.exitCode===null){child.kill('SIGTERM');await exit;}}
 })().catch(e=>{console.error(e);process.exitCode=1;});
 

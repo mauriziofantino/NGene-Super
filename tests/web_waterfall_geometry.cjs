@@ -1,4 +1,4 @@
-/* Geometry contract: a real frontal mesh, with power height and depth. */
+/* Geometry contract: a real tilted mesh, with power height and depth. */
 const assert=require('node:assert/strict'),fs=require('node:fs');
 (async()=>{
  const source=fs.readFileSync('web/waterfall-relief.js','utf8');
@@ -14,6 +14,15 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
  const low=projectSurfacePoint(0,.2,.5,mesh),high=projectSurfacePoint(0,.8,.5,mesh);
  assert(high.y>low.y,'Power must change vertex height');assert.notEqual(high.depth,low.depth,'Power must participate in 3D depth');
  const near=projectSurfacePoint(-.6,.5,0,mesh),far=projectSurfacePoint(-.6,.5,1,mesh);
+ const lower=projectSurfacePoint(-1,.5,.5,mesh),upper=projectSurfacePoint(1,.5,.5,mesh);
+ assert.deepEqual([mesh.matrix[0],mesh.matrix[4],mesh.matrix[8]],[0,0,1],'The shader projects time directly onto screen X');
+ assert(upper.y>lower.y&&upper.depth>lower.depth,'The vertical frequency direction tilts into depth');
+ assert.equal(upper.x,lower.x,'Tilting frequency preserves horizontal row alignment');
+ assert(Math.abs(Math.atan2(upper.depth-lower.depth,upper.y-lower.y)*180/Math.PI-35)<1e-5);
+ for(const frequency of [-1,1])for(const level of [0,1]){
+  const corner=projectSurfacePoint(frequency,level,.5,mesh);
+  assert(Math.abs(corner.y)<1&&Math.abs(corner.depth)<1,'Full power relief fits at each frequency edge');
+ }
  assert.equal(near.x,1);assert.equal(far.x,-1);
  assert.equal(near.y,far.y,'Time must not change the displayed frequency');
  assert.equal(low.x,high.x,'Power must not move the sample in time');

@@ -802,12 +802,12 @@ function drawColourBar(s,palette,lo,hi){
   }
   ctx.fillStyle='#9eb6c9';ctx.fillText(String(hi),right-30,top-4);ctx.fillText(String(lo),right-65,top-4);
 }
-function waterfallAxes(s,relief=false){
+function waterfallAxes(s,frequencyScale=1){
   const {ctx,left,right,top,bottom}=s,[lo,hi]=frequencyRange();
   const duration=(historyRows()-1)/Math.max(0.1,Math.min(30,Number($("waterfallRate").value)));
   ctx.fillStyle="#8fa6ba";ctx.textAlign="right";
   for(let j=0;j<=4;j++){
-    const y=(top+bottom)/2+(0.5-j/4)*(bottom-top)*(relief?0.86:1);
+    const y=(top+bottom)/2+(0.5-j/4)*(bottom-top)*frequencyScale;
     ctx.fillText((lo+j*(hi-lo)/4).toFixed($("frequencyReference").value==="rf"?3:1),left-4,y+3);
     const x=left+j*(right-left)/4;
     ctx.fillText(j===4?"0 s":"-"+(duration*(1-j/4)).toFixed(1)+" s",Math.max(left+32,x),bottom+18);
@@ -863,8 +863,8 @@ function drawWaterfall3D(rowOffset=waterfallScroll.offset(performance.now())){
     ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();
   }
   ctx.drawImage(waterfall3DBitmap,left,top,right-left,bottom-top);
-  drawColourBar(s,reliefPalette,lo,hi);waterfallAxes(s,true);
-  $('waterfall3DInfo').textContent='Frontal 3D | '+waterfallHistory.length+' snapshots | live scroll | synchronized with 2D';
+  drawColourBar(s,reliefPalette,lo,hi);waterfallAxes(s,geometry.projection[1]);
+  $('waterfall3DInfo').textContent='3D power surface | '+waterfallHistory.length+' snapshots | live scroll | synchronized with 2D';
   waterfall3DRender={mode:'3d',...geometry,newest:waterfallHistory[0]?.sequence??null,oldest:waterfallHistory.at(-1)?.sequence??null};
 }
 function animateWaterfallScroll(){
