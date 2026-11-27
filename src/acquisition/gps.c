@@ -2,6 +2,7 @@
  * Numerical adaptation: native complex samples, floating PCPS, no legacy FFT gain constants.
  * FalseAlarm's integer-shape gamma survival law and GPS Pfa=1e-9 are retained. */
 #include "acquisition/workspace.h"
+#include "dsp/egnos_code.h"
 #include "dsp/search_plan.h"
 #include "ngene/dsp/gps_ca.h"
 #include "acquisition/grid.h"
@@ -118,6 +119,27 @@ int NgAcquisitionGpsWorkspace(const TNgStreamInfo *stream, TNgSearchFftMode mode
         NgSearchFftExecute(search->fft, spectrum, 0);
     }
     *out = search;
+    return NG_OK;
+}
+
+/** Install GEO L1 C/A replicas in a private two-PRN search workspace. */
+int NgAcquisitionEgnosWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error)
+{
+    if (NgAcquisitionGpsWorkspace(stream, NG_SEARCH_FFT_FLOAT, out, error) != NG_OK) {
+        return NG_ERROR;
+    }
+    TNgGpsSearch *search = *out;
+    for (unsigned slot = 0; slot < 2; ++slot) {
+        NgEgnosCode(slot, search->chips[slot]);
+        TNgComplex *spectrum = search->codeFft + slot * search->size;
+        NgSearchCode(search->code, search->size, search->chips[slot],
+                     (double)search->size * 1000, NG_GPS_CA_RATE_HZ, 0);
+        for (size_t k = 0; k < search->size; ++k) {
+            spectrum[k].i = search->code[k];
+            spectrum[k].q = 0;
+        }
+        NgSearchFftExecute(search->fft, spectrum, 0);
+    }
     return NG_OK;
 }
 

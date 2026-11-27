@@ -1,5 +1,6 @@
 /** @file test_pvt.c @brief Broadcast analytic derivatives and common-epoch LS regression. */
 #include "ngene/pvt.h"
+#include "navigation/ionosphere.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -229,9 +230,30 @@ static void Fixture(unsigned mask, int rollover)
     CHECK(!solution.available);
 }
 
+/** Check the Galileo Annex E vectors and the constant BDGIM harmonic. */
+static void CheckIonosphere(void)
+{
+    const double radians = 3.14159265358979323846 / 180.0;
+    const double e1 = 1575420000.0;
+    const double gal[] = {2.580271, 0.127628236, 0.0252748384};
+    const double rx[] = {39.14 * radians, 141.13 * radians, 117.0};
+    const double sv1[] = {-13.93 * radians, 165.14 * radians, 20181976.50};
+    const double sv2[] = {36.64 * radians, 85.59 * radians, 20015444.79};
+    const double stec1 = NgNeQuickE1(gal, 4, 0, rx, sv1) * e1 * e1 / 40.3e16;
+    const double stec2 = NgNeQuickE1(gal, 4, 0, rx, sv2) * e1 * e1 / 40.3e16;
+    CHECK(fabs(stec1 - 36.44) < 0.2);
+    CHECK(fabs(stec2 - 14.24) < 0.2);
+    const double bds1[9] = {40.0}, bds2[9] = {48.0};
+    const double a = NgBdgimDelay(bds1, 60000.5, 0.7, 0.2, 0.4, 1.2);
+    const double b = NgBdgimDelay(bds2, 60000.5, 0.7, 0.2, 0.4, 1.2);
+    const double sine = 6378.0 / 6778.0 * cos(1.2);
+    CHECK(fabs(b - a - 8.0 * 40.28e16 / (e1 * e1 * sqrt(1 - sine * sine))) < 1e-10);
+}
+
 /** Check GPS-only, mixed biases, rollover and invalid-generation rejection. */
 int main(void)
 {
+    CheckIonosphere();
     for (unsigned mask = 1; mask < 8; ++mask) {
         Fixture(mask, 0);
         Fixture(mask, 1);

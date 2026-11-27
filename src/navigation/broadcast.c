@@ -1048,6 +1048,12 @@ int NgBroadcastGalileo(TNgBroadcast *broadcast, const unsigned char data[16])
     case 5:
         NgParseGalWord05(&p);
         break;
+    case 6: {
+        /* I/NAV Table 47: the signed 8-bit GST-UTC leap term follows A0 and A1. */
+        const int raw = ((data[7] & 3) << 6) | (data[8] >> 2);
+        broadcast->iono.utcLeap = (raw ^ 128) - 128;
+        break;
+    }
     default:
         break;
     }

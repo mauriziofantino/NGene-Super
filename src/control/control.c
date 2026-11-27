@@ -947,6 +947,20 @@ void NgControlSnapshot(TNgControl *control, TNgControlStatus *status)
     NgMutexUnlock(&control->mutex);
 }
 
+/** Copy command and file status under the same lock as the full snapshot. */
+void NgControlReadLifecycle(TNgControl *control, TNgControlLifecycle *status)
+{
+    NgMutexLock(&control->mutex);
+    status->state = control->status.state;
+    status->recordingState = control->status.recordingState;
+    status->revision = control->status.revision;
+    status->commandId = control->status.commandId;
+    status->completedCommandId = control->status.completedCommandId;
+    memcpy(status->recordingName, control->status.recordingName, sizeof(status->recordingName));
+    memcpy(status->outputDirectory, control->status.outputDirectory, sizeof(status->outputDirectory));
+    NgMutexUnlock(&control->mutex);
+}
+
 /** Store interest only; HTTP never touches live channel workspaces. */
 void NgControlObserveChannel(TNgControl *control, unsigned channelId)
 {

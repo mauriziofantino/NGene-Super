@@ -1,5 +1,5 @@
 /** @file gps_ca.c @brief GPS L1 C/A Gold codes and persistent sampled replicas. */
-#include "ngene/dsp/gps_ca.h"
+#include "dsp/egnos_code.h"
 #include <math.h>
 
 int NgGpsCaGenerate(unsigned prn, int8_t chips[NG_GPS_CA_LENGTH], TNgError *error)
@@ -84,4 +84,25 @@ void NgGpsCaSample(const int8_t chips[NG_GPS_CA_LENGTH], TNgGpsCaNco *nco, int8_
     size_t n;
     for (n = 0; n < count; ++n)
         output[n] = (int8_t)NgGpsCaNext(chips, nco);
+}
+
+/** Use the G2 delays of IS-GPS-200N Table 6-I, also used by NGene Classic. */
+void NgEgnosCode(unsigned slot, int8_t chips[NG_GPS_CA_LENGTH])
+{
+    static const unsigned delays[] = {175, 595};
+    unsigned g1 = 1023, g2 = 1023;
+    uint8_t direct[NG_GPS_CA_LENGTH], delayed[NG_GPS_CA_LENGTH];
+    for (unsigned k = 0; k < NG_GPS_CA_LENGTH; ++k) {
+        direct[k] = (uint8_t)(g1 >> 9);
+        delayed[k] = (uint8_t)(g2 >> 9);
+        const unsigned next1 = (g1 >> 2) ^ (g1 >> 9);
+        const unsigned next2 = (g2 >> 1) ^ (g2 >> 2) ^ (g2 >> 5) ^
+                               (g2 >> 7) ^ (g2 >> 8) ^ (g2 >> 9);
+        g1 = ((g1 << 1) | (next1 & 1u)) & 1023u;
+        g2 = ((g2 << 1) | (next2 & 1u)) & 1023u;
+    }
+    for (unsigned k = 0; k < NG_GPS_CA_LENGTH; ++k) {
+        chips[k] = (direct[k] ^ delayed[(k + NG_GPS_CA_LENGTH - delays[slot]) %
+                                        NG_GPS_CA_LENGTH]) ? -1 : 1;
+    }
 }

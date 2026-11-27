@@ -171,6 +171,50 @@
       "rules": []
     },
     {
+      "id": "pvt-broadcast-ionosphere",
+      "groups": [
+        {
+          "title": "Ionospheric corrections",
+          "topic": "tracking",
+          "fields": [
+            {
+              "key": "tracking.broadcast_ionosphere",
+              "label": "Broadcast ionosphere correction",
+              "type": "select",
+              "default": "true",
+              "options": [
+                {"value": "true", "label": "Enabled"},
+                {"value": "false", "label": "Disabled"}
+              ]
+            }
+          ]
+        }
+      ],
+      "rules": []
+    },
+    {
+      "id": "pvt-egnos",
+      "groups": [
+        {
+          "title": "SBAS",
+          "topic": "tracking",
+          "fields": [
+            {
+              "key": "tracking.egnos",
+              "label": "EGNOS L1",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {"value": "false", "label": "Disabled"},
+                {"value": "true", "label": "Receive from GEO"}
+              ]
+            }
+          ]
+        }
+      ],
+      "rules": []
+    },
+    {
       "id": "gps-l1-ca-classic",
       "groups": [
         {

@@ -57,6 +57,13 @@ async function until(fn, label) {
       const reply = await response.json(); assert(response.ok, JSON.stringify(reply)); return reply;
     };
     assert.equal(bootstrap.gps_acquisition, true);
+    const route = signal => `acquisition/search-space?prn=7&signal=${signal}`;
+    for (const signal of ['gps', 'galileo']) {
+      assert.deepEqual(await get(route(signal)), {valid: false});
+    }
+    const idle = await get('status');
+    assert.equal(idle.state, 'stopped');
+    assert.equal((await get('files')).revision, idle.revision);
     let config = await get('config'); assert.match(config.ini, /xor_correlation=true/);
     browser = await chromium.launch({headless: true,
       ...(process.env.BROWSER_EXECUTABLE ? {executablePath: process.env.BROWSER_EXECUTABLE} : {})});
@@ -96,10 +103,15 @@ async function until(fn, label) {
     assert.equal(await page.locator('[data-tracking-shape] polyline').count(),1,'Measured tap curve');
     assert.match(await page.locator('[data-satellite-acquisition]').textContent(),/confirmed/);
     assert.match(await page.locator('[data-tracking-detail]').textContent(),/C\/N0/);
-    const range=await page.locator('[data-tracking-range]').inputValue();
-    assert(Number(range)>0);
+    const range = page.locator('[data-tracking-range]');
+    assert(Number(await range.inputValue()) > 0);
+    await range.evaluate(input => {
+      // Commit in one browser task so a status refresh cannot reset the draft.
+      input.value = '10';
+      input.dispatchEvent(new Event('change', {bubbles: true}));
+    });
     await delay(120);
-    assert.equal(await page.locator('[data-tracking-range]').inputValue(),range,'Axis range is held, never normalized by Prompt');
+    assert.equal(await range.inputValue(), '10', 'Manual axis range is held');
     await until(async ()=>await page.locator('[data-channel-search-space] canvas').evaluateAll(nodes=>nodes.every(n=>n.dataset.prn==='7')),'selected satellite acquisition map');
     await page.screenshot({path:path.join(root,'channel-gps.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});
@@ -117,7 +129,13 @@ async function until(fn, label) {
       await until(async ()=>await page.locator('[data-channel-search-space] canvas').evaluateAll(nodes=>nodes.every(n=>n.dataset.signal==='galileo')),'Galileo satellite acquisition map');
       await page.screenshot({path:path.join(root,'channel-galileo.png'),fullPage:true});
     }
-    const space=await get('acquisition/search-space?prn=7');
+    const [space, galileoSpace] = await Promise.all([get(route('gps')), get(route('galileo'))]);
+    if (testGalileo) {
+      assert.equal(galileoSpace.valid, true);
+      assert.equal(galileoSpace.signal, 'galileo_e1b');
+      assert.equal(galileoSpace.power.length, 116);
+      assert(galileoSpace.power.every(row => row.length === 1024));
+    }
     assert.equal(space.valid,true);assert.equal(space.confirmed,true);
     assert.equal(space.power.length,16);assert.equal(space.power[0].length,1024);
     assert.equal((await fetch(base+'/api/v1/acquisition/search-space?prn=33')).status,400);

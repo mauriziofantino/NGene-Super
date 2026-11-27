@@ -285,6 +285,10 @@ histogram_update_hz=20
     const ring = page.locator('[name="buffer.ring_blocks"]');
     assert(await ring.isEnabled(), 'Implemented receiver buffers remain editable alongside unavailable GNSS controls');
     await ring.fill('32'); await ring.blur();
+    await page.locator('[data-settings="tracking"]').click();
+    const ionosphere = page.locator('[name="tracking.broadcast_ionosphere"]');
+    assert.equal(await ionosphere.inputValue(), 'true');
+    await ionosphere.selectOption('false');
     for (const topic of referenceOnlyTopics) {
       const beforeTelemetry = frames.length;
       await page.locator(`[data-settings="${topic}"]`).click();
@@ -308,6 +312,7 @@ histogram_update_hz=20
     const applied = await get('config');
     assert.match(applied.ini, /^\[beidou_acquisition\]\r?\nenabled=true(?:\r?\n|$)/m,
       'The BeiDou choice is saved in the operational profile');
+    assert.match(applied.ini, /broadcast_ionosphere=false(?:\r?\n|$)/);
     assert.match(applied.ini, /ring_blocks=32(?:\r?\n|$)/, 'Implemented receiver buffer change reaches the service');
     const referenceNames = await page.locator('[data-reference-param]').evaluateAll(controls => controls.map(control => control.dataset.referenceParam));
     for (const name of referenceNames) assert(!applied.ini.includes(`${name}=`), `Reference parameter ${name} must never enter the INI`);

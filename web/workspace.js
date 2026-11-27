@@ -384,6 +384,21 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     document.querySelector('[data-pvt-counts]').textContent=pvt?`${pvt.available?'Used measurements':'Eligible measurements'}: ${pvt.satellites ?? 0} (GPS ${pvt.gps ?? 0}, Galileo ${pvt.galileo ?? 0}, BeiDou ${pvt.beidou ?? 0}) | Epoch ${pvt.epoch ?? '—'}, sample ${pvt.sample ?? '—'}`:'Waiting for receiver';
     document.querySelector('[data-pvt-model]').textContent=pvt?.model||'Waiting for validated navigation data and consistent ephemerides.';
     const pvtValues=document.querySelector('[data-pvt-values]');pvtValues.replaceChildren();
+    if (pvt?.egnos?.geo_prn) {
+      const term = document.createElement('dt');
+      const description = document.createElement('dd');
+      term.textContent = 'EGNOS';
+      description.textContent = `PRN ${pvt.egnos.geo_prn} · ${pvt.egnos.valid_frames} valid frames · ${pvt.egnos.corrected_gps} GPS corrected`;
+      pvtValues.append(term, description);
+    }
+    if (pvt?.available && pvt.ionosphere_corrected) {
+      const {gps, galileo, beidou} = pvt.ionosphere_corrected;
+      const term = document.createElement('dt');
+      const description = document.createElement('dd');
+      term.textContent = 'Ionosphere corrections';
+      description.textContent = `GPS ${gps} · Galileo ${galileo} · BeiDou ${beidou}`;
+      pvtValues.append(term, description);
+    }
     if(pvt?.available) for(const [label,value] of [['Latitude',pvt.latitude_deg.toFixed(8)+' deg'],['Longitude',pvt.longitude_deg.toFixed(8)+' deg'],['Ellipsoidal height',pvt.height_m.toFixed(2)+' m'],['Residual RMS',pvt.residual_rms_m.toFixed(2)+' m'],['Nominal receiver TOW',pvt.tow_seconds.toFixed(6)+' s'],['Velocity ECEF',pvt.velocity_available?[pvt.velocity_x_mps,pvt.velocity_y_mps,pvt.velocity_z_mps].map(v=>v.toFixed(3)).join(', ')+' m/s':'Unavailable']]) {
       const row=document.createElement('div'),term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=value;row.append(term,description);pvtValues.append(row);
     }

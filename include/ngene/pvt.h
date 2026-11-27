@@ -2,6 +2,7 @@
 #ifndef NGENE_PVT_H
 #define NGENE_PVT_H
 #include "ngene/tracking.h"
+#include "ngene/sbas.h"
 
 /** Real line of sight at the solution epoch; all entries participated in the solve. */
 typedef struct {
@@ -24,6 +25,8 @@ typedef struct {
     double gdop, hdop, vdop;                   /**< Unweighted geometry, separate code clocks. */
     unsigned skyCount;                         /**< Number of real solved lines of sight. */
     TNgPvtSatelliteView sky[64];               /**< Solution-epoch satellite sky geometry. */
+    unsigned egnosPrn, egnosFrames, egnosCorrected; /**< GEO and EGNOS data used at this epoch. */
+    unsigned ionosphereCorrected[3]; /**< Applied delays for GPS, Galileo and BeiDou. */
     unsigned beidou; /**< Admitted B1C measurements. */
     double clockBeidou; /**< Independent B1C receiver code bias [m]. */
 } TNgPvtSnapshot;
@@ -50,4 +53,12 @@ int NgPvtSatellite(const TNgBroadcast *broadcast, unsigned constellation, double
 /** Solve common-epoch code/Doppler equations. No allocations, globals or source ownership. */
 void NgPvtCompute(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
                   double sampleRate, TNgPvtSnapshot *solution);
+/** Solve with explicit control of the broadcast ionospheric corrections. */
+void NgPvtComputeWithIonosphere(const TNgTrackingSnapshot channels[64], uint64_t epoch,
+                                uint64_t sample, double sampleRate, int broadcastIonosphere,
+                                TNgPvtSnapshot *solution);
+/** Solve with one optional GEO bank. Ages are tied to the input sample timeline. */
+void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoch,
+                            uint64_t sample, double sampleRate, int broadcastIonosphere,
+                            const TNgSbasCorrections *sbas, TNgPvtSnapshot *solution);
 #endif

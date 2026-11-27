@@ -49,8 +49,14 @@ add_library(NGene::Dsp ALIAS ngene_dsp)
 # Tracking algorithms form a separately replaceable library, independent of drivers/control.
 add_library(ngene_navigation STATIC src/navigation/navigation.c src/navigation/broadcast.c
     src/navigation/beidou_bcnv1.c src/navigation/beidou_observation.c
-    src/navigation/galileo.c src/navigation/viterbi.c src/navigation/pvt.c)
-target_include_directories(ngene_navigation PUBLIC include)
+    src/navigation/galileo.c src/navigation/viterbi.c src/navigation/pvt.c
+    src/navigation/bdgim.c src/navigation/nequick_e1.c src/navigation/sbas.c src/navigation/sbas_stream.c
+    src/navigation/nequick/ionoCalcModip.c src/navigation/nequick/nequickComputation.c
+    src/navigation/nequick/neqCalcBottomsideNe.c src/navigation/nequick/neqCalcTopsideNe.c
+    src/navigation/nequick/neqCalcEpstParams.c src/navigation/nequick/neqGetRayProperties.c
+    src/navigation/nequick/neqGetNeOnSlantRay.c src/navigation/nequick/neqGetNeOnVertRay.c
+    src/navigation/nequick/neqIntegrate.c src/navigation/nequick/neqUtils.c)
+target_include_directories(ngene_navigation PUBLIC include PRIVATE src)
 target_link_libraries(ngene_navigation PUBLIC ngene_base)
 if(NOT WIN32)
     target_link_libraries(ngene_navigation PUBLIC m)
@@ -66,7 +72,7 @@ add_library(ngene_core
     src/stream/ring.c
     src/frontend/frontend.c src/frontend/common.c src/frontend/file.c src/frontend/sige_decode.c src/frontend/ingress.c src/frontend/calibration.c
     src/conditioning/bypass.c src/recording/recording.c src/recording/metadata.c
-    src/tracking/bank.c src/analysis/analysis.c src/acquisition/acquisition.c src/acquisition/gps.c src/acquisition/galileo.c)
+    src/tracking/bank.c src/tracking/egnos.c src/analysis/analysis.c src/acquisition/acquisition.c src/acquisition/gps.c src/acquisition/galileo.c)
 target_include_directories(ngene_core PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}/generated" PRIVATE src)
 target_link_libraries(ngene_core PUBLIC ngene_platform ngene_dsp)
 target_link_libraries(ngene_core PUBLIC ngene_tracking)
@@ -294,8 +300,13 @@ if(NGENE_BUILD_TESTS)
     target_include_directories(ngene_acquisition_pool_tests PRIVATE src)
     target_link_libraries(ngene_acquisition_pool_tests PRIVATE ngene_core)
     add_test(NAME acquisition_pool_contract COMMAND ngene_acquisition_pool_tests)
+    add_executable(ngene_sbas_tests tests/test_sbas.c)
+    target_include_directories(ngene_sbas_tests PRIVATE src)
+    target_link_libraries(ngene_sbas_tests PRIVATE ngene_navigation)
+    add_test(NAME egnos_sbas_contract COMMAND ngene_sbas_tests)
     add_executable(ngene_pvt_tests tests/test_pvt.c)
     target_link_libraries(ngene_pvt_tests PRIVATE ngene_navigation)
+    target_include_directories(ngene_pvt_tests PRIVATE src)
     add_test(NAME broadcast_pvt COMMAND ngene_pvt_tests)
     add_executable(ngene_beidou_observation_tests tests/test_beidou_observation.c)
     target_link_libraries(ngene_beidou_observation_tests PRIVATE ngene_navigation)
@@ -486,7 +497,7 @@ if(NGENE_BUILD_TESTS)
     endif()
 endif()
 # Keep upstream dependencies outside first-party warning policy.
-foreach(target ngene_beidou_observation_tests ngene_beidou_bcnv1_tests ngene_beidou_b1c_tracking_lab ngene_beidou_b1c_acquisition_lab ngene_beidou_b1c_tests ngene_acquisition_pool_tests ngene_navigation ngene_navigation_tests ngene_galileo_navigation_tests ngene_pvt_tests ngene_channel_slot_tests ngene_tracking ngene_tracking_tests ngene_acquisition_tests ngene_gain_probe ngene_web_calibration_fixture ngene_sige_tests ngene_frontend_stream_tests ngene_calibration_tests ngene_base ngene_platform ngene_dsp ngene_core ngene_rtlsdr_tests ngene_bladerf_tests ngene_sdr_tests ngene ngene_hackrf_tests ngene_replay_tests ngene_control ngene_tests ngene_sample_tests ngene_analysis_tests ngene_fft_tests ngene_fft_fallback_tests ngene_engine_scheduler_tests ngene_control_tests)
+foreach(target ngene_sbas_tests ngene_beidou_observation_tests ngene_beidou_bcnv1_tests ngene_beidou_b1c_tracking_lab ngene_beidou_b1c_acquisition_lab ngene_beidou_b1c_tests ngene_acquisition_pool_tests ngene_navigation ngene_navigation_tests ngene_galileo_navigation_tests ngene_pvt_tests ngene_channel_slot_tests ngene_tracking ngene_tracking_tests ngene_acquisition_tests ngene_gain_probe ngene_web_calibration_fixture ngene_sige_tests ngene_frontend_stream_tests ngene_calibration_tests ngene_base ngene_platform ngene_dsp ngene_core ngene_rtlsdr_tests ngene_bladerf_tests ngene_sdr_tests ngene ngene_hackrf_tests ngene_replay_tests ngene_control ngene_tests ngene_sample_tests ngene_analysis_tests ngene_fft_tests ngene_fft_fallback_tests ngene_engine_scheduler_tests ngene_control_tests)
     if(TARGET ${target})
         if(MSVC)
             target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)

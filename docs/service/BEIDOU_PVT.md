@@ -16,6 +16,44 @@ L'epoca comune nominale usa GPST, con BDT +14 s e origine di settimana GPS 1356 
 
 Il QR con pivot in double usa tre coordinate e una colonna di bias di codice per ogni costellazione **ammessa**, per un totale di 4, 5 o 6 incognite. Il contributo BeiDou usa l'orbita BDCS con il proprio valore di rotazione terrestre. Il PVT misto assume ECEF BDCS e WGS84/ITRF nominalmente allineati. Le differenze fra realizzazioni e gli offset fini BGTO/GGTO restano da verificare su dati reali. Si mantiene il drift Doppler comune del modello EVO, coerente con una singola sorgente che usa lo stesso oscillatore L1/E1/B1C. I bias di codice sono indipendenti e includono gli offset costanti residui. La qualifica del drift con registrazioni e dell'accuratezza assoluta resta aperta. [Riferimento ICAO BDCS e ITRF](https://www.icao.int/sites/default/files/APAC/Meetings/2021/2021%20CNS%20SG%2025/4-Information%20Papers/IP07_ICAO-AI.5.4-PFA-OF-ANNEX-10-VOLUME-I-ON-DFMC-AND-GBAS.pdf)
 
+## Ionosfera broadcast a frequenza singola
+
+La pagina 1 di SF3 B-CNAV1 porta nove coefficienti BDGIM. Il decoder usa
+solo pagine accettate dal decoder con CRC per un satellite sano. Conserva
+l'ultima pagina valida durante le altre pagine SF3 e la invalida al cambio
+di continuità o alla scadenza della cache. Il quinto coefficiente è senza
+segno sul filo e ha fattore di scala negativo. Il modello PVT usa il punto
+subionosferico a 400 km, il riferimento geomagnetico solidale con il Sole,
+le armoniche trasmesse e i coefficienti di previsione della Tabella 7-12.
+Il ritardo lungo la linea di vista è espresso in metri alla frequenza B1C.
+[BeiDou B1C SIS ICD, §7.8](https://www-labsticc.univ-ubs.fr/nb_ldpc/matrices/BeiDou_2017_B1C.pdf)
+
+Per Galileo E1 la parola 5 di I/NAV fornisce i tre coefficienti della
+ionizzazione efficace. Il modello NeQuick G usa il motore numerico e le
+tabelle MODIP/CCIR di Classic, con dati in sola lettura e contesto di
+calcolo locale. L'integrale su ciascuna linea di vista fornisce lo STEC,
+convertito in ritardo di codice alla frequenza E1. Il tempo dei due
+modelli usa il termine intero GST/BDT–UTC trasmesso quando disponibile.
+La conversione completa durante l'inserzione di un secondo intercalare
+resta da qualificare.
+[Galileo OS SIS ICD](https://www.gsc-europa.eu/sites/default/files/sites/all/files/Galileo_OS_SIS_ICD_v2.2.pdf) ·
+[NeQuick G, Annex E](https://www.gsc-europa.eu/sites/default/files/sites/all/files/Galileo_Ionospheric_Model.pdf)
+
+In Receiver configuration → Tracking, **Broadcast ionosphere correction**
+controlla i modelli broadcast GPS, Galileo e BeiDou. Il profilo INI salva
+`tracking.broadcast_ionosphere`, attivo anche per i profili precedenti che
+omettono il campo. La pagina PVT mostra i conteggi effettivi per soluzione.
+La correzione troposferica Hopfield continua sul percorso separato.
+
+Su Windows x64 Release, il replay RTL-SDR da 75 a 175 s ha elaborato
+240 milioni di coppie in 100,18 s, con zero gap e zero campioni persi.
+La telemetria indica Galileo corretto in 67/67 fix e BeiDou in 23/67,
+fino a 2 e 6 satelliti rispettivamente. Il manifest e il riepilogo sono in
+`build/b8-broadcast-ionosphere-final-rtl`. Passati i contratti applicativi
+Windows (25/25) e la prova browser di salvataggio della scelta. I tre
+controlli di tooling Windows e le prove native su Linux/macOS restano
+fuori da questa esecuzione.
+
 ## Verifica riproducibile
 
 Windows x64 Release con MSVC e Ninja. Suite completa 28/28 in 166,31 s, build senza profiling.

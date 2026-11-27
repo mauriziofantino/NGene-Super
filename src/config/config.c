@@ -252,6 +252,12 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("tracking.galileo_channels", tracking.galileoChannels)
     UINT_KEY("tracking.workers", tracking.workers)
     UINT_KEY("tracking.doppler_smoothing_ms", tracking.dopplerSmoothingMs)
+    if (strcmp(key, "tracking.egnos") == 0) {
+        return ParseBool(value, &c->tracking.egnosEnabled);
+    }
+    if (strcmp(key, "tracking.broadcast_ionosphere") == 0) {
+        return ParseBool(value, &c->tracking.broadcastIonosphere);
+    }
     if (strcmp(key, "pvt.carrier_smoothing_length") == 0) {
         return ParseU64(value, &n) == NG_OK && n <= 1024 ? NG_OK : NG_ERROR;
     }
@@ -843,6 +849,9 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
                    "galileo_spacing_slots=%.17g\ndoppler_smoothing_ms=%u\n",config->tracking.workers,
             config->tracking.tapCount,config->tracking.spacingChips,
             2.0 * config->tracking.galileoSpacingChips,config->tracking.dopplerSmoothingMs);
+    fprintf(output, "egnos=%s\n", config->tracking.egnosEnabled ? "true" : "false");
+    fprintf(output, "broadcast_ionosphere=%s\n",
+            config->tracking.broadcastIonosphere ? "true" : "false");
     fprintf(output,"\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\ncpu_budget=%.17g\n",
             config->acquisition.firstPrn,config->acquisition.lastPrn,config->acquisition.falseAlarmProbability,
             config->acquisition.cpuBudget);

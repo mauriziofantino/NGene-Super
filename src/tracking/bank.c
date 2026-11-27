@@ -1,5 +1,6 @@
 /** @file bank.c @brief One receiver slot pool shared by all acquisition strategies. */
 #include "tracking/bank.h"
+#include "tracking/egnos.h"
 #include "core/channel_dispatch.h"
 #include "platform/platform.h"
 #include <stdlib.h>
@@ -12,6 +13,7 @@
 
 /** Receiver-owned pool. All allocation/assignment happens outside DSP jobs. */
 typedef struct {
+    TNgEgnos *egnos;                     /**< Optional GPS L1 augmentation channel. */
     TNgPvtSnapshot pvt;                   /**< Last common-epoch code/Doppler solve. */
     double sampleRate;                    /**< Actual source pairs per second. */
     uint64_t lastPvtSample;               /**< Last periodic solver invocation. */
@@ -168,6 +170,10 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
     pool->firstSample = window->meta.firstSample;
     pool->count = window->meta.count;
     pool->expected = window->meta.firstSample + window->meta.count;
+    if (NgEgnosProcess(pool->egnos, window, !pool->catchingUp && pool->trackingLoad < 0.85,
+                       error) != NG_OK) {
+        return NG_ERROR;
+    }
     pool->haveWindow = 1;
     Refresh(pool);
     for (system = 0; system < NG_CONSTELLATION_COUNT; ++system)
@@ -349,8 +355,12 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
         (bank->pool->pvt.epoch != bank->pool->epoch || !bank->pool->lastPvtSample ||
          bank->pool->expected < bank->pool->lastPvtSample ||
          (double)(bank->pool->expected - bank->pool->lastPvtSample) >= bank->pool->sampleRate)) {
-        NgPvtCompute(bank->pool->slots, bank->pool->epoch, bank->pool->expected,
-                     bank->pool->sampleRate, &bank->pool->pvt);
+        NgPvtComputeAugmented(bank->pool->slots, bank->pool->epoch, bank->pool->expected,
+                              bank->pool->sampleRate, bank->pool->config.broadcastIonosphere,
+                              NgEgnosCorrections(bank->pool->egnos), &bank->pool->pvt);
+        bank->pool->pvt.egnosPrn = NgEgnosPrn(bank->pool->egnos);
+        const TNgSbasCorrections *corrections = NgEgnosCorrections(bank->pool->egnos);
+        bank->pool->pvt.egnosFrames = corrections ? corrections->frameCount : 0;
         bank->pool->lastPvtSample = bank->pool->expected;
     }
     return capture->ops->process(capture->context, id, state, window, next, error);
@@ -366,6 +376,7 @@ static void DestroyPool(TNgChannelPool *pool)
     unsigned k;
     if (!pool)
         return;
+    NgEgnosDestroy(pool->egnos);
     NgChannelDispatchDestroy(pool->dispatch);
     for (k = 0; k < pool->config.channelCount; ++k)
         NgTrackingDestroy(pool->tracking[k]);
@@ -396,6 +407,11 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
     bank->ownsPool = 1;
     bank->system = channel->id.constellation - 1;
     pool->config = *config;
+    if (bank->system == 0 && config->egnosEnabled &&
+        NgEgnosCreate(stream, &pool->egnos, error) != NG_OK) {
+        NgTrackingBankDestroy(bank);
+        return NG_ERROR;
+    }
     pool->sampleRate = stream->sampleRateHz;
     pool->batchLimit = (size_t)((stream->sampleRateHz + 999u) / 1000u) * NG_BANK_BATCH_MS;
     pool->captures[bank->system] = *channel;

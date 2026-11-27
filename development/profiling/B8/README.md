@@ -337,6 +337,152 @@ l'osservabile anche a parità di campione iniziale del tracker. Il test di
 recupero PVT dopo gap è completato, con anomalie di accuratezza ancora
 aperte.
 
+### Diagnosi C32 alla stessa epoca PVT
+
+Questa prova storica varia artificialmente la stima iniziale. La qualifica
+B8 usa le stime di acquisizione effettivamente consegnate al tracking.
+
+Prova Windows x64 Release del 27 novembre 2026, sorgenti EVO su `b4452a2`.
+Si riusa la cattura RTL-SDR del paragrafo precedente, CI8 a 2,4 Msps,
+SHA-256 `9cf152a10160816e98115a15a51e34213a02780c6d1fab63ea0a84b3f10dc1dc`.
+I campioni seguenti sono espressi dall'inizio del file. Il campione PVT
+120.009.600 del replay corrisponde al campione 300.009.600 del file. La
+pseudorange di C32 usa lo stesso TOW nominale GPST, 472595,5211526484 s, per
+tutti i casi. Lo strumento esegue il tracker isolato con i suoi default
+(3 tap, spaziatura 0,4 chip, smoothing Doppler 200 ms), poi chiama
+`NgPvtObserve` al campione esatto.
+
+| Risultato di acquisizione | Campione di riferimento | Fase al riferimento | Doppler iniziale | Partenza effettiva del tracker |
+|---|---:|---:|---:|---:|
+| Freddo | 209.853.600 | 2202,0241503906254 chip | −1950 Hz | 218.092.800 |
+| Riavvolgimento, prima del gap | 224.102.400 | 9354,80385253906 chip | −1960 Hz | 233.472.000 |
+
+Con le partenze effettive le pseudorange sono 22.198.677,754 m e
+22.198.875,047 m. Usando il risultato a freddo con la partenza del
+riavvolgimento si ottengono ancora 22.198.677,754 m alla precisione esposta.
+La partenza a freddo precede la disponibilità del risultato del
+riavvolgimento, quindi il controllo inverso usa la partenza comune più
+tarda. Si riportano entrambe le fasi al campione 233.472.000 alla frequenza
+di codice prevista dal rispettivo Doppler, modulo 10.230 chip. Si varia
+poi un solo parametro alla volta.
+
+| Fase al campione comune (chip) | Doppler iniziale (Hz) | Campione SF1 decodificato | Fine integrazione | Pseudorange (m) |
+|---:|---:|---:|---:|---:|
+| 3212,563143898 | −1950 | 234.136.465 | 299.992.546 | 22.198.677,754 |
+| 3212,563143898 | −1960 | 234.136.465 | 299.992.546 | 22.198.677,737 |
+| 3211,835125266 | −1950 | 234.136.466 | 299.992.548 | 22.198.874,942 |
+| 3211,835125266 | −1960 | 234.136.466 | 299.992.548 | 22.198.875,047 |
+
+Il cambio di fase iniziale produce 197,19–197,31 m di differenza, già
+visibili nel tempo di trasmissione prima del solver. Il cambio di Doppler
+iniziale a fase fissata produce al massimo 0,105 m. Tutte e quattro le
+prove decodificano una trama. L'ancora SF1 è spostata di un campione e la
+fine dell'integrazione di due campioni quando cambia la fase. A Doppler
+fisso (−1950 Hz), un offset dalla fase a freddo di −0,25 chip conserva il
+primo risultato, mentre −0,50, −0,75 e −1,00 chip producono il secondo
+entro 0,39 m. Questo indica due esiti stabili per questa finestra.
+Resta da verificare con correlazioni pilota indipendenti quale esito
+corrisponda al massimo principale e se lo stesso meccanismo spieghi gli
+errori dopo il gap o nei replay HackRF.
+
+Per ripetere la prova, usare il target `ngene_tracking_replay` compilato
+con `NGENE_TRACKING_BENCHMARK=ON` e `NGENE_PROFILE_ACQUISITION_JOBS=OFF`.
+Esempio alla partenza comune con fase del riavvolgimento e Doppler a freddo:
+
+```sh
+ngene_tracking_replay rtlsdr-gnss-l1_000000.cs8 2400000 3 32 -1950 3211.8351252661087 233472000 233472000 300009600 472595.5211526484
+```
+
+L'ultimo argomento prima del TOW arresta il replay al campione esatto.
+Il CSV include fase relativa al risultato iniziale, limiti dell'integrazione,
+ancora di navigazione e osservabile PVT grezza. Output locali in
+`build/b8-c32-observation/*.csv`. Le verifiche native Linux/macOS restano aperte.
+
+### Qualifica della consegna acquisizione-tracking su RTL-SDR
+
+27 novembre 2026, Windows x64. Le analisi usano fase, Doppler e campione di
+riferimento pubblicati dal ricevitore, insieme al primo campione elaborato dal
+tracker. Si considerano C32 e C12 quando la timeline contiene un solo risultato
+di acquisizione compatibile con l'assegnazione ed epoca. Il riferimento
+`pilot-reference.cjs` correla direttamente gli I/Q CI8 con il primario
+BOC(1,1), usando un'implementazione separata da PCPS, tracking e PVT.
+Si somma la potenza su 24 periodi, escludendo i margini di ogni periodo.
+Il confronto sulle due metà controlla la stabilità del massimo. La griglia
+locale finale è di 1/32 chip e 1 Hz. Il sintetico a fase e Doppler noti ha
+verificato la risoluzione del riferimento, mentre il replay conserva
+integralmente le uscite di acquisizione.
+
+| Traccia RTL storica | PRN | Correzione di fase al riferimento acquisizione | Correzione di fase all'avvio tracking | Correzione Doppler all'avvio |
+|---|---|---:|---:|---:|
+| Freddo 1 | C32 | −0,094 chip | −0,094 chip | −2 Hz |
+| Freddo 2 | C32 | +0,094 chip | +0,125 chip | −2 Hz |
+| Riavvolgimento, prima del gap | C32 | +0,625 chip | +0,656 chip | +4 Hz |
+| Freddo 1 | C12 | −0,188 chip | −0,156 chip | +3 Hz |
+| Freddo 2 | C12 | +0,156 chip | +0,188 chip | −1 Hz |
+| Riavvolgimento, prima del gap | C12 | −0,063 chip | −0,031 chip | −2 Hz |
+| Riavvolgimento, dopo il gap | C12 | −0,656 chip | −0,656 chip | +1 Hz |
+
+Tutte queste assegnazioni hanno raggiunto lo stato PLL. Per i due scarti
+maggiori, il riferimento indipendente sul primario dati alla finestra nominale
+del raffinamento codice indica correzioni di +0,625 chip (C32) e −0,656 chip
+(C12), coerenti col riferimento pilota. Lo scarto è già visibile all'origine
+del risultato di acquisizione e resta simile al passaggio al tracking.
+Questa prova localizza lo scarto a monte degli anelli, senza attribuirlo
+a un singolo passaggio di raffinamento. Il PLL osservato qualifica l'aggancio
+della portante per questi casi. Per stabilire la banda utile del DLL e
+identificare il cammino diretto in presenza di multipath serve un riferimento
+di codice indipendente con quei livelli di segnale. Il riferimento locale
+individua il massimo coerente nella finestra consegnata.
+
+Per ripetere il caso C32 prima del gap, usare i campioni assoluti nel file:
+
+```sh
+node development/profiling/B8/pilot-reference.cjs --self-test
+node development/profiling/B8/pilot-reference.cjs rtlsdr-gnss-l1_000000.cs8 2400000 32 224102400 9354.80385253906 -1960 233472000
+node development/profiling/B8/pilot-reference.cjs rtlsdr-gnss-l1_000000.cs8 2400000 32 224102400 9354.80385253906 -1960 224486400 data
+```
+
+Manifest e riferimento di posizione LNIKS della cattura in
+`build/b8-rtl-repeat-gap-20261127`. Misure JSON e replay della revisione corrente
+in `build/b8-current-rtl`.
+
+### Ripetizione RTL sulla revisione corrente
+
+Windows x64 MSVC Release, sorgenti su `b4452a2` con correzione web locale e
+profiling disattivato. Finestra 75–175 s, riferimento LNIKS. Tutti i fix
+che usano BeiDou usano anche GPS e Galileo. Il tempo è misurato dall'inizio
+dell'epoca di continuità.
+
+| Prova | Fix osservati | Fix a tre costellazioni | Primo fix con BeiDou | RMS 3D con BeiDou |
+|---|---:|---:|---:|---:|
+| Freddo 1 | 67 | 40 | 42,004 s | 7,36 m |
+| Freddo 2 | 67 | 40 | 42,004 s | 59,91 m |
+| Prima del gap | 67 | 49 | 33,004 s | 12,86 m |
+| Dopo il gap | 42 | 27 | 24,001 s | 41,30 m |
+
+Due avvii da 240 milioni di coppie in circa 100,5 s ciascuno.
+Il riavvolgimento ha elaborato 360.333.600 coppie con il solo gap previsto.
+Zero campioni persi. La distanza fra i PVT dei due avvii raggiunge 74,05 m
+su 67 epoche comuni. Al campione 129.609.600, il primo avvio usa anche C20 e
+C23, con VDOP 2,79 contro 10,87 nel secondo. La geometria delle misure
+disponibili differisce fra i due avvii a parità di conteggio dei fix.
+
+Nelle sette assegnazioni C32/C12 associabili univocamente alla timeline di
+questa ripetizione, la differenza rispetto al riferimento pilota all'ingresso
+del tracking è al massimo 0,188 chip e 10 Hz in valore assoluto. Tutte hanno
+raggiunto il PLL. Le due discrepanze da circa 0,66 chip appartengono alla
+campagna precedente. Questi risultati non coprono tutti i PRN usati nei fix
+e non spiegano da soli la differenza di accuratezza fra i due avvii.
+
+Passate 7/7 prove mirate Windows, inclusi codici primari, decoder B-CNAV1,
+osservabili, PVT, tracking, pool e scheduler. Il banco B2 ha prodotto
+432 righe su ritardi al bordo del periodo. Il banco B3 ha verificato
+correlazione e continuità a 2,048, 8 e 8,1838 Msps. Questi contratti danno
+evidenza sintetica. Il replay misura disponibilità, recupero e accuratezza
+di posizione. La qualifica dell'accuratezza per PRN e degli errori HackRF
+resta aperta. Manifest, timeline ed errori LNIKS in `build/b8-current-rtl`.
+B9 è rinviato per indisponibilità dell'antenna.
+
 ## B10 · Canali, messaggi e PVT
 
 La console mostra acquisizione, tracking, decodifica e appartenenza alla
@@ -349,6 +495,14 @@ Playwright con Edge su Windows verifica PRN 63, omonimia tra costellazioni,
 stato parziale, telemetria storica, reset di epoca, nuova assegnazione e il
 layout mobile in `web_pvt_map.cjs` e `web_workspace.cjs`. La scelta Preview BeiDou B1C attiva una fixture a tre
 costellazioni con etichetta visibile. La scelta operativa **BeiDou B1C** è in Receiver configuration, Channel allocation. [Contratto web](../../../docs/service/WEBGUI.md#states)
+
+Sulla build Windows della ripetizione RTL sono passati `web_workspace.cjs`,
+`web_pvt_map.cjs` e `web_acquisition.cjs`. La prima prova salva e applica
+la selezione B1C nel profilo. La seconda verifica PRN 63, stati parziali,
+appartenenza al PVT misto, nuova assegnazione, cambio di epoca e layout
+mobile con fixture. La terza esercita i dettagli canale e le mappe GPS/Galileo
+in replay. La sua verifica del range manuale ora invia il valore e
+l'evento di conferma nello stesso task del browser.
 
 ## Verifiche native
 

@@ -69,8 +69,38 @@ static void Orbit(const TNgBroadcast *broadcast)
 }
 
 /** Validate full cache life cycle, independent time/range signs and the week transition. */
+/** Exercise page 1 wire units, including unsigned negative and signed fields. */
+static void CheckBdgimPage(void)
+{
+    TNgBcnv1Frame frame = Fixture();
+    TNgBcnv1Cache cache = {0};
+    unsigned bit = 42;
+    Pack(frame.sf3, &bit, 10, 320);
+    Pack(frame.sf3, &bit, 8, -16);
+    Pack(frame.sf3, &bit, 8, 240);
+    Pack(frame.sf3, &bit, 8, 8);
+    Pack(frame.sf3, &bit, 8, 24);
+    Pack(frame.sf3, &bit, 8, -32);
+    CHECK(NgBcnv1Accept(&cache, &frame, 7, 1) == NG_OK);
+    CHECK(cache.broadcast.ionoReceived);
+    CHECK(cache.broadcast.iono.alphaBds[0] == 40);
+    CHECK(cache.broadcast.iono.alphaBds[1] == -2);
+    CHECK(cache.broadcast.iono.alphaBds[2] == 30);
+    CHECK(cache.broadcast.iono.alphaBds[4] == -3);
+    CHECK(cache.broadcast.iono.alphaBds[5] == -4);
+    frame.pageId = 2;
+    frame.hour = 0;
+    frame.soh = 0;
+    ++frame.week;
+    CHECK(NgBcnv1Accept(&cache, &frame, 7, 2) == NG_OK);
+    CHECK(cache.broadcast.ionoReceived && cache.broadcast.iono.alphaBds[4] == -3);
+    CHECK(NgBcnv1Accept(&cache, &frame, 8, 3) == NG_OK);
+    CHECK(!cache.broadcast.ionoReceived);
+}
+
 int main(void)
 {
+    CheckBdgimPage();
     TNgBcnv1Frame expected = Fixture(), frame;
     int8_t symbols[NG_BCNV1_FRAME_SYMBOLS];
     for (size_t n = 0; n < sizeof(symbols); ++n)

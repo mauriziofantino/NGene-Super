@@ -2,7 +2,8 @@
  * Algorithm basis: NGene Classic tracking/trackingDiscriminatorsLoops.c,
  * Mario Nicola, 2014. Adapted to native complex samples and shared window epochs.
  */
-#include "ngene/tracking.h"
+#include "tracking/egnos.h"
+#include "dsp/egnos_code.h"
 #include "ngene/beidou_observation.h"
 #include "ngene/dsp/gps_ca.h"
 #include "ngene/dsp/tracking_replica.h"
@@ -14,6 +15,8 @@
 
 /** Private NCOs, integration accumulators and reusable block kernels. */
 struct TNgTracking {
+    void (*egnosPrompt)(void *, double, uint64_t); /**< Receiver-owned prompt sink. */
+    void *egnosContext; /**< Lifetime of the separate GEO tracker. */
     int observeRequested, observeIntegration; /**< Optional tap interest, latched per integration. */
     double offsets[NG_TRACKING_MAX_TAPS]; /**< Configured tap delays, never telemetry-compacted. */
     TNgNavigation navigation;   /**< Per-integration data demodulator; never fed from telemetry. */
@@ -75,6 +78,7 @@ void NgTrackingDefaults(TNgTrackingConfig *config)
     config->enabled = 1;
     config->tapCount = 3;
     config->spacingChips = 0.4;
+    config->broadcastIonosphere = 1;
     config->dopplerSmoothingMs = 200;
 }
 
@@ -154,6 +158,7 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     memset(tracking->peakPower, 0, sizeof(tracking->peakPower));
     memset(tracking->sideI, 0, sizeof(tracking->sideI));
     memset(tracking->sideQ, 0, sizeof(tracking->sideQ));
+    tracking->egnosPrompt = NULL;
     tracking->seed = *result;
     NgNavigationReset(&tracking->navigation);
     memset(&tracking->bcnv1, 0, sizeof(tracking->bcnv1));
@@ -410,7 +415,11 @@ static void Complete(TNgTracking *t)
         t->snapshot.navigation.towValid = 0;
         return;
     }
-    if (t->system == 1) {
+    if (t->egnosPrompt) {
+        if (t->snapshot.pll) {
+            t->egnosPrompt(t->egnosContext, i / (double)t->accumulated, t->expected);
+        }
+    } else if (t->system == 1) {
         NgNavigationGpsPrompt(&t->navigation, i, q, t->snapshot.pll, t->expected);
         t->snapshot.navigation = t->navigation.snapshot;
     } else if (t->system == NG_CONSTELLATION_GALILEO) {
@@ -615,4 +624,18 @@ void NgTrackingObserve(TNgTracking *tracking, int observed)
 void NgTrackingDestroy(TNgTracking *tracking)
 {
     free(tracking);
+}
+
+int NgTrackingSeedEgnos(TNgTracking *tracking, const TNgAcquisitionResult *result,
+                        void (*prompt)(void *, double, uint64_t), void *context, TNgError *error)
+{
+    if (!result || result->prn < 1 || result->prn > 2 || !prompt ||
+        NgTrackingSetSignal(tracking, NG_CONSTELLATION_GPS, error) != NG_OK ||
+        NgTrackingSeed(tracking, result, error) != NG_OK) {
+        return NgFail(error, "Cannot initialize EGNOS C/A tracking");
+    }
+    NgEgnosCode(result->prn - 1, tracking->chips);
+    tracking->egnosPrompt = prompt;
+    tracking->egnosContext = context;
+    return NG_OK;
 }

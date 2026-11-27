@@ -23,6 +23,8 @@ typedef struct {
                           precise (no tables, no phase quantization); differs from the default
                           one-lane recurrence only by double rounding. */
     unsigned mixerBits; /**< 0: precise recurrence; 8: signed-byte mixer, 16-level carrier. */
+    int egnosEnabled; /**< Search, track and apply EGNOS L1 corrections. */
+    int broadcastIonosphere; /**< Apply satellite broadcast ionosphere corrections in PVT. */
     unsigned dopplerSmoothingMs; /**< Output Doppler filter time constant; zero disables. */
 } TNgTrackingConfig;
 

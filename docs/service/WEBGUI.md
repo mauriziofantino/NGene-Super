@@ -34,6 +34,23 @@ Verified locally on 2026-11-12 (Linux x86_64, Node 24.19.0, Chrome headless):
 `web_acquisition_views.cjs`, `web_acquisition_stability.cjs` and the updated
 `web_acquisition.cjs` passed. The CMake build and `gps_acquisition_contract` passed.
 
+The native Apple M1 Pro report for revision `923743f` traced the channel-detail
+crash to the large local search-space map in the CivetWeb request thread. The
+request now owns its map on the heap and frees it after serialization. HTTP
+and WebSocket telemetry also serialize a heap-owned full status snapshot.
+Commands and capture-file handlers copy only the lifecycle fields they need
+under the controller mutex. These paths serialize after the mutex is released.
+
+On 2026-11-27, the updated tree based on `b4452a2` passed the GPS/Galileo
+Playwright replay on Windows x64 with a 512 KiB executable stack reserve.
+The replay checked empty maps, simultaneous complete maps, lifecycle and file
+status, receiver restart, and clean shutdown. With only the map moved to the
+heap, the same stack limit caused a connection reset. MSVC disassembly showed
+a stack reservation of about 393 KiB in `Handle` before the lifecycle change
+and about 20 KiB afterward. The acquisition pool, channel scheduler and
+analysis worker contracts also passed on Windows. The current patch awaits
+native macOS and Linux runs.
+
 Settings / Acquisition includes independent GPS L1 C/A and Galileo E1-B enable,
 PRN range and replica-mode fields. Apply while stopped, then start the receiver.
 Both signals may run together. The Signal dropdown at the top of Acquisition

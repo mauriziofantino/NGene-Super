@@ -109,6 +109,24 @@ int NgBcnv1Accept(TNgBcnv1Cache *cache, const TNgBcnv1Frame *frame, uint64_t epo
                                 frame->health || frame->dif || frame->sif || frame->aif;
     next.broadcast.subframe2Received = 1;
     next.broadcast.subframe3Received = frame->pageId >= 1 && frame->pageId <= 4;
+    /* B1C SIS ICD Figure 6-8 and Table 7-10. Keep the last accepted page
+     * when the next CRC-checked frame carries another SF3 page. */
+    if (frame->pageId == 1 && !next.broadcast.eph.health) {
+        unsigned bit = 42;
+        next.broadcast.iono.alphaBds[0] = (double)Read(frame->sf3, &bit, 10) / 8.0;
+        for (unsigned k = 1; k < 9; ++k) {
+            next.broadcast.iono.alphaBds[k] =
+                (k == 1 || k >= 5) ? Signed(frame->sf3, &bit, 8, -3) :
+                (k == 4 ? -0.125 : 0.125) * (double)Read(frame->sf3, &bit, 8);
+        }
+        bit += 36; /* A0UTC, A1UTC and A2UTC precede delta-tLS. */
+        next.broadcast.iono.utcLeap = (int)Signed(frame->sf3, &bit, 8, 0);
+        next.broadcast.iono.bdsTow = tow;
+        next.broadcast.ionoReceived = 1;
+    }
+    if (fabs(Age(tow, next.broadcast.iono.bdsTow)) > NG_BCNV1_MAX_BROADCAST_AGE) {
+        next.broadcast.ionoReceived = 0;
+    }
     next.broadcast.wn = (int)frame->week;
     next.broadcast.tow = (int)tow;
     next.broadcast.wnValid = next.broadcast.towValid = 1;

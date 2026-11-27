@@ -128,12 +128,27 @@ and the tracking data prompt feeds B-CNAV1. Healthy, matched BDT observations
 are eligible for the mixed PVT solve. B8 recovered three-system fixes after
 a replay gap. Against the LNIKS antenna reference, the RTL-SDR cold runs
 gave 12.67 and 12.64 m 3D RMS on fixes using BeiDou, and the post-gap run
-gave 256.76 m. The next increment traces B1C code phase from acquisition
-through the pilot, data-symbol timing and per-satellite pseudorange at the
-common PVT epoch. B9 uses the existing HackRF RF trial. B10 was verified on
-Windows. Native Linux and macOS qualification remains pending.
+gave 256.76 m on the earlier campaign. On the current Windows revision,
+the same replay recovered 27 three-system fixes after one gap with zero
+sample loss. 3D RMS was 7.36 m and 59.91 m in the two cold runs and
+41.30 m after the gap. A direct local BOC(1,1) reference
+compared the actual acquisition outputs for C32 and C12. Residuals of
+about 0.63–0.66 chip were already present at the acquisition reference
+sample in two historical RTL assignments, one before and one after the
+gap. The independently correlated B1C data and pilot components agree
+on these discrepancies. Both assignments reached PLL. The code pull-in
+envelope and absolute pseudorange accuracy remain open. B9 is deferred
+while the antenna is unavailable. B10 passed the three Windows browser
+regressions on the same build. Native Linux and macOS qualification
+remains pending.
 [BeiDou analysis and test plan](PIANO_INCREMENTALE_EVO.md#piano-operativo-di-verifica-beidou-b1c).
 [B8–B10 evidence](../../development/profiling/B8/README.md).
+
+The broadcast PVT uses GPS Klobuchar, Galileo E1 NeQuick G and BeiDou B1C
+BDGIM when the required coefficients are available. The receiver profile
+can disable these corrections and the PVT view reports their per-system
+counts. SBAS remains pending, including both EGNOS GEO reception and
+online EDAS/SISNeT. [Ionosphere models](BEIDOU_PVT.md#ionosfera-broadcast-a-frequenza-singola)
 
 The F6 mixed GPS/Galileo replay matrix measures the existing tracking pool
 and acquisition permits at fixed precision. More acquisition permits reduced

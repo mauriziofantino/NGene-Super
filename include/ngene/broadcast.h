@@ -57,10 +57,13 @@ typedef struct {
     TNgBroadcastClock clkTmp, clk; /**< Pending and committed clock. */
 
     struct {
-        double alphaGal[3];
+        double alphaGal[3]; /**< Galileo I/NAV word 5 effective ionization coefficients. */
+        double alphaBds[9]; /**< B-CNAV1 SF3 page 1 BDGIM coefficients (TECU). */
+        int utcLeap; /**< Broadcast whole-second system time offset for ionosphere models. */
+        unsigned bdsTow; /**< BDT seconds of week of the accepted BDGIM page. */
         double alphaGps[4], betaGps[4]; /**< LNAV SF4 page 18 Klobuchar coefficients. */
         int sf[5];
-    } iono; /**< Galileo ionosphere telemetry. */
+    } iono; /**< Broadcast ionosphere model for this channel. */
 
     int satelliteId;                /**< Broadcast SVID when available; zero before reception. */
     int wn, tow, wnValid, towValid; /**< Broadcast system time, unexpanded week. */

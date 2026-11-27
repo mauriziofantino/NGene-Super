@@ -640,17 +640,20 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
 {
     static const char *states[] = {"stopped", "starting", "running", "stopping", "error"};
     static const char *recordStates[] = {"off", "starting", "recording", "stopping"};
-    TNgControlStatus status;
+    TNgControlStatus *status = malloc(sizeof(*status));
     cJSON *object = cJSON_CreateObject();
-    TNgAnalysisSnapshot telemetry;
-    NgControlSnapshot(control, &status);
-    /* Deliberate deep copy before telemetry. Snapshot arrays are values, not borrowed pointers. */
+    if (status == NULL || object == NULL) {
+        free(status);
+        cJSON_Delete(object);
+        return NULL;
+    }
+    NgControlSnapshot(control, status);
     {
         unsigned channelIndex;
         cJSON *channels = cJSON_AddArrayToObject(object, "tracking");
         for (channelIndex = 0; channelIndex < 64; ++channelIndex) {
             unsigned tap;
-            const TNgTrackingSnapshot *t = &status.tracking[channelIndex];
+            const TNgTrackingSnapshot *t = &status->tracking[channelIndex];
             cJSON *row, *taps;
             if (!t->channelId) continue;
             row = cJSON_CreateObject();
@@ -687,7 +690,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             Number(row, "code_rate_hz", t->codeRateHz);
             Number(row, "dll_error", t->dllError);
             Number(row, "carrier_error", t->carrierError);
-            Number(row, "sample_rate_hz", status.actualSampleRateHz);
+            Number(row, "sample_rate_hz", status->actualSampleRateHz);
             taps = cJSON_AddArrayToObject(row, "taps");
             for (tap = 0; tap < t->tapCount; ++tap) {
                 cJSON *point = cJSON_CreateObject();
@@ -699,7 +702,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         }
     }
     {
-        const TNgPvtSnapshot *s = &status.pvt;
+        const TNgPvtSnapshot *s = &status->pvt;
         cJSON *p = cJSON_AddObjectToObject(object, "pvt");
         cJSON_AddBoolToObject(p, "available", s->available);
         cJSON_AddBoolToObject(p, "velocity_available", s->velocityAvailable);
@@ -730,35 +733,42 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             Number(p, "velocity_x_mps", s->velocity[0]); Number(p, "velocity_y_mps", s->velocity[1]);
             Number(p, "velocity_z_mps", s->velocity[2]); Number(p, "clock_drift_mps", s->clockDrift);
         }
-        String(p, "model", "Broadcast LS; Hopfield troposphere; ionosphere uncorrected; no integrity qualification");
+        cJSON *egnos = cJSON_AddObjectToObject(p, "egnos");
+        Number(egnos, "geo_prn", s->egnosPrn);
+        Number(egnos, "valid_frames", s->egnosFrames);
+        Number(egnos, "corrected_gps", s->available ? s->egnosCorrected : 0);
+        cJSON *ionosphere = cJSON_AddObjectToObject(p, "ionosphere_corrected");
+        Number(ionosphere, "gps", s->ionosphereCorrected[0]);
+        Number(ionosphere, "galileo", s->ionosphereCorrected[1]);
+        Number(ionosphere, "beidou", s->ionosphereCorrected[2]);
+        String(p, "model", "Broadcast LS, Hopfield and available broadcast ionosphere delays");
     }
-    telemetry = status.analysis;
-    cJSON_AddItemToObject(object, "analysis", AnalysisJson(&telemetry, mask));
+    cJSON_AddItemToObject(object, "analysis", AnalysisJson(&status->analysis, mask));
     {
         unsigned prn;
         cJSON *acquisition = cJSON_AddObjectToObject(object, "acquisition");
         cJSON *results = cJSON_AddArrayToObject(acquisition, "results");
-        cJSON_AddBoolToObject(acquisition, "enabled", status.acquisition.enabled);
-        cJSON_AddBoolToObject(acquisition, "searching", status.acquisition.searching);
-        Number(acquisition, "current_prn", status.acquisition.currentPrn);
-        Number(acquisition, "active_searches", status.acquisition.activeSearches);
-        Number(acquisition, "parallel_limit", status.acquisition.parallelLimit);
-        Number(acquisition, "parallel_capacity", status.acquisition.parallelCapacity);
-        Number(acquisition, "pool_active", status.acquisition.poolActive);
-        Number(acquisition, "pool_executing", status.acquisition.poolExecuting);
-        Number(acquisition, "execution_limit", status.acquisition.executionLimit);
+        cJSON_AddBoolToObject(acquisition, "enabled", status->acquisition.enabled);
+        cJSON_AddBoolToObject(acquisition, "searching", status->acquisition.searching);
+        Number(acquisition, "current_prn", status->acquisition.currentPrn);
+        Number(acquisition, "active_searches", status->acquisition.activeSearches);
+        Number(acquisition, "parallel_limit", status->acquisition.parallelLimit);
+        Number(acquisition, "parallel_capacity", status->acquisition.parallelCapacity);
+        Number(acquisition, "pool_active", status->acquisition.poolActive);
+        Number(acquisition, "pool_executing", status->acquisition.poolExecuting);
+        Number(acquisition, "execution_limit", status->acquisition.executionLimit);
         {
             cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
             for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
-                if (status.acquisition.currentPrns[lane])
-                    cJSON_AddItemToArray(prns, cJSON_CreateNumber(status.acquisition.currentPrns[lane]));
+                if (status->acquisition.currentPrns[lane])
+                    cJSON_AddItemToArray(prns, cJSON_CreateNumber(status->acquisition.currentPrns[lane]));
         }
-        Counter(acquisition, "searches", status.acquisition.searches);
-        Counter(acquisition, "skipped_samples", status.acquisition.skippedSamples);
-        Counter(acquisition, "gaps", status.acquisition.gaps);
-        String(acquisition, "message", status.acquisition.message);
+        Counter(acquisition, "searches", status->acquisition.searches);
+        Counter(acquisition, "skipped_samples", status->acquisition.skippedSamples);
+        Counter(acquisition, "gaps", status->acquisition.gaps);
+        String(acquisition, "message", status->acquisition.message);
         for (prn = 0; prn < 32; ++prn) {
-            const TNgAcquisitionResult *found = &status.acquisition.results[prn];
+            const TNgAcquisitionResult *found = &status->acquisition.results[prn];
             cJSON *item;
             if (found->prn == 0)
                 continue;
@@ -778,27 +788,27 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         unsigned prn;
         cJSON *acquisition = cJSON_AddObjectToObject(object, "galileo_acquisition");
         cJSON *results = cJSON_AddArrayToObject(acquisition, "results");
-        cJSON_AddBoolToObject(acquisition, "enabled", status.galileoAcquisition.enabled);
-        cJSON_AddBoolToObject(acquisition, "searching", status.galileoAcquisition.searching);
-        Number(acquisition, "current_prn", status.galileoAcquisition.currentPrn);
-        Number(acquisition, "active_searches", status.galileoAcquisition.activeSearches);
-        Number(acquisition, "parallel_limit", status.galileoAcquisition.parallelLimit);
-        Number(acquisition, "parallel_capacity", status.galileoAcquisition.parallelCapacity);
-        Number(acquisition, "pool_active", status.galileoAcquisition.poolActive);
-        Number(acquisition, "pool_executing", status.galileoAcquisition.poolExecuting);
-        Number(acquisition, "execution_limit", status.galileoAcquisition.executionLimit);
+        cJSON_AddBoolToObject(acquisition, "enabled", status->galileoAcquisition.enabled);
+        cJSON_AddBoolToObject(acquisition, "searching", status->galileoAcquisition.searching);
+        Number(acquisition, "current_prn", status->galileoAcquisition.currentPrn);
+        Number(acquisition, "active_searches", status->galileoAcquisition.activeSearches);
+        Number(acquisition, "parallel_limit", status->galileoAcquisition.parallelLimit);
+        Number(acquisition, "parallel_capacity", status->galileoAcquisition.parallelCapacity);
+        Number(acquisition, "pool_active", status->galileoAcquisition.poolActive);
+        Number(acquisition, "pool_executing", status->galileoAcquisition.poolExecuting);
+        Number(acquisition, "execution_limit", status->galileoAcquisition.executionLimit);
         {
             cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
             for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
-                if (status.galileoAcquisition.currentPrns[lane])
-                    cJSON_AddItemToArray(prns, cJSON_CreateNumber(status.galileoAcquisition.currentPrns[lane]));
+                if (status->galileoAcquisition.currentPrns[lane])
+                    cJSON_AddItemToArray(prns, cJSON_CreateNumber(status->galileoAcquisition.currentPrns[lane]));
         }
-        Counter(acquisition, "searches", status.galileoAcquisition.searches);
-        Counter(acquisition, "skipped_samples", status.galileoAcquisition.skippedSamples);
-        Counter(acquisition, "gaps", status.galileoAcquisition.gaps);
-        String(acquisition, "message", status.galileoAcquisition.message);
+        Counter(acquisition, "searches", status->galileoAcquisition.searches);
+        Counter(acquisition, "skipped_samples", status->galileoAcquisition.skippedSamples);
+        Counter(acquisition, "gaps", status->galileoAcquisition.gaps);
+        String(acquisition, "message", status->galileoAcquisition.message);
         for (prn = 0; prn < 32; ++prn) {
-            const TNgAcquisitionResult *found = &status.galileoAcquisition.results[prn];
+            const TNgAcquisitionResult *found = &status->galileoAcquisition.results[prn];
             cJSON *item;
             if (found->prn == 0)
                 continue;
@@ -815,7 +825,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         }
     }
     {
-        const TNgAcquisitionSnapshot *snapshot = &status.beidouAcquisition;
+        const TNgAcquisitionSnapshot *snapshot = &status->beidouAcquisition;
         cJSON *acquisition = cJSON_AddObjectToObject(object, "beidou_acquisition");
         cJSON *results = cJSON_AddArrayToObject(acquisition, "results");
         cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
@@ -831,7 +841,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             if (snapshot->currentPrns[lane])
                 cJSON_AddItemToArray(prns, cJSON_CreateNumber(snapshot->currentPrns[lane]));
         for (unsigned prn = 0; prn < NG_SATELLITE_MAX_PRN; ++prn) {
-            const TNgAcquisitionResult *found = &status.beidouResults[prn];
+            const TNgAcquisitionResult *found = &status->beidouResults[prn];
             if (!found->prn)
                 continue;
             cJSON *item = cJSON_CreateObject();
@@ -846,109 +856,122 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             cJSON_AddItemToArray(results, item);
         }
     }
-    Number(object, "hardware_frequency_hz", (double)status.hardwareFrequencyHz);
-    Number(object, "signal_frequency_hz", (double)status.signalFrequencyHz);
-    Number(object, "digital_if_hz", (double)status.digitalIfHz);
-    Number(object, "actual_sample_rate_hz", status.actualSampleRateHz);
-    String(object, "sample_format", NgSampleFormatName(status.sampleFormat));
-    String(object, "native_format", NgSampleFormatName(status.nativeFormat));
-    Number(object, "adc_bits", status.adcBits);
+    Number(object, "hardware_frequency_hz", (double)status->hardwareFrequencyHz);
+    Number(object, "signal_frequency_hz", (double)status->signalFrequencyHz);
+    Number(object, "digital_if_hz", (double)status->digitalIfHz);
+    Number(object, "actual_sample_rate_hz", status->actualSampleRateHz);
+    String(object, "sample_format", NgSampleFormatName(status->sampleFormat));
+    String(object, "native_format", NgSampleFormatName(status->nativeFormat));
+    Number(object, "adc_bits", status->adcBits);
     String(object, "sample_rate_basis", "device_reported_nominal");
-    String(object, "state", states[status.state]);
-    String(object, "recording_state", recordStates[status.recordingState]);
-    String(object, "message", status.message);
-    String(object, "recording_name", status.recordingName);
-    String(object, "output_directory", status.outputDirectory);
-    Counter(object, "revision", status.revision);
-    Counter(object, "active_revision", status.activeRevision);
-    Counter(object, "run_id", status.runId);
-    Counter(object, "command_id", status.commandId);
-    Counter(object, "completed_command_id", status.completedCommandId);
-    cJSON_AddBoolToObject(object, "command_ok", status.commandOk);
-    Number(object, "wall_seconds", status.receiver.wallSeconds);
-    Number(object, "actual_bandwidth_hz", status.actualBandwidthHz);
-    Counter(object, "received_samples", status.receiver.frontend.receivedSamples);
-    Counter(object, "processed_samples", status.receiver.processedSamples);
-    Counter(object, "windows", status.receiver.windows);
-    Counter(object, "gap_events", status.receiver.gapEvents);
-    Counter(object, "known_dropped_samples", status.receiver.frontend.droppedSamples);
-    Counter(object, "input_queued_samples", status.receiver.frontend.queuedSamples);
-    Counter(object, "input_discarded_on_stop", status.receiver.frontend.discardedOnStop);
-    Counter(object, "ring_high_water", status.receiver.ringHighWater);
-    cJSON_AddBoolToObject(object, "ingress_available", status.receiver.frontend.ingressAvailable);
-    Counter(object, "ingress_capacity_blocks", status.receiver.frontend.ingress.capacityBlocks);
-    Counter(object, "ingress_block_samples", status.receiver.frontend.ingress.blockSamples);
-    Counter(object, "ingress_used_blocks", status.receiver.frontend.ingress.usedBlocks);
-    Counter(object, "ingress_high_water_blocks", status.receiver.frontend.ingress.highWaterBlocks);
-    Counter(object, "ingress_accepted_samples", status.receiver.frontend.ingress.acceptedSamples);
-    Counter(object, "ingress_consumed_samples", status.receiver.frontend.ingress.consumedSamples);
-    Counter(object, "ingress_overflow_events", status.receiver.frontend.ingress.overflowEvents);
-    Number(object, "ingress_occupancy_percent", status.receiver.frontend.ingress.occupancyPercent);
-    Number(object, "ingress_available_ms", status.receiver.frontend.ingress.availableMs);
-    Counter(object, "transport_errors", status.receiver.frontend.transportErrors);
+    String(object, "state", states[status->state]);
+    String(object, "recording_state", recordStates[status->recordingState]);
+    String(object, "message", status->message);
+    String(object, "recording_name", status->recordingName);
+    String(object, "output_directory", status->outputDirectory);
+    Counter(object, "revision", status->revision);
+    Counter(object, "active_revision", status->activeRevision);
+    Counter(object, "run_id", status->runId);
+    Counter(object, "command_id", status->commandId);
+    Counter(object, "completed_command_id", status->completedCommandId);
+    cJSON_AddBoolToObject(object, "command_ok", status->commandOk);
+    Number(object, "wall_seconds", status->receiver.wallSeconds);
+    Number(object, "actual_bandwidth_hz", status->actualBandwidthHz);
+    Counter(object, "received_samples", status->receiver.frontend.receivedSamples);
+    Counter(object, "processed_samples", status->receiver.processedSamples);
+    Counter(object, "windows", status->receiver.windows);
+    Counter(object, "gap_events", status->receiver.gapEvents);
+    Counter(object, "known_dropped_samples", status->receiver.frontend.droppedSamples);
+    Counter(object, "input_queued_samples", status->receiver.frontend.queuedSamples);
+    Counter(object, "input_discarded_on_stop", status->receiver.frontend.discardedOnStop);
+    Counter(object, "ring_high_water", status->receiver.ringHighWater);
+    cJSON_AddBoolToObject(object, "ingress_available", status->receiver.frontend.ingressAvailable);
+    Counter(object, "ingress_capacity_blocks", status->receiver.frontend.ingress.capacityBlocks);
+    Counter(object, "ingress_block_samples", status->receiver.frontend.ingress.blockSamples);
+    Counter(object, "ingress_used_blocks", status->receiver.frontend.ingress.usedBlocks);
+    Counter(object, "ingress_high_water_blocks", status->receiver.frontend.ingress.highWaterBlocks);
+    Counter(object, "ingress_accepted_samples", status->receiver.frontend.ingress.acceptedSamples);
+    Counter(object, "ingress_consumed_samples", status->receiver.frontend.ingress.consumedSamples);
+    Counter(object, "ingress_overflow_events", status->receiver.frontend.ingress.overflowEvents);
+    Number(object, "ingress_occupancy_percent", status->receiver.frontend.ingress.occupancyPercent);
+    Number(object, "ingress_available_ms", status->receiver.frontend.ingress.availableMs);
+    Counter(object, "transport_errors", status->receiver.frontend.transportErrors);
     String(object, "hardware_loss_state",
-           status.receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_VALID   ? "valid"
-           : status.receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_ERROR ? "error"
-           : status.receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_UNAVAILABLE
+           status->receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_VALID   ? "valid"
+           : status->receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_ERROR ? "error"
+           : status->receiver.frontend.hardwareLossState == NG_DIAGNOSTIC_UNAVAILABLE
                ? "unavailable"
                : "unsupported");
     cJSON_AddNullToObject(object, "hardware_lost_samples");
     String(object, "device_continuity_state",
-           status.receiver.frontend.deviceContinuityState == NG_DIAGNOSTIC_VALID ? "valid"
+           status->receiver.frontend.deviceContinuityState == NG_DIAGNOSTIC_VALID ? "valid"
                                                                                  : "unsupported");
-    if (status.receiver.frontend.deviceContinuityState == NG_DIAGNOSTIC_VALID) {
-        Counter(object, "device_gap_events", status.receiver.frontend.deviceGapEvents);
-        Counter(object, "device_missing_samples", status.receiver.frontend.deviceMissingSamples);
+    if (status->receiver.frontend.deviceContinuityState == NG_DIAGNOSTIC_VALID) {
+        Counter(object, "device_gap_events", status->receiver.frontend.deviceGapEvents);
+        Counter(object, "device_missing_samples", status->receiver.frontend.deviceMissingSamples);
     } else {
         cJSON_AddNullToObject(object, "device_gap_events");
         cJSON_AddNullToObject(object, "device_missing_samples");
     }
-    Counter(object, "written_samples", status.totalWrittenSamples);
-    Counter(object, "session_written_samples", status.recording.samples);
-    Counter(object, "recording_queued_samples", status.recording.queuedSamples);
-    Counter(object, "recording_segments", status.recording.segments);
+    Counter(object, "written_samples", status->totalWrittenSamples);
+    Counter(object, "session_written_samples", status->recording.samples);
+    Counter(object, "recording_queued_samples", status->recording.queuedSamples);
+    Counter(object, "recording_segments", status->recording.segments);
+    free(status);
     return object;
 }
 
 /** Serialize one explicitly requested completed map; never add arrays to status broadcasts. */
 static cJSON *SearchSpaceJson(TNgControl *control, unsigned prn, int galileo)
 {
-    TNgAcquisitionSearchSpace space;
+    TNgAcquisitionSearchSpace *space;
     cJSON *object = cJSON_CreateObject();
     cJSON *frequencies;
     cJSON *power;
     unsigned row;
-    if (galileo)
-        NgControlGalileoSearchSpace(control, prn, &space);
-    else
-        NgControlAcquisitionSearchSpace(control, prn, &space);
-    cJSON_AddBoolToObject(object, "valid", space.valid);
-    if (!space.valid)
+    if (object == NULL) {
+        return NULL;
+    }
+    /* The full map is too large for a Darwin HTTP worker stack. */
+    space = malloc(sizeof(*space));
+    if (space == NULL) {
+        cJSON_AddBoolToObject(object, "valid", 0);
         return object;
-    Number(object, "prn", space.result.prn);
-    cJSON_AddBoolToObject(object, "confirmed", space.result.confirmed);
-    Counter(object, "epoch", space.result.epoch);
-    Counter(object, "first_sample", space.result.firstSample);
-    Number(object, "peak_ratio", space.result.peakRatio);
-    Number(object, "peak_doppler_hz", space.peakDopplerHz);
-    Number(object, "peak_code_phase_chips", space.peakCodePhaseChips);
-    Number(object, "threshold", space.threshold);
-    Number(object, "fft_size", space.fftSize);
+    }
+    if (galileo)
+        NgControlGalileoSearchSpace(control, prn, space);
+    else
+        NgControlAcquisitionSearchSpace(control, prn, space);
+    cJSON_AddBoolToObject(object, "valid", space->valid);
+    if (!space->valid) {
+        free(space);
+        return object;
+    }
+    Number(object, "prn", space->result.prn);
+    cJSON_AddBoolToObject(object, "confirmed", space->result.confirmed);
+    Counter(object, "epoch", space->result.epoch);
+    Counter(object, "first_sample", space->result.firstSample);
+    Number(object, "peak_ratio", space->result.peakRatio);
+    Number(object, "peak_doppler_hz", space->peakDopplerHz);
+    Number(object, "peak_code_phase_chips", space->peakCodePhaseChips);
+    Number(object, "threshold", space->threshold);
+    Number(object, "fft_size", space->fftSize);
     Number(object, "code_bins", NG_ACQUISITION_CODE_BINS);
-    Number(object, "code_period_chips", space.codePeriodChips);
+    Number(object, "code_period_chips", space->codePeriodChips);
     String(object, "signal", galileo ? "galileo_e1b" : "gps_l1ca");
     String(object, "units", "power / coarse threshold");
     String(object, "reduction", "maximum per code-phase cell");
     frequencies = cJSON_AddArrayToObject(object, "doppler_hz");
     power = cJSON_AddArrayToObject(object, "power");
-    for (row = 0; row < space.dopplerBins; ++row) {
+    for (row = 0; row < space->dopplerBins; ++row) {
         unsigned column;
         cJSON *values = cJSON_CreateArray();
         cJSON_AddItemToArray(frequencies, cJSON_CreateNumber(galileo ? -5000 + row * 87.0 : row == 15 ? 5000 : -5000 + row * 667.0));
         for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column)
-            cJSON_AddItemToArray(values, cJSON_CreateNumber(space.power[row][column]));
+            cJSON_AddItemToArray(values, cJSON_CreateNumber(space->power[row][column]));
         cJSON_AddItemToArray(power, values);
     }
+    free(space);
     return object;
 }
 
@@ -1082,7 +1105,7 @@ static int FileNameValid(const char *name)
  *
  * @return Nonzero if active, zero if closed.
  */
-static int FileActive(const TNgControlStatus *status, const char *name)
+static int FileActive(const TNgControlLifecycle *status, const char *name)
 {
     size_t n = strlen(status->recordingName);
     if (status->recordingState == NG_REC_STARTING) {
@@ -1097,7 +1120,7 @@ typedef struct {
     /** Request-owned JSON file array; no live file handle is retained. */
     cJSON *files;
     /** Owned copied lifecycle snapshot protected by the controller mutex. */
-    TNgControlStatus status;
+    TNgControlLifecycle status;
     /** Number of file entries added to the bounded response. */
     size_t count;
     /** Nonzero when the directory listing exceeded response capacity. */
@@ -1146,14 +1169,14 @@ static int FileInUse(TNgWebServer *server, const char *full, int includeReaders)
     TNgControl *controllers[1] = {server->control};
     size_t index;
     for (index = 0; index < 1; ++index) {
-        TNgControlStatus status;
+        TNgControlLifecycle status;
         TNgConfig config = {0};
         uint64_t revision;
         char directory[512];
         char candidate[512];
         const char *name = full;
         const char *cursor;
-        NgControlSnapshot(controllers[index], &status);
+        NgControlReadLifecycle(controllers[index], &status);
         for (cursor = full; *cursor != '\0'; ++cursor) {
             if (*cursor == '/' || *cursor == '\\') {
                 name = cursor + 1;
@@ -1300,14 +1323,14 @@ static void AddPickerEntry(void *context, const char *name, uint64_t bytes, int 
 static int PickerBrowse(TNgWebServer *server, struct mg_connection *connection, cJSON *body)
 {
     TNgPickerList list = {0};
-    TNgControlStatus status;
+    TNgControlLifecycle status;
     cJSON *requested = cJSON_GetObjectItemCaseSensitive(body, "path");
     cJSON *filter = cJSON_GetObjectItemCaseSensitive(body, "filter");
     cJSON *reply;
     char parent[512] = "";
     const char *path;
     list.server = server;
-    NgControlSnapshot(server->control, &status);
+    NgControlReadLifecycle(server->control, &status);
     if (requested != NULL && cJSON_IsString(requested) == 0) {
         return Failure(connection, 400, "Expected a receiver-side directory path");
     }
@@ -1378,7 +1401,7 @@ static int PickerInspect(TNgWebServer *server, TNgControl *control,
     cJSON *reply;
     TNgConfig config = {0};
     TNgCaptureMetadata metadata = {0};
-    TNgControlStatus status;
+    TNgControlLifecycle status;
     TNgError error = {{0}};
     uint64_t revision;
     char full[512];
@@ -1387,7 +1410,7 @@ static int PickerInspect(TNgWebServer *server, TNgControl *control,
         NgFileAbsolute(selected->valuestring, full, sizeof(full)) != 0) {
         return Failure(connection, 400, "Select an existing regular file on the receiver computer");
     }
-    NgControlSnapshot(control, &status);
+    NgControlReadLifecycle(control, &status);
     if ((status.state != NG_STOPPED && status.state != NG_FAILED) ||
         FileInUse(server, full, 0) != 0) {
         return Failure(connection, 409,
@@ -1566,7 +1589,7 @@ static int Handle(struct mg_connection *connection, void *context)
             TNgFileList list;
             memset(&list, 0, sizeof(list));
             list.files = cJSON_CreateArray();
-            NgControlSnapshot(control, &list.status);
+            NgControlReadLifecycle(control, &list.status);
             if (NgDirectoryFiles(list.status.outputDirectory, AddFile, &list) != 0) {
                 cJSON_Delete(list.files);
                 return Failure(connection, 500, "Cannot read capture directory");
@@ -1579,7 +1602,7 @@ static int Handle(struct mg_connection *connection, void *context)
             return JsonReply(connection, 200, reply);
         }
         if (strncmp(path, "/api/v1/files/", 14) == 0) {
-            TNgControlStatus status;
+            TNgControlLifecycle status;
             char full[1024];
             char extra[512];
             uint64_t bytes;
@@ -1587,7 +1610,7 @@ static int Handle(struct mg_connection *connection, void *context)
             if (FileNameValid(name) == 0) {
                 return Failure(connection, 400, "Invalid recording filename");
             }
-            NgControlSnapshot(control, &status);
+            NgControlReadLifecycle(control, &status);
             if (FileActive(&status, name) != 0) {
                 return Failure(connection, 409, "Stop recording before downloading its files");
             }
@@ -1681,14 +1704,14 @@ static int Handle(struct mg_connection *connection, void *context)
         }
         NgMutexUnlock(&server->commandMutex);
     } else if (strcmp(path, "/api/v1/frontend/calibrate") == 0) {
-        TNgControlStatus status;
+        TNgControlLifecycle status;
         TNgConfig config = {0};
         TNgError error = {{0}};
         cJSON *ini = cJSON_GetObjectItemCaseSensitive(body, "ini");
         uint64_t revision;
         FILE *input = NULL;
         NgMutexLock(&server->commandMutex);
-        NgControlSnapshot(control, &status);
+        NgControlReadLifecycle(control, &status);
         if (!cJSON_IsString(ini) || !ParseRevision(body, &revision)) {
             code = Failure(connection, 400, "Expected source profile and revision");
         } else if (server->calibrationState == 1) {
@@ -1720,14 +1743,14 @@ static int Handle(struct mg_connection *connection, void *context)
         }
         NgMutexUnlock(&server->commandMutex);
     } else if (strcmp(path, "/api/v1/frontend/capabilities") == 0) {
-        TNgControlStatus status;
+        TNgControlLifecycle status;
         TNgConfig config = {0};
         TNgFrontendCaps caps = {0};
         TNgError error = {{0}};
         cJSON *ini = cJSON_GetObjectItemCaseSensitive(body, "ini");
         FILE *input = NULL;
         NgMutexLock(&server->commandMutex);
-        NgControlSnapshot(control, &status);
+        NgControlReadLifecycle(control, &status);
         if (server->calibrationState == 1) {
             code = Failure(connection, 409,
                            "Wait for gain calibration or cancel it before querying device limits");
@@ -1786,12 +1809,12 @@ static int Handle(struct mg_connection *connection, void *context)
         if (cJSON_IsString(name) == 0 || ParseRevision(body, &revision) == 0) {
             code = Failure(connection, 400, "Expected name and revision strings");
         } else {
-            TNgControlStatus status;
+            TNgControlLifecycle status;
             char candidate[1024];
             char absolute[512];
             int result;
             NgMutexLock(&server->commandMutex);
-            NgControlSnapshot(control, &status);
+            NgControlReadLifecycle(control, &status);
             (void)snprintf(candidate, sizeof(candidate), "%s/%s", status.outputDirectory,
                            name->valuestring);
             if (FileNameValid(name->valuestring) != 0 &&

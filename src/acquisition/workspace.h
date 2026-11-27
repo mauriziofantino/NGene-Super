@@ -10,6 +10,8 @@ int NgAcquisitionGalileoWorkspace(const TNgStreamInfo *stream, unsigned fftSize,
 void NgAcquisitionGpsFree(void *context);
 void NgAcquisitionGalileoFree(void *context);
 extern const TNgAcquisitionStrategy ngGpsAcquisitionStrategy;
+/** Build private PRN 121/136 spectra for the unchanged PCPS search. */
+int NgAcquisitionEgnosWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error);
 extern const TNgAcquisitionStrategy ngGalileoAcquisitionStrategy;
 int NgAcquisitionBeidouWorkspace(const TNgStreamInfo *stream, void **out, TNgError *error);
 extern const TNgAcquisitionStrategy ngBeidouAcquisitionStrategy;
