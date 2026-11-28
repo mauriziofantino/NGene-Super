@@ -37,9 +37,11 @@ static uint64_t Bch(unsigned value, unsigned bits, unsigned count, unsigned poly
     const unsigned top = 1u << (bits - 1);
     for (unsigned n = bits; n < count; ++n) {
         unsigned feedback = 0;
-        for (unsigned k = 0; k < bits; ++k)
-            if (poly & (top >> k))
+        for (unsigned k = 0; k < bits; ++k) {
+            if (poly & (top >> k)) {
                 feedback ^= (unsigned)(word >> k) & 1u;
+            }
+        }
         word = (word << 1) | feedback;
     }
     return word;
@@ -49,8 +51,9 @@ static uint64_t Bch(unsigned value, unsigned bits, unsigned count, unsigned poly
 static unsigned Distance(uint64_t x, uint64_t y)
 {
     unsigned distance = 0;
-    for (uint64_t bits = x ^ y; bits; bits &= bits - 1)
+    for (uint64_t bits = x ^ y; bits; bits &= bits - 1) {
         ++distance;
+    }
     return distance;
 }
 
@@ -58,14 +61,17 @@ static unsigned Distance(uint64_t x, uint64_t y)
 static int Header(const int8_t *symbols, uint64_t prnWord, TNgBcnv1Header *header)
 {
     uint64_t prn = 0, hour = 0;
-    for (unsigned n = 0; n < 21; ++n)
+    for (unsigned n = 0; n < 21; ++n) {
         prn = (prn << 1) | (unsigned)(symbols[n] < 0);
+    }
     const unsigned d = Distance(prn, prnWord);
-    if (d > 3 && d < 18)
+    if (d > 3 && d < 18) {
         return 0;
+    }
     const int inverted = d >= 18;
-    for (unsigned n = 21; n < NG_BCNV1_HEADER_SYMBOLS; ++n)
+    for (unsigned n = 21; n < NG_BCNV1_HEADER_SYMBOLS; ++n) {
         hour = (hour << 1) | (unsigned)((symbols[n] < 0) != inverted);
+    }
     unsigned best = 12, soh = 256;
     for (unsigned value = 0; value < 256; ++value) {
         const unsigned distance = Distance(hour, Bch(value, 8, 51, 0x9f));
@@ -76,8 +82,9 @@ static int Header(const int8_t *symbols, uint64_t prnWord, TNgBcnv1Header *heade
             soh = 256;
         }
     }
-    if (soh >= 200)
+    if (soh >= 200) {
         return 0;
+    }
     *header = (TNgBcnv1Header){soh, best + (inverted ? 21 - d : d), inverted};
     return 1;
 }
@@ -87,8 +94,9 @@ static unsigned Product(unsigned a, unsigned b)
 {
     unsigned out = 0;
     while (b) {
-        if (b & 1u)
+        if (b & 1u) {
             out ^= a;
+        }
         a = (a << 1) ^ (a & 32u ? 0x43u : 0u);
         b >>= 1;
     }
@@ -100,10 +108,12 @@ static int Syndrome(const TNgBcnv1Code *code, const uint8_t *word)
 {
     for (unsigned row = 0; row < code->rows; ++row) {
         unsigned sum = 0;
-        for (unsigned e = 0; e < 4; ++e)
+        for (unsigned e = 0; e < 4; ++e) {
             sum ^= Product(code->coeff[row][e], word[code->column[row][e]]);
-        if (sum)
+        }
+        if (sum) {
             return 0;
+        }
     }
     return 1;
 }
@@ -115,8 +125,9 @@ static void Convolve(int *out, const int *a, const int *b)
         int best = INT_MAX;
         for (unsigned y = 0; y < NG_BCNV1_GF; ++y) {
             const int cost = a[y] + b[x ^ y];
-            if (cost < best)
+            if (cost < best) {
                 best = cost;
+            }
         }
         out[x] = best;
     }
@@ -128,8 +139,9 @@ static void UpdateRow(TNgBcnv1Ldpc *work, const TNgBcnv1Code *code, unsigned row
     int input[4][NG_BCNV1_GF], pairs[2][NG_BCNV1_GF], output[NG_BCNV1_GF];
     for (unsigned e = 0; e < 4; ++e) {
         const unsigned column = code->column[row][e], coeff = code->coeff[row][e];
-        for (unsigned s = 0; s < NG_BCNV1_GF; ++s)
+        for (unsigned s = 0; s < NG_BCNV1_GF; ++s) {
             input[e][work->gf[coeff][s]] = work->belief[column][s] - work->edge[row][e][s];
+        }
     }
     Convolve(pairs[0], input[0], input[1]);
     Convolve(pairs[1], input[2], input[3]);
@@ -137,14 +149,17 @@ static void UpdateRow(TNgBcnv1Ldpc *work, const TNgBcnv1Code *code, unsigned row
         const unsigned column = code->column[row][e], coeff = code->coeff[row][e];
         int minimum = INT_MAX;
         Convolve(output, pairs[1u - e / 2u], input[e ^ 1u]);
-        for (unsigned s = 0; s < NG_BCNV1_GF; ++s)
-            if (output[s] < minimum)
+        for (unsigned s = 0; s < NG_BCNV1_GF; ++s) {
+            if (output[s] < minimum) {
                 minimum = output[s];
+            }
+        }
         for (unsigned s = 0; s < NG_BCNV1_GF; ++s) {
             const unsigned field = work->gf[coeff][s];
             int message = (output[field] - minimum) * 3 / 4;
-            if (message > 4096)
+            if (message > 4096) {
                 message = 4096;
+            }
             work->edge[row][e][s] = message;
             work->belief[column][s] = input[e][field] + message;
         }
@@ -166,40 +181,53 @@ static int Ldpc(const TNgBcnv1Code *code, const int16_t *llr, uint8_t *bytes, un
         }
         word[n] = hard[n] = (uint8_t)bits;
     }
-    if (!haveEvidence)
+    if (!haveEvidence) {
         return NG_END;
+    }
     if (!Syndrome(code, word)) {
         TNgBcnv1Ldpc *work = calloc(1, sizeof(*work));
-        if (!work)
+        if (!work) {
             return NG_ERROR;
-        for (unsigned a = 0; a < NG_BCNV1_GF; ++a)
-            for (unsigned b = 0; b < NG_BCNV1_GF; ++b)
+        }
+        for (unsigned a = 0; a < NG_BCNV1_GF; ++a) {
+            for (unsigned b = 0; b < NG_BCNV1_GF; ++b) {
                 work->gf[a][b] = (uint8_t)Product(a, b);
-        for (unsigned n = 0; n < symbols; ++n)
-            for (unsigned s = 0; s < NG_BCNV1_GF; ++s)
-                for (unsigned b = 0; b < 6; ++b)
-                    if ((s ^ hard[n]) & (32u >> b))
+            }
+        }
+        for (unsigned n = 0; n < symbols; ++n) {
+            for (unsigned s = 0; s < NG_BCNV1_GF; ++s) {
+                for (unsigned b = 0; b < 6; ++b) {
+                    if ((s ^ hard[n]) & (32u >> b)) {
                         work->belief[n][s] += abs(llr[6 * n + b]);
+                    }
+                }
+            }
+        }
         int valid = 0;
         for (unsigned sweep = 0; sweep < NG_BCNV1_LDPC_SWEEPS && !valid; ++sweep) {
-            for (unsigned row = 0; row < code->rows; ++row)
+            for (unsigned row = 0; row < code->rows; ++row) {
                 UpdateRow(work, code, row);
+            }
             for (unsigned n = 0; n < symbols; ++n) {
                 unsigned best = 0;
-                for (unsigned s = 1; s < NG_BCNV1_GF; ++s)
-                    if (work->belief[n][s] < work->belief[n][best])
+                for (unsigned s = 1; s < NG_BCNV1_GF; ++s) {
+                    if (work->belief[n][s] < work->belief[n][best]) {
                         best = s;
+                    }
+                }
                 word[n] = (uint8_t)best;
             }
             valid = Syndrome(code, word);
         }
         free(work);
-        if (!valid)
+        if (!valid) {
             return NG_END;
+        }
     }
     *changed = 0;
-    for (unsigned n = 0; n < symbols; ++n)
+    for (unsigned n = 0; n < symbols; ++n) {
         *changed += Distance(hard[n], word[n]);
+    }
     for (unsigned n = 0; n < code->rows; n += 4) {
         const unsigned packed = ((unsigned)word[n] << 18) | ((unsigned)word[n + 1] << 12) |
                                 ((unsigned)word[n + 2] << 6) | word[n + 3];
@@ -218,8 +246,9 @@ static int Crc(const uint8_t *bytes, size_t count)
         remainder ^= (uint32_t)bytes[n] << 16;
         for (unsigned b = 0; b < 8; ++b) {
             remainder <<= 1;
-            if (remainder & UINT32_C(0x1000000))
+            if (remainder & UINT32_C(0x1000000)) {
                 remainder ^= UINT32_C(0x1864cfb);
+            }
         }
     }
     return remainder == 0;
@@ -229,8 +258,9 @@ static int Crc(const uint8_t *bytes, size_t count)
 static unsigned Field(const uint8_t *bytes, unsigned start, unsigned width)
 {
     unsigned value = 0;
-    for (unsigned b = start; b < start + width; ++b)
+    for (unsigned b = start; b < start + width; ++b) {
         value = (value << 1) | (unsigned)((bytes[b / 8] >> (7u - b % 8)) & 1);
+    }
     return value;
 }
 
@@ -246,26 +276,32 @@ static int Payload(const int8_t *symbols, unsigned prn, TNgBcnv1Header header, T
             const int sample = symbols[NG_BCNV1_HEADER_SYMBOLS + 36 * col + row];
             to[col] = (int16_t)(header.inverted ? -sample : sample);
         }
-        if (row < 33 && row % 3 == 2)
+        if (row < 33 && row % 3 == 2) {
             n3 += 48;
-        else
+        } else {
             n2 += 48;
+        }
     }
     int result = Ldpc(&sf2Code, sf2, candidate.sf2, &candidate.correctedBits[1]);
-    if (result != NG_OK)
+    if (result != NG_OK) {
         return result;
-    if (!Crc(candidate.sf2, sizeof(candidate.sf2)))
+    }
+    if (!Crc(candidate.sf2, sizeof(candidate.sf2))) {
         return NG_END;
+    }
     result = Ldpc(&sf3Code, sf3, candidate.sf3, &candidate.correctedBits[2]);
-    if (result != NG_OK)
+    if (result != NG_OK) {
         return result;
-    if (!Crc(candidate.sf3, sizeof(candidate.sf3)))
+    }
+    if (!Crc(candidate.sf3, sizeof(candidate.sf3))) {
         return NG_END;
+    }
 
     candidate.week = Field(candidate.sf2, 0, 13);
     candidate.hour = Field(candidate.sf2, 13, 8);
-    if (candidate.hour >= 168)
+    if (candidate.hour >= 168) {
         return NG_END;
+    }
     candidate.iodc = Field(candidate.sf2, 21, 10);
     candidate.iode = Field(candidate.sf2, 31, 8);
     candidate.pageId = Field(candidate.sf3, 0, 6);
@@ -285,10 +321,12 @@ static int Payload(const int8_t *symbols, unsigned prn, TNgBcnv1Header header, T
 int NgBcnv1Decode(const int8_t symbols[NG_BCNV1_FRAME_SYMBOLS], unsigned prn, TNgBcnv1Frame *frame)
 {
     TNgBcnv1Header header;
-    if (!symbols || !frame || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn))
+    if (!symbols || !frame || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn)) {
         return NG_ERROR;
-    if (!Header(symbols, Bch(prn, 6, 21, 0x17), &header))
+    }
+    if (!Header(symbols, Bch(prn, 6, 21, 0x17), &header)) {
         return NG_END;
+    }
     return Payload(symbols, prn, header, frame);
 }
 
@@ -296,10 +334,12 @@ int NgBcnv1Find(const int8_t *symbols, size_t count, unsigned prn, size_t *offse
                 TNgBcnv1Frame *frame)
 {
     const size_t needed = NG_BCNV1_SYNC_SYMBOLS;
-    if (!symbols || !offset || !frame || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn))
+    if (!symbols || !offset || !frame || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn)) {
         return NG_ERROR;
-    if (count < needed)
+    }
+    if (count < needed) {
         return NG_END;
+    }
     const uint64_t prnWord = Bch(prn, 6, 21, 0x17);
     for (size_t n = 0; n <= count - needed; ++n) {
         TNgBcnv1Header first, second;
@@ -307,10 +347,12 @@ int NgBcnv1Find(const int8_t *symbols, size_t count, unsigned prn, size_t *offse
             Header(symbols + n + NG_BCNV1_FRAME_SYMBOLS, prnWord, &second) &&
             first.inverted == second.inverted && (first.soh + 1) % 200 == second.soh) {
             int result = Payload(symbols + n, prn, first, frame);
-            if (result == NG_OK)
+            if (result == NG_OK) {
                 *offset = n;
-            if (result != NG_END)
+            }
+            if (result != NG_END) {
                 return result;
+            }
         }
     }
     return NG_END;
@@ -321,8 +363,9 @@ int NgBcnv1Push(TNgBcnv1Stream *stream, unsigned prn, uint64_t epoch, uint64_t f
                 uint64_t endSample, int8_t symbol, TNgBcnv1Frame *frame, uint64_t *frameStartSample)
 {
     if (!stream || !frame || !frameStartSample || endSample <= firstSample ||
-        !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn))
+        !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn)) {
         return NG_ERROR;
+    }
     if (prn != stream->prn || epoch != stream->epoch || firstSample != stream->nextSample) {
         stream->count = stream->writeIndex = 0;
         stream->nextFrame = 0;
@@ -334,18 +377,22 @@ int NgBcnv1Push(TNgBcnv1Stream *stream, unsigned prn, uint64_t epoch, uint64_t f
     stream->firstSamples[index] = firstSample;
     stream->writeIndex = (index + 1) % NG_BCNV1_SYNC_SYMBOLS;
     stream->nextSample = endSample;
-    if (stream->count < NG_BCNV1_SYNC_SYMBOLS)
+    if (stream->count < NG_BCNV1_SYNC_SYMBOLS) {
         ++stream->count;
-    if (stream->count < NG_BCNV1_SYNC_SYMBOLS)
+    }
+    if (stream->count < NG_BCNV1_SYNC_SYMBOLS) {
         return NG_END;
+    }
     if (stream->nextFrame) {
-        if (--stream->nextFrame)
+        if (--stream->nextFrame) {
             return NG_END;
+        }
         size_t start = stream->writeIndex + NG_BCNV1_HEADER_SYMBOLS;
         TNgBcnv1Frame aligned;
         int status = NgBcnv1Decode(stream->symbols + start, prn, &aligned);
-        if (status == NG_ERROR)
+        if (status == NG_ERROR) {
             return status;
+        }
         if (status == NG_OK && aligned.soh == (stream->lastSoh + 1) % 200) {
             stream->lastSoh = aligned.soh;
             stream->nextFrame = NG_BCNV1_FRAME_SYMBOLS;

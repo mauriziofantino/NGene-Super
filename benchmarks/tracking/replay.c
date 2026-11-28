@@ -63,39 +63,48 @@ int main(int argc, char **argv)
     seed.codePhaseChips = strtod(argv[6], NULL);
     first = strtoull(argv[7], NULL, 10);
     seed.firstSample = argc >= 9 ? strtoull(argv[8], NULL, 10) : first;
-    if (seed.firstSample > first || !block)
+    if (seed.firstSample > first || !block) {
         return 2;
+    }
     if (observe) {
         char *end;
         errno = 0;
         observationSample = strtoull(argv[9], &end, 10);
         if (errno == ERANGE || argv[9][0] < '0' || argv[9][0] > '9' || *end ||
-            observationSample <= first)
+            observationSample <= first) {
             return 2;
+        }
         receiverTow = strtod(argv[10], &end);
-        if (end == argv[10] || *end || !isfinite(receiverTow))
+        if (end == argv[10] || *end || !isfinite(receiverTow)) {
             return 2;
+        }
     }
     if (NgTrackingCreate(&config, &stream, (unsigned)strtoul(argv[3], NULL, 10), &tracking,
-                         &error) != NG_OK)
+                         &error) != NG_OK) {
         return 3;
-    if (NgTrackingSeed(tracking, &seed, &error) != NG_OK)
+    }
+    if (NgTrackingSeed(tracking, &seed, &error) != NG_OK) {
         return 4;
+    }
     NgTrackingObserve(tracking, 0);
     samples = calloc(block, sizeof(*samples));
     input = fopen(argv[1], "rb");
-    if (!samples || !input || first > LONG_MAX / 2 || fseek(input, (long)(2 * first), SEEK_SET))
+    if (!samples || !input || first > LONG_MAX / 2 || fseek(input, (long)(2 * first), SEEK_SET)) {
         return 5;
-    if (!observe)
+    }
+    if (!observe) {
         puts(
             "sample,integrations,doppler,code_rate,dll,carrier_error,prompt,bit_sync,subframes,tow,active,pll,navigation_boundary_sample,end_sample,transmit_time_seconds");
+    }
     while (!observe || first < observationSample) {
         size_t readCount = block;
-        if (observe && observationSample - first < block)
+        if (observe && observationSample - first < block) {
             readCount = (size_t)(observationSample - first);
+        }
         count = fread(samples, sizeof(*samples), readCount, input);
-        if (!count)
+        if (!count) {
             break;
+        }
         view.samples = samples;
         view.meta.firstSample = first;
         view.meta.count = count;
@@ -117,9 +126,9 @@ int main(int argc, char **argv)
         }
     }
     if (observe) {
-        if (first == observationSample)
+        if (first == observationSample) {
             result = ReportObservation(&s, first, stream.sampleRateHz, receiverTow);
-        else {
+        } else {
             fprintf(stderr, "Capture ended before the requested observation sample\n");
             result = 5;
         }

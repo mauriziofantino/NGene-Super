@@ -18,8 +18,9 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
                   const TNgAcquisitionConfig *config, TNgAcquisitionCancel cancel,
                   void *cancelContext, TNgAcquisitionResult *result, TNgError *error)
 {
-    if (context)
+    if (context) {
         NgSleepMs(*(const unsigned *)context);
+    }
     (void)config;
     (void)cancel;
     (void)cancelContext;
@@ -82,8 +83,9 @@ static TNgTrackingSnapshot Batched(size_t split)
           NG_OK);
     for (n = 0; n < 1000; n++) {
         NgAcquisitionRead(search, &outcome);
-        if (outcome.searches)
+        if (outcome.searches) {
             break;
+        }
         NgSleepMs(1);
     }
     CHECK(outcome.searches);
@@ -91,12 +93,14 @@ static TNgTrackingSnapshot Batched(size_t split)
     samples = calloc(100u * 2048u, sizeof(*samples));
     CHECK(samples);
     CHECK(NgGpsCaGenerate(1, chips, &error) == NG_OK);
-    for (n = 0; n < 100u * 2048u; n++)
+    for (n = 0; n < 100u * 2048u; n++) {
         samples[n].i = (int8_t)(40 * chips[(n * 1023u / 2048u) % 1023u]);
+    }
     for (n = 0; n < 100u * 2048u;) {
         size_t count = 100u * 2048u - n;
-        if (count > split)
+        if (count > split) {
             count = split;
+        }
         view.samples = samples + n;
         view.meta.firstSample = first + n;
         view.meta.count = count;
@@ -150,8 +154,9 @@ static void AutomaticPool(unsigned faster, unsigned priority)
     view.meta.epoch = 1;
     for (n = 0; n < 120; ++n) {
         Window(&channels[0], &channels[1], &view);
-        if (priority && n == 55)
+        if (priority && n == 55) {
             NgSleepMs(600); /* Both strategies finish before the next admission. */
+        }
     }
     NgTrackingBankReadAll(banks[0], slots);
     CHECK(slots[0].channelId == 1 && slots[1].channelId == 2 && !slots[2].channelId);
@@ -204,14 +209,16 @@ int main(void)
     view.samples = samples;
     view.meta.count = 2048;
     view.meta.epoch = 1;
-    for (n = 0; n < 100; n++)
+    for (n = 0; n < 100; n++) {
         Window(&channel, &galileo, &view);
+    }
     NgTrackingBankRead(bank, slots);
     CHECK(slots[0].state == 2 && slots[1].state == 2);
     CHECK(slots[0].prn != slots[1].prn);
     NgAcquisitionRead(acquisition, &before);
-    for (n = 0; n < 100; n++)
+    for (n = 0; n < 100; n++) {
         Window(&channel, &galileo, &view);
+    }
     NgAcquisitionRead(acquisition, &after);
     CHECK(after.searches == before.searches);
     view.meta.epoch = 2;
@@ -220,8 +227,9 @@ int main(void)
     Window(&channel, &galileo, &view);
     NgTrackingBankRead(bank, slots);
     CHECK(slots[0].state != 2 && slots[1].state != 2);
-    for (n = 0; n < 100; n++)
+    for (n = 0; n < 100; n++) {
         Window(&channel, &galileo, &view);
+    }
     NgTrackingBankRead(bank, slots);
     CHECK(slots[0].channelId == 1 && slots[1].channelId == 2);
     CHECK(slots[0].state == 2 && slots[0].epoch == 2);
@@ -242,8 +250,9 @@ int main(void)
         TNgTrackingSnapshot a = Batched(2048), b = Batched(37);
         CHECK(a.endSample == b.endSample && a.integrations == b.integrations);
         CHECK(a.codeRateHz == b.codeRateHz && a.dopplerHz == b.dopplerHz);
-        for (n = 0; n < 3; n++)
+        for (n = 0; n < 3; n++) {
             CHECK(a.i[n] == b.i[n] && a.q[n] == b.q[n]);
+        }
     }
     puts("shared channel allocation, reservations and gap reuse passed");
     return 0;

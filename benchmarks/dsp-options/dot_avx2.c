@@ -27,8 +27,9 @@ int64_t DspOptionsDot16Avx2(const int16_t *x, const int16_t *w, size_t n)
         acc = Accumulate(acc, _mm256_madd_epi16(samples, weights));
     }
     int64_t sum = Reduce(acc);
-    for (; k < n; ++k)
+    for (; k < n; ++k) {
         sum += (int32_t)x[k] * w[k];
+    }
     return sum;
 }
 
@@ -42,7 +43,8 @@ int64_t DspOptionsDot8Avx2(const int8_t *x, const int16_t *w, size_t n)
         acc = Accumulate(acc, _mm256_madd_epi16(_mm256_cvtepi8_epi16(bytes), weights));
     }
     int64_t sum = Reduce(acc);
-    for (; k < n; ++k)
+    for (; k < n; ++k) {
         sum += (int32_t)x[k] * w[k];
+    }
     return sum;
 }

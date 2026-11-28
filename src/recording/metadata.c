@@ -249,9 +249,10 @@ static int ReadMetadata(FILE *file, const char *rawPath, TNgCaptureMetadata *out
         }
     }
     if (out->format == NG_FORMAT_CI16) {
-        if (significantBits < 1 || significantBits > 16 || fractionalBits != 15)
+        if (significantBits < 1 || significantBits > 16 || fractionalBits != 15) {
             return NgFail(
                 error, "CI16 metadata requires valid source precision and signed Q15 components");
+        }
     }
     if (out->format == NG_FORMAT_SC16_Q11 || out->format == NG_FORMAT_CI16) {
         if (out->samples % 2u != 0) {
@@ -325,8 +326,9 @@ int NgReplayInspect(const char *path, TNgCaptureMetadata *metadata, TNgError *er
             result.metadataPath[0] = '\0';
             n = strlen(path);
             if (n >= 5 && strcmp(path + n - 5, ".ci16") == 0) {
-                if (bytes % 4u)
+                if (bytes % 4u) {
                     return NgFail(error, "Incomplete CI16 IQ pair");
+                }
                 result.format = NG_FORMAT_CI16;
                 result.samples = bytes / 4u;
             } else if (n >= 8 && strcmp(path + n - 8, ".sc16q11") == 0) {

@@ -51,13 +51,15 @@ static void Accumulate(TNgComplex *to, const TNgComplex *from, size_t count)
 {
     size_t k = 0;
 #if NG_SSE2
-    for (; k + 2 <= count; k += 2)
+    for (; k + 2 <= count; k += 2) {
         _mm_storeu_ps((float *)(to + k), _mm_add_ps(_mm_loadu_ps((const float *)(to + k)),
                                                     _mm_loadu_ps((const float *)(from + k))));
+    }
 #elif NG_NEON
-    for (; k + 2 <= count; k += 2)
+    for (; k + 2 <= count; k += 2) {
         vst1q_f32((float *)(to + k), vaddq_f32(vld1q_f32((const float *)(to + k)),
                                                vld1q_f32((const float *)(from + k))));
+    }
 #endif
     for (; k < count; ++k) {
         to[k].i += from[k].i;
@@ -81,8 +83,9 @@ static void Grid(const TNgB1cLab *lab, const TNgComplex *input, TNgComplex *outp
         _mm_storel_pi((__m64 *)(output + k), _mm_cvtpd_ps(_mm_div_pd(sum, _mm_set1_pd(width))));
 #elif NG_NEON
         float64x2_t sum = vdupq_n_f64(0);
-        for (size_t n = begin; n < end; ++n)
+        for (size_t n = begin; n < end; ++n) {
             sum = vaddq_f64(sum, vcvt_f64_f32(vld1_f32((const float *)(input + n))));
+        }
         vst1_f32((float *)(output + k), vcvt_f32_f64(vdivq_f64(sum, vdupq_n_f64(width))));
 #else
         double i = 0, q = 0;
@@ -132,8 +135,9 @@ static void Prepare(TNgB1cLab *lab, unsigned prn, uint32_t rate, int filtered)
         const uint64_t phase = (uint64_t)k * NG_BEIDOU_B1C_RATE_HZ * NG_BEIDOU_B1C_SUBCHIPS / rate;
         lab->code[k] = NgBeidouB1cPilotAt(chips, phase);
     }
-    if (filtered)
+    if (filtered) {
         FilterReplica(lab, rate);
+    }
     lab->nativeEnergy = 0;
     for (size_t k = 0; k < lab->count; ++k) {
         const TNgComplex c = lab->code[k];
@@ -148,16 +152,18 @@ static void Prepare(TNgB1cLab *lab, unsigned prn, uint32_t rate, int filtered)
         lab->gridEnergy += (double)c.i * c.i + (double)c.q * c.q;
     }
     NgSearchFftExecute(lab->fft, lab->gridSpectrum, 0);
-    for (size_t k = 0; k < NG_B1C_FFT_SIZE; ++k)
+    for (size_t k = 0; k < NG_B1C_FFT_SIZE; ++k) {
         lab->gridSpectrum[k].q = -lab->gridSpectrum[k].q;
+    }
     memset(lab->codeSpectra, 0, lab->blocks * NG_B1C_FFT_SIZE * sizeof(*lab->codeSpectra));
     for (size_t k = 0; k < lab->count; ++k) {
         const TNgComplex c = lab->code[k ? lab->count - k : 0];
         lab->codeSpectra[k / NG_B1C_BLOCK * NG_B1C_FFT_SIZE + k % NG_B1C_BLOCK] =
             (TNgComplex){c.i, -c.q};
     }
-    for (size_t b = 0; b < lab->blocks; ++b)
+    for (size_t b = 0; b < lab->blocks; ++b) {
         NgSearchFftExecute(lab->fft, lab->codeSpectra + b * NG_B1C_FFT_SIZE, 0);
+    }
 }
 
 /** Build a reproducible cyclic delay plus coherent carrier and independent complex noise. */
@@ -295,8 +301,9 @@ static void PeakRow(const TNgComplex *map, size_t size, double hz, TNgB1cPeak *b
         Consider(best, k + 1, hz, vgetq_lane_f64(p, 1));
     }
 #endif
-    for (; k < size; ++k)
+    for (; k < size; ++k) {
         Consider(best, k, hz, Power(map[k]));
+    }
 }
 
 typedef enum { NG_B1C_GRID, NG_B1C_BLOCKS, NG_B1C_STAGGERED } TNgB1cCoarseMode;
@@ -378,8 +385,9 @@ static unsigned Confirm(TNgB1cLab *lab, uint32_t rate, TNgB1cPeak peak, size_t d
         Capture(lab, rate, delay, hz, attempt + 3, (present & (1u << attempt)) ? 1.0f : 0.0f);
         Mix(lab, rate, peak.hz);
         successes += Prompt(lab, peak.delay) > cut * cut;
-        if (successes >= 3 || successes + 3 - attempt < 3)
+        if (successes >= 3 || successes + 3 - attempt < 3) {
             break;
+        }
     }
     return successes;
 }
@@ -433,8 +441,9 @@ static void Run(TNgB1cLab *lab, uint32_t rate, unsigned prn)
             const TNgComplex ref = Oracle(lab, probes[k]);
             const double error =
                 hypot((double)sample.i - ref.i, (double)sample.q - ref.q) / (double)lab->count;
-            if (error > residual)
+            if (error > residual) {
                 residual = error;
+            }
         }
         CHECK(residual < 2e-6);
         const double sidelobe =
@@ -461,8 +470,9 @@ static void Run(TNgB1cLab *lab, uint32_t rate, unsigned prn)
 static double CheckTranches(const TNgB1cLab *lab, size_t delay)
 {
     double i = 0, q = 0;
-    for (size_t ms = 0; ms < 10; ++ms)
+    for (size_t ms = 0; ms < 10; ++ms) {
         PromptSpan(lab, delay, ms * lab->count / 10, (ms + 1) * lab->count / 10, &i, &q);
+    }
     const TNgComplex oracle = Oracle(lab, delay);
     return hypot(i - oracle.i, q - oracle.q) / (double)lab->count;
 }

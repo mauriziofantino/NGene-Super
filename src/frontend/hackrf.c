@@ -312,8 +312,9 @@ int NgHackrfOpen(const TNgConfig *config, TNgFrontend *frontend, TNgError *error
         free(s);
         return NG_ERROR;
     }
-    if (OpenDevice(config, s, error) != NG_OK)
+    if (OpenDevice(config, s, error) != NG_OK) {
         goto failed;
+    }
     bandwidth = config->bandwidthHz == 0
                     ? hackrf_compute_baseband_filter_bw_round_down_lt(config->sampleRateHz)
                     : config->bandwidthHz;
@@ -388,8 +389,9 @@ int NgHackrfCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgErro
     uint8_t board = 255, revision = 0;
     int rc = NG_ERROR;
     memset(caps, 0, sizeof(*caps));
-    if (OpenDevice(config, &source, error) != NG_OK)
+    if (OpenDevice(config, &source, error) != NG_OK) {
         goto done;
+    }
     if (hackrf_board_id_read(source.device, &board) != HACKRF_SUCCESS) {
         NgFail(error, "Cannot identify HackRF board for gain calibration");
         goto done;
@@ -414,8 +416,9 @@ int NgHackrfCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgErro
         snprintf(caps->deviceModel, sizeof(caps->deviceModel), "Unknown HackRF board %u", board);
         break;
     }
-    if (hackrf_board_rev_read(source.device, &revision) == HACKRF_SUCCESS)
+    if (hackrf_board_rev_read(source.device, &revision) == HACKRF_SUCCESS) {
         caps->boardRevision = revision;
+    }
     snprintf(caps->deviceSerial, sizeof(caps->deviceSerial), "%s", source.serial);
     caps->format = NG_FORMAT_CI8;
     caps->sampleRateMinHz = NG_HACKRF_MIN_SAMPLE_RATE_HZ;
@@ -423,9 +426,11 @@ int NgHackrfCapabilities(const TNgConfig *config, TNgFrontendCaps *caps, TNgErro
     caps->frequencyMaxHz = UINT64_C(6000000000);
     rc = NG_OK;
 done:
-    if (source.device)
+    if (source.device) {
         (void)hackrf_close(source.device);
-    if (source.libraryInitialized)
+    }
+    if (source.libraryInitialized) {
         (void)hackrf_exit();
+    }
     return rc;
 }

@@ -66,8 +66,9 @@ int NgGalileoViterbi(long *finalPathMetric, unsigned char *decData, unsigned cha
     int i, branchMetrics[4];
     unsigned long dec, paths[240], *pathPointer;
     int metricTab[2][256];
-    if (numOutBits != 120)
+    if (numOutBits != 120) {
         return -1;
+    }
     for (i = 0; i < 256; i++) {
         metricTab[0][i] = 128 - i;
         metricTab[1][255 - i] = 127 - i;
@@ -80,8 +81,9 @@ int NgGalileoViterbi(long *finalPathMetric, unsigned char *decData, unsigned cha
     // Convert all values in 0 and 255
     // the number of input symbols is 2*numOutBits because the rate is 1/2 for both F/NAV and I/NAV
     for (i = 0; i < (int)(2 * numOutBits); i++) {
-        if (symbols[i] == 1)
+        if (symbols[i] == 1) {
             symbols[i] = 255;
+        }
     }
     /* Initialize starting metrics */
     for (i = 0; i < 64; i++) {
@@ -184,8 +186,9 @@ int NgGalileoViterbi(long *finalPathMetric, unsigned char *decData, unsigned cha
         }
     }
     /* Chain back from terminal state to produce decoded data (tail included) */
-    if (decData == NULL)
+    if (decData == NULL) {
         return -1;
+    }
     memset(decData, 0, (numOutBits + 7) / 8); /* round up in case nbits % 8 != 0 */
     for (i = (int)numOutBits - 1; i >= 0; i--) {
         pathPointer -= 2;

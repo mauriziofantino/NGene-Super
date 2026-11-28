@@ -4,8 +4,9 @@
  * magnitude. Use unsigned shifts to avoid shifting negative signed values. */
 static inline int32_t RoundShift(int32_t value, unsigned shift)
 {
-    if (shift == 0)
+    if (shift == 0) {
         return value;
+    }
     uint32_t magnitude = (uint32_t)(value < 0 ? -value : value);
     int32_t rounded = (int32_t)((magnitude + (UINT32_C(1) << (shift - 1))) >> shift);
     return value < 0 ? -rounded : rounded;
@@ -37,8 +38,9 @@ static unsigned CompactStageShift(const int8_t *samples, const int64_t *wr, cons
             for (size_t k = 0; k < 4; ++k) {
                 /* Preimages of INT8 under round-to-nearest, ties away from zero.
                  * Two bits always suffice: each |output| is at most 384. */
-                if (values[k] < -256 || values[k] > 254)
+                if (values[k] < -256 || values[k] > 254) {
                     return 2;
+                }
                 shift |= values[k] < -128 || values[k] > 127;
             }
         }

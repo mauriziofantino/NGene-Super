@@ -10,11 +10,13 @@ static inline int NgDspAvx2Available(void)
 #ifdef _MSC_VER
     int info[4];
     __cpuid(info, 0);
-    if (info[0] < 7)
+    if (info[0] < 7) {
         return 0;
+    }
     __cpuid(info, 1);
-    if ((info[2] & (3 << 27)) != (3 << 27) || (_xgetbv(0) & 6) != 6)
+    if ((info[2] & (3 << 27)) != (3 << 27) || (_xgetbv(0) & 6) != 6) {
         return 0;
+    }
     __cpuidex(info, 7, 0);
     return (info[1] & (1 << 5)) != 0;
 #else

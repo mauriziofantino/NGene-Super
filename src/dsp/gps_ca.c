@@ -9,8 +9,9 @@ int NgGpsCaGenerate(unsigned prn, int8_t chips[NG_GPS_CA_LENGTH], TNgError *erro
         {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {1, 4},  {2, 5}, {3, 6}, {4, 7},  {5, 8}, {6, 9},
         {1, 3}, {4, 6}, {5, 7}, {6, 8}, {7, 9},  {8, 10}, {1, 6}, {2, 7}, {3, 8},  {4, 9}};
     unsigned g1 = 1023u, g2 = 1023u, n;
-    if (chips == NULL || prn < 1u || prn > 32u)
+    if (chips == NULL || prn < 1u || prn > 32u) {
         return NgFail(error, "GPS C/A PRN must be in 1..32");
+    }
     for (n = 0; n < NG_GPS_CA_LENGTH; ++n) {
         unsigned bit =
             ((g1 >> 9) ^ (g2 >> (taps[prn - 1u][0] - 1u)) ^ (g2 >> (taps[prn - 1u][1] - 1u))) & 1u;
@@ -30,13 +31,16 @@ int NgGpsCaNcoInit(TNgGpsCaNco *nco, double sampleRateHz, double codeRateHz, dou
 {
     double phase, increment;
     if (nco == NULL || !isfinite(sampleRateHz) || sampleRateHz <= 0.0 || !isfinite(codeRateHz) ||
-        codeRateHz <= 0.0 || !isfinite(phaseChips) || !isfinite(codeRateHz / sampleRateHz))
+        codeRateHz <= 0.0 || !isfinite(phaseChips) || !isfinite(codeRateHz / sampleRateHz)) {
         return NgFail(error, "Invalid GPS code NCO parameters");
+    }
     phase = fmod(phaseChips, (double)NG_GPS_CA_LENGTH);
-    if (phase < 0.0)
+    if (phase < 0.0) {
         phase += (double)NG_GPS_CA_LENGTH;
-    if (phase >= (double)NG_GPS_CA_LENGTH)
+    }
+    if (phase >= (double)NG_GPS_CA_LENGTH) {
         phase = 0.0;
+    }
     increment = fmod(codeRateHz / sampleRateHz, (double)NG_GPS_CA_LENGTH);
     nco->phase = (uint64_t)(phase * 4294967296.0);
     nco->step = (uint64_t)(increment * 4294967296.0 + 0.5);
@@ -71,10 +75,12 @@ int NgGpsCaNext(const int8_t chips[NG_GPS_CA_LENGTH], TNgGpsCaNco *nco)
             nco->remainder -= nco->denominator;
             nco->phase += UINT64_C(1) << 32;
         }
-    } else
+    } else {
         nco->phase += nco->step;
-    if (nco->phase >= period)
+    }
+    if (nco->phase >= period) {
         nco->phase -= period;
+    }
     return chip;
 }
 
@@ -82,8 +88,9 @@ void NgGpsCaSample(const int8_t chips[NG_GPS_CA_LENGTH], TNgGpsCaNco *nco, int8_
                    size_t count)
 {
     size_t n;
-    for (n = 0; n < count; ++n)
+    for (n = 0; n < count; ++n) {
         output[n] = (int8_t)NgGpsCaNext(chips, nco);
+    }
 }
 
 /** Use the G2 delays of IS-GPS-200N Table 6-I, also used by NGene Classic. */

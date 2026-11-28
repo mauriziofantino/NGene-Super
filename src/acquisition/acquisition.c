@@ -63,10 +63,11 @@ struct TNgAcquisition {
 typedef struct {
     TNgAcquisition *acquisition;   /**< Borrowed subscription, retained until job release. */
     TNgAcquisitionCapture capture; /**< Frozen per-job observer/capture geometry. */
-    unsigned prn, lane;            /**< PRN and exclusively claimed workspace. */
-    int generation;                /**< Capture cancellation generation. */
-    int permit;                    /**< Owns one cooperative DSP-stage permit. */
-    double cpuMark;                /**< Thread CPU seconds at the last charged boundary. */
+    unsigned prn;
+    unsigned lane;  /**< PRN and exclusively claimed workspace. */
+    int generation; /**< Capture cancellation generation. */
+    int permit;     /**< Owns one cooperative DSP-stage permit. */
+    double cpuMark; /**< Thread CPU seconds at the last charged boundary. */
 #ifdef NGENE_PROFILE_ACQUISITION_JOBS
     double published, claimed, permitWait;
 #endif
@@ -127,8 +128,9 @@ static int WorkCancelled(void *context)
     int delay = NgAtomicGet(&job->acquisition->yieldMilliseconds);
     double cpu = NgThreadCpuSeconds();
     NgMutexLock(&pool->mutex);
-    if (pool->budgetActive)
+    if (pool->budgetActive) {
         pool->cpuCredit -= cpu - job->cpuMark;
+    }
     job->cpuMark = cpu;
     if (job->permit) {
         --pool->executing;
@@ -136,18 +138,21 @@ static int WorkCancelled(void *context)
         NgConditionSignal(&pool->work);
     }
     NgMutexUnlock(&pool->mutex);
-    if (Cancelled(job))
+    if (Cancelled(job)) {
         return 1;
-    if (delay)
+    }
+    if (delay) {
         NgSleepMs((unsigned)delay);
+    }
 #ifdef NGENE_PROFILE_ACQUISITION_JOBS
     double startedWaiting = NgMonotonicSeconds();
 #endif
     NgMutexLock(&pool->mutex);
     while (!pool->stopping && !Cancelled(job) &&
            (pool->executing >= (unsigned)NgAtomicGet(&pool->executionLimit) ||
-            (pool->budgetActive && pool->cpuCredit <= 0)))
+            (pool->budgetActive && pool->cpuCredit <= 0))) {
         NgConditionWait(&pool->work, &pool->mutex, 20);
+    }
     int cancelled = pool->stopping || Cancelled(job);
     if (!cancelled) {
         ++pool->executing;
@@ -163,75 +168,86 @@ static int WorkCancelled(void *context)
 }
 
 /** Update the compatibility PRN and release a capture only after its last borrower. */
-static void RefreshJobs(TNgAcquisition *a)
+static void RefreshJobs(TNgAcquisition *acquisition)
 {
-    unsigned k;
-    a->snapshot.activeSearches = 0;
-    a->snapshot.currentPrn = 0;
-    for (k = 0; k < a->contextCount; ++k)
-        if (a->snapshot.currentPrns[k]) {
-            if (!a->snapshot.currentPrn)
-                a->snapshot.currentPrn = a->snapshot.currentPrns[k];
-            a->snapshot.activeSearches++;
+    unsigned contextIndex;
+    acquisition->snapshot.activeSearches = 0;
+    acquisition->snapshot.currentPrn = 0;
+    for (contextIndex = 0; contextIndex < acquisition->contextCount; ++contextIndex) {
+        if (acquisition->snapshot.currentPrns[contextIndex]) {
+            if (!acquisition->snapshot.currentPrn) {
+                acquisition->snapshot.currentPrn = acquisition->snapshot.currentPrns[contextIndex];
+            }
+            acquisition->snapshot.activeSearches++;
         }
-    a->snapshot.searching = a->snapshot.activeSearches != 0;
-    if (!a->activeJobs && a->nextPrn > a->captureLastPrn)
-        NgAtomicSet(&a->slot, 0);
+    }
+    acquisition->snapshot.searching = acquisition->snapshot.activeSearches != 0;
+    if (!acquisition->activeJobs && acquisition->nextPrn > acquisition->captureLastPrn) {
+        NgAtomicSet(&acquisition->slot, 0);
+    }
 }
 
 /** Claim one PRN fairly across ready constellations; caller holds pool mutex. */
 static int Claim(TNgAcquisitionPool *pool, TNgAcquisitionJob *job)
 {
     unsigned attempt;
-    if (pool->budgetActive && pool->cpuCredit <= 0)
+    if (pool->budgetActive && pool->cpuCredit <= 0) {
         return 0;
+    }
     for (attempt = 0; attempt < pool->subscriptionCount; ++attempt) {
         unsigned system = (pool->nextSystem + attempt) % pool->subscriptionCount;
-        TNgAcquisition *a = pool->subscriptions[system];
+        TNgAcquisition *acquisition = pool->subscriptions[system];
         unsigned prn, lane;
-        if (!a || !NgAtomicGet(&a->slot))
-            continue;
-        NgMutexLock(&a->mutex);
-        if (NgAtomicGet(&a->stop) || a->paused ||
-            NgAtomicGet(&a->generation) != a->captureGeneration)
-            a->nextPrn = a->captureLastPrn + 1;
-        while (a->nextPrn <= a->captureLastPrn &&
-               (a->excludedMask & (UINT64_C(1) << (a->nextPrn - 1))))
-            ++a->nextPrn;
-        if (a->nextPrn > a->captureLastPrn) {
-            RefreshJobs(a);
-            NgMutexUnlock(&a->mutex);
+        if (!acquisition || !NgAtomicGet(&acquisition->slot)) {
             continue;
         }
-        if (pool->active >= (unsigned)NgAtomicGet(&pool->limit) || a->activeJobs >= a->quota ||
-            a->activeJobs >= a->contextCount) {
-            NgMutexUnlock(&a->mutex);
+        NgMutexLock(&acquisition->mutex);
+        if (NgAtomicGet(&acquisition->stop) || acquisition->paused ||
+            NgAtomicGet(&acquisition->generation) != acquisition->captureGeneration) {
+            acquisition->nextPrn = acquisition->captureLastPrn + 1;
+        }
+        while (acquisition->nextPrn <= acquisition->captureLastPrn &&
+               (acquisition->excludedMask & (UINT64_C(1) << (acquisition->nextPrn - 1)))) {
+            ++acquisition->nextPrn;
+        }
+        if (acquisition->nextPrn > acquisition->captureLastPrn) {
+            RefreshJobs(acquisition);
+            NgMutexUnlock(&acquisition->mutex);
             continue;
         }
-        prn = a->nextPrn++;
-        for (lane = 0; lane < a->contextCount; ++lane)
-            if (!(a->busyContexts & (UINT32_C(1) << lane)))
+        if (pool->active >= (unsigned)NgAtomicGet(&pool->limit) ||
+            acquisition->activeJobs >= acquisition->quota ||
+            acquisition->activeJobs >= acquisition->contextCount) {
+            NgMutexUnlock(&acquisition->mutex);
+            continue;
+        }
+        prn = acquisition->nextPrn++;
+        for (lane = 0; lane < acquisition->contextCount; ++lane) {
+            if (!(acquisition->busyContexts & (UINT32_C(1) << lane))) {
                 break;
-        a->busyContexts |= UINT32_C(1) << lane;
-        a->activeJobs++;
+            }
+        }
+        acquisition->busyContexts |= UINT32_C(1) << lane;
+        acquisition->activeJobs++;
         pool->active++;
-        a->snapshot.currentPrns[lane] = prn;
-        RefreshJobs(a);
-        job->acquisition = a;
-        job->capture = a->capture;
-        job->capture.displayPrn = NgMonotonicSeconds() < a->observedUntil ? a->observedPrn : 0;
-        job->generation = a->captureGeneration;
+        acquisition->snapshot.currentPrns[lane] = prn;
+        RefreshJobs(acquisition);
+        job->acquisition = acquisition;
+        job->capture = acquisition->capture;
+        job->capture.displayPrn =
+            NgMonotonicSeconds() < acquisition->observedUntil ? acquisition->observedPrn : 0;
+        job->generation = acquisition->captureGeneration;
         job->prn = prn;
         job->lane = lane;
         job->permit = 0;
         job->cpuMark = NgThreadCpuSeconds();
 #ifdef NGENE_PROFILE_ACQUISITION_JOBS
-        job->published = a->capturePublished;
+        job->published = acquisition->capturePublished;
         job->claimed = NgMonotonicSeconds();
         job->permitWait = 0;
 #endif
         pool->nextSystem = (system + 1) % pool->subscriptionCount;
-        NgMutexUnlock(&a->mutex);
+        NgMutexUnlock(&acquisition->mutex);
         return 1;
     }
     return 0;
@@ -240,63 +256,71 @@ static int Claim(TNgAcquisitionPool *pool, TNgAcquisitionJob *job)
 /** Copy a native strategy's completed map on the worker that owns its private workspace. */
 static void CopySpace(TNgAcquisitionJob *job, const TNgAcquisitionResult *result)
 {
-    TNgAcquisition *a = job->acquisition;
-    TNgAcquisitionSearchSpace *space = &a->spaces[job->prn - a->config.firstPrn];
-    if (a->strategy == &ngGalileoAcquisitionStrategy)
-        NgAcquisitionGalileoSearchSpace(a->contexts[job->lane], space);
-    else
-        NgAcquisitionGpsSearchSpace(a->contexts[job->lane], space);
+    TNgAcquisition *acquisition = job->acquisition;
+    TNgAcquisitionSearchSpace *space =
+        &acquisition->spaces[job->prn - acquisition->config.firstPrn];
+    if (acquisition->strategy == &ngGalileoAcquisitionStrategy) {
+        NgAcquisitionGalileoSearchSpace(acquisition->contexts[job->lane], space);
+    } else {
+        NgAcquisitionGpsSearchSpace(acquisition->contexts[job->lane], space);
+    }
     space->result = *result;
 }
 
 /** Execute one unchanged decision and then its optional, lower-priority map. */
 static void Execute(TNgAcquisitionJob *job)
 {
-    TNgAcquisition *a = job->acquisition;
+    TNgAcquisition *acquisition = job->acquisition;
     TNgAcquisitionResult result = {0};
     TNgError error = {{0}};
-    void *context = a->contexts[job->lane];
-    int native =
-        a->strategy == &ngGpsAcquisitionStrategy || a->strategy == &ngGalileoAcquisitionStrategy;
-    int status = a->strategy->search(context, &job->capture, job->prn, &a->config, WorkCancelled,
-                                     job, &result, &error);
+    void *context = acquisition->contexts[job->lane];
+    int native = acquisition->strategy == &ngGpsAcquisitionStrategy ||
+                 acquisition->strategy == &ngGalileoAcquisitionStrategy;
+    int status =
+        acquisition->strategy->search(context, &job->capture, job->prn, &acquisition->config,
+                                      WorkCancelled, job, &result, &error);
     result.completedSeconds = NgMonotonicSeconds();
-    NgMutexLock(&a->mutex);
+    NgMutexLock(&acquisition->mutex);
     int published = !Cancelled(job);
     if (published) {
-        if (job->prn <= NG_LEGACY_MAX_PRN)
-            a->snapshot.results[job->prn - 1] = result;
-        else
-            a->highResults[job->prn - NG_LEGACY_MAX_PRN - 1] = result;
-        a->snapshot.searches++;
-        a->snapshot.currentPrns[job->lane] = 0;
-        RefreshJobs(a);
-        if (status == NG_OK && native && job->capture.displayPrn == job->prn)
+        if (job->prn <= NG_LEGACY_MAX_PRN) {
+            acquisition->snapshot.results[job->prn - 1] = result;
+        } else {
+            acquisition->highResults[job->prn - NG_LEGACY_MAX_PRN - 1] = result;
+        }
+        acquisition->snapshot.searches++;
+        acquisition->snapshot.currentPrns[job->lane] = 0;
+        RefreshJobs(acquisition);
+        if (status == NG_OK && native && job->capture.displayPrn == job->prn) {
             CopySpace(job, &result);
-        if (status == NG_ERROR)
-            snprintf(a->snapshot.message, sizeof(a->snapshot.message), "%s", error.message);
+        }
+        if (status == NG_ERROR) {
+            snprintf(acquisition->snapshot.message, sizeof(acquisition->snapshot.message), "%s",
+                     error.message);
+        }
     }
-    NgMutexUnlock(&a->mutex);
+    NgMutexUnlock(&acquisition->mutex);
 #ifdef NGENE_PROFILE_ACQUISITION_JOBS
     fprintf(
         stderr, "f6_job,%s,%" PRIu64 ",%" PRIu64 ",%u,%d,%d,%d,%.17g,%.17g,%.17g,%.9f,%.9f,%.9f\n",
-        a->strategy == &ngGalileoAcquisitionStrategy ? "galileo"
-        : a->strategy == &ngGpsAcquisitionStrategy   ? "gps"
-                                                     : "custom",
+        acquisition->strategy == &ngGalileoAcquisitionStrategy ? "galileo"
+        : acquisition->strategy == &ngGpsAcquisitionStrategy   ? "gps"
+                                                               : "custom",
         job->capture.origin.epoch, job->capture.origin.firstSample, job->prn, status, published,
         result.confirmed, result.dopplerHz, result.codePhaseChips, result.peakRatio,
         job->claimed - job->published, job->permitWait, result.completedSeconds - job->published);
 #endif
     if (status == NG_OK && native && result.confirmed && !Cancelled(job) &&
         job->capture.displayPrn != job->prn) {
-        int display =
-            a->strategy == &ngGpsAcquisitionStrategy
-                ? NgAcquisitionGpsDisplay(context, job->prn, &a->config, WorkCancelled, job)
-                : NgAcquisitionGalileoDisplay(context, job->prn, &a->config, WorkCancelled, job);
+        int display = acquisition->strategy == &ngGpsAcquisitionStrategy
+                          ? NgAcquisitionGpsDisplay(context, job->prn, &acquisition->config,
+                                                    WorkCancelled, job)
+                          : NgAcquisitionGalileoDisplay(context, job->prn, &acquisition->config,
+                                                        WorkCancelled, job);
         if (display == NG_OK && !Cancelled(job)) {
-            NgMutexLock(&a->mutex);
+            NgMutexLock(&acquisition->mutex);
             CopySpace(job, &result);
-            NgMutexUnlock(&a->mutex);
+            NgMutexUnlock(&acquisition->mutex);
         }
     }
 }
@@ -317,18 +341,20 @@ static void SearchWorker(void *context)
         Execute(&job);
         double cpu = NgThreadCpuSeconds();
         NgMutexLock(&pool->mutex);
-        if (pool->budgetActive)
+        if (pool->budgetActive) {
             pool->cpuCredit -= cpu - job.cpuMark;
-        if (job.permit)
+        }
+        if (job.permit) {
             --pool->executing;
-        TNgAcquisition *a = job.acquisition;
-        NgMutexLock(&a->mutex);
-        a->activeJobs--;
+        }
+        TNgAcquisition *acquisition = job.acquisition;
+        NgMutexLock(&acquisition->mutex);
+        acquisition->activeJobs--;
         pool->active--;
-        a->busyContexts &= ~(UINT32_C(1) << job.lane);
-        a->snapshot.currentPrns[job.lane] = 0;
-        RefreshJobs(a);
-        NgMutexUnlock(&a->mutex);
+        acquisition->busyContexts &= ~(UINT32_C(1) << job.lane);
+        acquisition->snapshot.currentPrns[job.lane] = 0;
+        RefreshJobs(acquisition);
+        NgMutexUnlock(&acquisition->mutex);
         NgConditionSignal(&pool->idle);
         NgConditionSignal(&pool->work);
     }
@@ -338,15 +364,17 @@ static void SearchWorker(void *context)
 /** Stop an idle pool before linking subscriptions or releasing its final owner. */
 static void DestroyPool(TNgAcquisitionPool *pool)
 {
-    unsigned k;
-    if (!pool)
+    unsigned workerIndex;
+    if (!pool) {
         return;
+    }
     NgMutexLock(&pool->mutex);
     pool->stopping = 1;
     NgConditionSignal(&pool->work);
     NgMutexUnlock(&pool->mutex);
-    for (k = 0; k < pool->started; ++k)
-        NgThreadJoin(pool->workers[k]);
+    for (workerIndex = 0; workerIndex < pool->started; ++workerIndex) {
+        NgThreadJoin(pool->workers[workerIndex]);
+    }
     NgConditionDestroy(&pool->idle);
     NgConditionDestroy(&pool->work);
     NgMutexDestroy(&pool->mutex);
@@ -358,7 +386,7 @@ static TNgAcquisitionPool *CreatePool(TNgAcquisition *const *members, unsigned c
                                       TNgError *error)
 {
     TNgAcquisitionPool *pool = calloc(1, sizeof(*pool));
-    unsigned wanted = 0, k;
+    unsigned wanted = 0;
     if (!pool) {
         NgFail(error, "Cannot allocate acquisition pool");
         return NULL;
@@ -382,16 +410,16 @@ static TNgAcquisitionPool *CreatePool(TNgAcquisition *const *members, unsigned c
         return NULL;
     }
     pool->subscriptionCount = count;
-    for (k = 0; k < count; ++k) {
-        pool->subscriptions[k] = members[k];
-        wanted += members[k]->contextCount;
+    for (unsigned memberIndex = 0; memberIndex < count; ++memberIndex) {
+        pool->subscriptions[memberIndex] = members[memberIndex];
+        wanted += members[memberIndex]->contextCount;
     }
     pool->cpuBudget = members[0]->config.cpuBudget;
     pool->capacity = wanted < Capacity() ? wanted : Capacity();
     NgAtomicSet(&pool->limit, (int)pool->capacity);
     NgAtomicSet(&pool->executionLimit, (int)pool->capacity);
-    for (k = 0; k < pool->capacity; ++k) {
-        if (NgThreadStart(&pool->workers[k], SearchWorker, pool)) {
+    for (unsigned workerIndex = 0; workerIndex < pool->capacity; ++workerIndex) {
+        if (NgThreadStart(&pool->workers[workerIndex], SearchWorker, pool)) {
             DestroyPool(pool);
             NgFail(error, "Cannot prepare acquisition pool worker");
             return NULL;
@@ -415,11 +443,13 @@ void NgAcquisitionDefaults(TNgAcquisitionConfig *config)
 int NgAcquisitionValidateGrid(const char *signal, uint32_t rateHz, unsigned periodMs, size_t size,
                               TNgError *error)
 {
-    if (periodMs == 0)
+    if (periodMs == 0) {
         return NgFail(error, "%s acquisition code period must be positive", signal);
-    if (!NgSearchFftSupportsSize(size))
+    }
+    if (!NgSearchFftSupportsSize(size)) {
         return NgFail(error, "%s acquisition FFT size %zu is unsupported by the search FFT", signal,
                       size);
+    }
     /* The compression boundaries are floor(k * Fs * periodMs / (1000 * N)).
      * If the step is below one, the first cell is empty even when a rounded-up
      * buffer can store N native pairs. A step >= 1 makes every cell nonempty. */
@@ -445,15 +475,18 @@ static int ValidateForConstellation(const TNgAcquisitionConfig *config,
         config->lastPrn < config->firstPrn || (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1) ||
-        config->fftMode < NG_SEARCH_FFT_FLOAT || config->fftMode > NG_SEARCH_FFT_INTEGER_SCALED)
+        config->fftMode < NG_SEARCH_FFT_FLOAT || config->fftMode > NG_SEARCH_FFT_INTEGER_SCALED) {
         return NgFail(error, "Invalid acquisition PRN range or mode");
+    }
     if (config->fftSize != 0 && config->fftSize != 4096 && config->fftSize != 8192 &&
-        config->fftSize != 16384)
+        config->fftSize != 16384) {
         return NgFail(error,
                       "Galileo acquisition FFT size must be 0 (automatic), 4096, 8192 or 16384");
+    }
     if (!isfinite(config->cpuBudget) || config->cpuBudget < 0 ||
-        config->cpuBudget > NG_ACQUISITION_MAX_PARALLEL)
+        config->cpuBudget > NG_ACQUISITION_MAX_PARALLEL) {
         return NgFail(error, "Acquisition CPU budget must be 0..32 cores (0 disables it)");
+    }
     return NG_OK;
 }
 
@@ -467,7 +500,7 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
                    const TNgIqView *window, TNgChannelState *next, TNgError *error)
 {
     TNgAcquisition *acquisition = context;
-    size_t k;
+    size_t sampleIndex;
     size_t take;
     (void)id;
     (void)error;
@@ -475,8 +508,9 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
     if (!acquisition->haveEpoch || window->meta.epoch != acquisition->epoch ||
         window->meta.firstSample != acquisition->expectedSample ||
         (window->meta.flags & NG_BLOCK_GAP) != 0) {
-        if (acquisition->haveEpoch)
+        if (acquisition->haveEpoch) {
             acquisition->gaps++;
+        }
         int generation = NgAtomicGet(&acquisition->generation);
         NgAtomicSet(&acquisition->generation, generation == INT_MAX ? 0 : generation + 1);
         acquisition->filled = 0;
@@ -492,14 +526,18 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
     } else if (NgAtomicGet(&acquisition->slot) != 0) {
         acquisition->skipped += window->meta.count;
     } else {
-        if (acquisition->filled == 0)
+        if (acquisition->filled == 0) {
             acquisition->capture.origin = window->meta;
+        }
         take = acquisition->capacity - acquisition->filled;
-        if (take > window->meta.count)
+        if (take > window->meta.count) {
             take = window->meta.count;
-        for (k = 0; k < take; ++k) {
-            acquisition->storage[acquisition->filled + k].i = (float)NgIqComponent(window, k, 0);
-            acquisition->storage[acquisition->filled + k].q = (float)NgIqComponent(window, k, 1);
+        }
+        for (sampleIndex = 0; sampleIndex < take; ++sampleIndex) {
+            acquisition->storage[acquisition->filled + sampleIndex].i =
+                (float)NgIqComponent(window, sampleIndex, 0);
+            acquisition->storage[acquisition->filled + sampleIndex].q =
+                (float)NgIqComponent(window, sampleIndex, 1);
         }
         acquisition->filled += take;
         if (acquisition->filled == acquisition->capacity) {
@@ -511,8 +549,9 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
             acquisition->nextPrn = acquisition->nextCapturePrn;
             acquisition->captureLastPrn = acquisition->config.lastPrn;
             if (acquisition->strategy == &ngBeidouAcquisitionStrategy &&
-                acquisition->captureLastPrn - acquisition->nextPrn >= 4)
+                acquisition->captureLastPrn - acquisition->nextPrn >= 4) {
                 acquisition->captureLastPrn = acquisition->nextPrn + 3;
+            }
             acquisition->nextCapturePrn = acquisition->captureLastPrn == acquisition->config.lastPrn
                                               ? acquisition->config.firstPrn
                                               : acquisition->captureLastPrn + 1;
@@ -536,15 +575,16 @@ static const TNgChannelOps acquisitionOps = {
     Process, (1u << NG_FORMAT_CI8) | (1u << NG_FORMAT_CI16) | (1u << NG_FORMAT_SC16_Q11), NULL, 0};
 
 /** Release private workspaces; caller decides whether the supplied first context is owned. */
-static void FreeContexts(TNgAcquisition *a, unsigned first)
+static void FreeContexts(TNgAcquisition *acquisition, unsigned first)
 {
-    unsigned k;
-    for (k = first; k < a->contextCount; ++k) {
-        if (a->strategy == &ngGalileoAcquisitionStrategy ||
-            a->strategy == &ngBeidouAcquisitionStrategy)
-            NgAcquisitionGalileoFree(a->contexts[k]);
-        else if (a->strategy == &ngGpsAcquisitionStrategy)
-            NgAcquisitionGpsFree(a->contexts[k]);
+    unsigned contextIndex;
+    for (contextIndex = first; contextIndex < acquisition->contextCount; ++contextIndex) {
+        if (acquisition->strategy == &ngGalileoAcquisitionStrategy ||
+            acquisition->strategy == &ngBeidouAcquisitionStrategy) {
+            NgAcquisitionGalileoFree(acquisition->contexts[contextIndex]);
+        } else if (acquisition->strategy == &ngGpsAcquisitionStrategy) {
+            NgAcquisitionGpsFree(acquisition->contexts[contextIndex]);
+        }
     }
 }
 
@@ -554,84 +594,98 @@ static int CreateWithDuration(const TNgAcquisitionConfig *config, const TNgStrea
                               TNgAcquisition **out, TNgChannel *channel, TNgError *error,
                               TNgConstellation constellation, unsigned durationMs)
 {
-    TNgAcquisition *a;
-    unsigned k, wanted;
+    TNgAcquisition *acquisition;
+    unsigned contextIndex;
+    unsigned wanted;
     int native = strategy == &ngGpsAcquisitionStrategy || strategy == &ngGalileoAcquisitionStrategy;
     *out = NULL;
     memset(channel, 0, sizeof(*channel));
-    if (ValidateForConstellation(config, constellation, error) != NG_OK)
+    if (ValidateForConstellation(config, constellation, error) != NG_OK) {
         return NG_ERROR;
-    if (!config->enabled)
+    }
+    if (!config->enabled) {
         return NG_OK;
+    }
     if (!stream || stream->sampleRateHz < 2048000 || stream->sampleRateHz > 20000000 || !strategy ||
-        !strategy->search)
+        !strategy->search) {
         return NgFail(error, "Acquisition supports native rates 2.048..20 Msps");
+    }
     uint64_t pairs = ((uint64_t)stream->sampleRateHz * durationMs + 999u) / 1000u;
-    if (!pairs || pairs > SIZE_MAX / sizeof(TNgComplex))
+    if (!pairs || pairs > SIZE_MAX / sizeof(TNgComplex)) {
         return NgFail(error, "Invalid acquisition capture duration");
-    a = calloc(1, sizeof(*a));
-    if (!a)
+    }
+    acquisition = calloc(1, sizeof(*acquisition));
+    if (!acquisition) {
         return NgFail(error, "Acquisition allocation failed");
-    a->capacity = (size_t)pairs;
-    a->storage = calloc(a->capacity, sizeof(*a->storage));
-    if (native)
-        a->spaces = calloc(config->lastPrn - config->firstPrn + 1, sizeof(*a->spaces));
-    if (!a->storage || (native && !a->spaces) || NgMutexInit(&a->mutex)) {
-        free(a->spaces);
-        free(a->storage);
-        free(a);
+    }
+    acquisition->capacity = (size_t)pairs;
+    acquisition->storage = calloc(acquisition->capacity, sizeof(*acquisition->storage));
+    if (native) {
+        acquisition->spaces =
+            calloc(config->lastPrn - config->firstPrn + 1, sizeof(*acquisition->spaces));
+    }
+    if (!acquisition->storage || (native && !acquisition->spaces) ||
+        NgMutexInit(&acquisition->mutex)) {
+        free(acquisition->spaces);
+        free(acquisition->storage);
+        free(acquisition);
         return NgFail(error, "Acquisition capture/mutex allocation failed");
     }
-    a->config = *config;
-    a->constellation = constellation;
-    a->strategy = strategy;
-    a->capture.samples = a->storage;
-    a->capture.stream = *stream;
-    a->contexts[0] = context;
-    a->contextCount = 1;
+    acquisition->config = *config;
+    acquisition->constellation = constellation;
+    acquisition->strategy = strategy;
+    acquisition->capture.samples = acquisition->storage;
+    acquisition->capture.stream = *stream;
+    acquisition->contexts[0] = context;
+    acquisition->contextCount = 1;
     wanted = native || strategy == &ngBeidouAcquisitionStrategy ? Capacity() : 1;
-    if (strategy == &ngBeidouAcquisitionStrategy && wanted > 4)
+    if (strategy == &ngBeidouAcquisitionStrategy && wanted > 4) {
         wanted = 4;
-    if (wanted > config->lastPrn - config->firstPrn + 1)
+    }
+    if (wanted > config->lastPrn - config->firstPrn + 1) {
         wanted = config->lastPrn - config->firstPrn + 1;
-    for (k = 1; k < wanted; ++k) {
+    }
+    for (contextIndex = 1; contextIndex < wanted; ++contextIndex) {
         int result;
-        if (strategy == &ngGpsAcquisitionStrategy)
-            result = NgAcquisitionGpsWorkspace(stream, config->fftMode, &a->contexts[k], error);
-        else if (strategy == &ngGalileoAcquisitionStrategy)
+        if (strategy == &ngGpsAcquisitionStrategy) {
+            result = NgAcquisitionGpsWorkspace(stream, config->fftMode,
+                                               &acquisition->contexts[contextIndex], error);
+        } else if (strategy == &ngGalileoAcquisitionStrategy) {
             result = NgAcquisitionGalileoWorkspace(stream, config->fftSize, config->fftMode,
-                                                   &a->contexts[k], error);
-        else
-            result = NgAcquisitionBeidouWorkspace(stream, &a->contexts[k], error);
+                                                   &acquisition->contexts[contextIndex], error);
+        } else {
+            result =
+                NgAcquisitionBeidouWorkspace(stream, &acquisition->contexts[contextIndex], error);
+        }
         if (result != NG_OK) {
-            FreeContexts(a, 1);
-            NgMutexDestroy(&a->mutex);
-            free(a->spaces);
-            free(a->storage);
-            free(a);
+            FreeContexts(acquisition, 1);
+            NgMutexDestroy(&acquisition->mutex);
+            free(acquisition->spaces);
+            free(acquisition->storage);
+            free(acquisition);
             return NG_ERROR;
         }
-        a->contextCount++;
+        acquisition->contextCount++;
     }
-    a->quota = wanted;
-    a->nextPrn = a->nextCapturePrn = config->firstPrn;
-    a->captureLastPrn = config->lastPrn;
-    a->snapshot.enabled = 1;
-    a->pool = CreatePool(&a, 1, error);
-    if (!a->pool) {
-        FreeContexts(a, 1);
-        NgMutexDestroy(&a->mutex);
-        free(a->spaces);
-        free(a->storage);
-        free(a);
+    acquisition->quota = wanted;
+    acquisition->nextPrn = acquisition->nextCapturePrn = config->firstPrn;
+    acquisition->captureLastPrn = config->lastPrn;
+    acquisition->snapshot.enabled = 1;
+    acquisition->pool = CreatePool(&acquisition, 1, error);
+    if (!acquisition->pool) {
+        FreeContexts(acquisition, 1);
+        NgMutexDestroy(&acquisition->mutex);
+        free(acquisition->spaces);
+        free(acquisition->storage);
+        free(acquisition);
         return NG_ERROR;
     }
     channel->ops = &acquisitionOps;
-    channel->context = a;
+    channel->context = acquisition;
     channel->state = NG_CHANNEL_ACQUISITION;
     channel->id.constellation = (uint32_t)constellation;
     channel->id.signal = NG_PRIMARY_SIGNAL;
-    *out = a;
+    *out = acquisition;
     return NG_OK;
 }
 
@@ -661,17 +715,20 @@ int NgAcquisitionCreate(const TNgAcquisitionConfig *config, const TNgStreamInfo 
     void *workspace = NULL;
     int status;
     *out = NULL;
-    if (NgAcquisitionValidate(config, error) != NG_OK)
+    if (NgAcquisitionValidate(config, error) != NG_OK) {
         return NG_ERROR;
+    }
     if (config->enabled &&
-        NgAcquisitionGpsWorkspace(stream, config->fftMode, &workspace, error) != NG_OK)
+        NgAcquisitionGpsWorkspace(stream, config->fftMode, &workspace, error) != NG_OK) {
         return NG_ERROR;
+    }
     status = CreateWithDuration(config, stream, &ngGpsAcquisitionStrategy, workspace, out, channel,
                                 error, NG_CONSTELLATION_GPS, 56);
-    if (status != NG_OK || !*out)
+    if (status != NG_OK || !*out) {
         NgAcquisitionGpsFree(workspace);
-    else
+    } else {
         (*out)->ownsContext = 1;
+    }
     return status;
 }
 
@@ -682,16 +739,18 @@ int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStre
     void *workspace = NULL;
     int status;
     *out = NULL;
-    if (NgAcquisitionValidate(config, error) != NG_OK)
+    if (NgAcquisitionValidate(config, error) != NG_OK) {
         return NG_ERROR;
+    }
     if (config->enabled && NgAcquisitionGalileoWorkspace(stream, config->fftSize, config->fftMode,
-                                                         &workspace, error) != NG_OK)
+                                                         &workspace, error) != NG_OK) {
         return NG_ERROR;
+    }
     status = CreateWithDuration(config, stream, &ngGalileoAcquisitionStrategy, workspace, out,
                                 channel, error, NG_CONSTELLATION_GALILEO, 224);
-    if (status != NG_OK || !*out)
+    if (status != NG_OK || !*out) {
         NgAcquisitionGalileoFree(workspace);
-    else {
+    } else {
         (*out)->ownsContext = 1;
         channel->id.instanceId = 1;
     }
@@ -708,10 +767,12 @@ int NgAcquisitionCreateBeidou(const TNgAcquisitionConfig *config, const TNgStrea
 {
     void *workspace = NULL;
     *out = NULL;
-    if (ValidateForConstellation(config, NG_CONSTELLATION_BEIDOU, error) != NG_OK)
+    if (ValidateForConstellation(config, NG_CONSTELLATION_BEIDOU, error) != NG_OK) {
         return NG_ERROR;
-    if (config->enabled && NgAcquisitionBeidouWorkspace(stream, &workspace, error) != NG_OK)
+    }
+    if (config->enabled && NgAcquisitionBeidouWorkspace(stream, &workspace, error) != NG_OK) {
         return NG_ERROR;
+    }
     int status = CreateWithDuration(config, stream, &ngBeidouAcquisitionStrategy, workspace, out,
                                     channel, error, NG_CONSTELLATION_BEIDOU, 570);
     if (*out) {
@@ -724,131 +785,157 @@ int NgAcquisitionCreateBeidou(const TNgAcquisitionConfig *config, const TNgStrea
 }
 
 /** Merge idle subscriptions before their first common window. */
-int NgAcquisitionLink(TNgAcquisition *a, TNgAcquisition *b, TNgError *error)
+int NgAcquisitionLink(TNgAcquisition *firstRunner, TNgAcquisition *secondRunner, TNgError *error)
 {
-    if (!a || !b || a->pool == b->pool)
+    if (!firstRunner || !secondRunner || firstRunner->pool == secondRunner->pool) {
         return NG_OK;
-    TNgAcquisitionPool *previous[] = {a->pool, b->pool};
+    }
+    TNgAcquisitionPool *previous[] = {firstRunner->pool, secondRunner->pool};
     TNgAcquisition *members[NG_CONSTELLATION_COUNT];
     unsigned count = 0;
-    for (unsigned k = 0; k < 2; ++k) {
-        for (unsigned j = 0; j < previous[k]->subscriptionCount; ++j) {
-            TNgAcquisition *member = previous[k]->subscriptions[j];
-            if (!member)
+    for (unsigned poolIndex = 0; poolIndex < 2; ++poolIndex) {
+        for (unsigned subscriptionIndex = 0;
+             subscriptionIndex < previous[poolIndex]->subscriptionCount; ++subscriptionIndex) {
+            TNgAcquisition *member = previous[poolIndex]->subscriptions[subscriptionIndex];
+            if (!member) {
                 continue;
-            if (member->haveEpoch || NgAtomicGet(&member->slot))
+            }
+            if (member->haveEpoch || NgAtomicGet(&member->slot)) {
                 return NgFail(error, "Acquisition pools must link before RX");
-            if (count == NG_CONSTELLATION_COUNT)
+            }
+            if (count == NG_CONSTELLATION_COUNT) {
                 return NgFail(error, "Acquisition pool supports at most three subscriptions");
+            }
             members[count++] = member;
         }
     }
     TNgAcquisitionPool *pool = CreatePool(members, count, error);
-    if (!pool)
+    if (!pool) {
         return NG_ERROR;
-    for (unsigned k = 0; k < 2; ++k)
-        DestroyPool(previous[k]);
-    for (unsigned k = 0; k < count; ++k)
-        members[k]->pool = pool;
+    }
+    for (unsigned poolIndex = 0; poolIndex < 2; ++poolIndex) {
+        DestroyPool(previous[poolIndex]);
+    }
+    for (unsigned memberIndex = 0; memberIndex < count; ++memberIndex) {
+        members[memberIndex]->pool = pool;
+    }
     return NG_OK;
 }
 
 /** Detach after RX; no workspace is freed until all outstanding borrowers return. */
-void NgAcquisitionDestroy(TNgAcquisition *a)
+void NgAcquisitionDestroy(TNgAcquisition *acquisition)
 {
     TNgAcquisitionPool *pool;
-    unsigned k;
+    unsigned subscriptionIndex;
     int remaining = 0;
-    if (!a)
+    if (!acquisition) {
         return;
-    NgAtomicSet(&a->stop, 1);
-    pool = a->pool;
+    }
+    NgAtomicSet(&acquisition->stop, 1);
+    pool = acquisition->pool;
     if (pool) {
         NgMutexLock(&pool->mutex);
         NgConditionSignal(&pool->work);
-        while (a->activeJobs)
+        while (acquisition->activeJobs) {
             NgConditionWait(&pool->idle, &pool->mutex, UINT_MAX);
-        for (k = 0; k < pool->subscriptionCount; ++k) {
-            if (pool->subscriptions[k] == a)
-                pool->subscriptions[k] = NULL;
-            if (pool->subscriptions[k])
+        }
+        for (subscriptionIndex = 0; subscriptionIndex < pool->subscriptionCount;
+             ++subscriptionIndex) {
+            if (pool->subscriptions[subscriptionIndex] == acquisition) {
+                pool->subscriptions[subscriptionIndex] = NULL;
+            }
+            if (pool->subscriptions[subscriptionIndex]) {
                 remaining = 1;
+            }
         }
         NgMutexUnlock(&pool->mutex);
-        if (!remaining)
+        if (!remaining) {
             DestroyPool(pool);
+        }
     }
-    if (a->ownsContext)
-        FreeContexts(a, 0);
-    else
-        FreeContexts(a, 1);
-    NgMutexDestroy(&a->mutex);
-    free(a->spaces);
-    free(a->storage);
-    free(a);
+    if (acquisition->ownsContext) {
+        FreeContexts(acquisition, 0);
+    } else {
+        FreeContexts(acquisition, 1);
+    }
+    NgMutexDestroy(&acquisition->mutex);
+    free(acquisition->spaces);
+    free(acquisition->storage);
+    free(acquisition);
 }
 
 /** Publish slot masks and wake only when eligibility changes. */
-void NgAcquisitionSetAdmission(TNgAcquisition *a, uint32_t mask, int paused)
+void NgAcquisitionSetAdmission(TNgAcquisition *acquisition, uint32_t mask, int paused)
 {
-    NgAcquisitionSetAdmissionMask(a, mask, paused);
+    NgAcquisitionSetAdmissionMask(acquisition, mask, paused);
 }
 
-void NgAcquisitionSetAdmissionMask(TNgAcquisition *a, uint64_t mask, int paused)
+void NgAcquisitionSetAdmissionMask(TNgAcquisition *acquisition, uint64_t mask, int paused)
 {
     int changed;
-    if (!a)
+    if (!acquisition) {
         return;
-    NgMutexLock(&a->mutex);
-    changed = a->excludedMask != mask || a->paused != (paused != 0);
-    a->excludedMask = mask;
-    a->paused = paused != 0;
-    NgMutexUnlock(&a->mutex);
-    if (changed)
-        Wake(a->pool);
+    }
+    NgMutexLock(&acquisition->mutex);
+    changed = acquisition->excludedMask != mask || acquisition->paused != (paused != 0);
+    acquisition->excludedMask = mask;
+    acquisition->paused = paused != 0;
+    NgMutexUnlock(&acquisition->mutex);
+    if (changed) {
+        Wake(acquisition->pool);
+    }
 }
 
 /** Publish adaptive total concurrency and this subscription's free-slot quota. */
-void NgAcquisitionSetParallelism(TNgAcquisition *a, unsigned totalLimit, unsigned quota,
+void NgAcquisitionSetParallelism(TNgAcquisition *acquisition, unsigned totalLimit, unsigned quota,
                                  unsigned executionLimit)
 {
     TNgAcquisitionPool *pool;
-    if (!a || !a->pool)
+    if (!acquisition || !acquisition->pool) {
         return;
-    pool = a->pool;
-    if (totalLimit > pool->capacity)
+    }
+    pool = acquisition->pool;
+    if (totalLimit > pool->capacity) {
         totalLimit = pool->capacity;
-    if (executionLimit > pool->capacity)
+    }
+    if (executionLimit > pool->capacity) {
         executionLimit = pool->capacity;
-    if ((unsigned)NgAtomicGet(&pool->limit) == totalLimit && a->quota == quota &&
-        (unsigned)NgAtomicGet(&pool->executionLimit) == executionLimit)
+    }
+    if ((unsigned)NgAtomicGet(&pool->limit) == totalLimit && acquisition->quota == quota &&
+        (unsigned)NgAtomicGet(&pool->executionLimit) == executionLimit) {
         return;
+    }
     NgMutexLock(&pool->mutex);
-    int changed = (unsigned)NgAtomicGet(&pool->limit) != totalLimit || a->quota != quota ||
+    int changed = (unsigned)NgAtomicGet(&pool->limit) != totalLimit ||
+                  acquisition->quota != quota ||
                   (unsigned)NgAtomicGet(&pool->executionLimit) != executionLimit;
     NgAtomicSet(&pool->limit, (int)totalLimit);
     NgAtomicSet(&pool->executionLimit, (int)executionLimit);
-    a->quota = quota;
-    if (changed)
+    acquisition->quota = quota;
+    if (changed) {
         NgConditionSignal(&pool->work);
+    }
     NgMutexUnlock(&pool->mutex);
 }
 
 /** Credit the shared pool with CPU time for newly processed signal. Linked subscriptions
  * share one pool and one signal clock, so calling this for both is harmless. */
-unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *a, uint64_t epoch, uint64_t endSample,
+unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *acquisition, uint64_t epoch, uint64_t endSample,
                                     double sampleRate)
 {
     TNgAcquisitionPool *pool;
     unsigned execution;
-    if (!a || !a->pool || !(sampleRate > 0))
+    if (!acquisition || !acquisition->pool || !(sampleRate > 0)) {
         return 0;
-    pool = a->pool;
-    if (!(pool->cpuBudget > 0))
+    }
+    pool = acquisition->pool;
+    if (!(pool->cpuBudget > 0)) {
         return 0;
+    }
     execution = (unsigned)ceil(pool->cpuBudget);
-    if (execution > pool->capacity)
+    if (execution > pool->capacity) {
         execution = pool->capacity;
+    }
     NgMutexLock(&pool->mutex);
     double cap = NG_ACQUISITION_CREDIT_SECONDS * pool->cpuBudget;
     if (!pool->budgetActive) {
@@ -858,10 +945,12 @@ unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *a, uint64_t epoch, uint64_t 
     if (pool->haveSignal && pool->signalEpoch == epoch && endSample > pool->signalSample) {
         int starved = pool->cpuCredit <= 0;
         pool->cpuCredit += (double)(endSample - pool->signalSample) / sampleRate * pool->cpuBudget;
-        if (pool->cpuCredit > cap)
+        if (pool->cpuCredit > cap) {
             pool->cpuCredit = cap;
-        if (starved && pool->cpuCredit > 0)
+        }
+        if (starved && pool->cpuCredit > 0) {
             NgConditionSignal(&pool->work);
+        }
     }
     if (!pool->haveSignal || pool->signalEpoch != epoch || endSample > pool->signalSample) {
         pool->signalEpoch = epoch;
@@ -875,8 +964,9 @@ unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *a, uint64_t epoch, uint64_t 
 /** Publish display interest without touching search decisions or the owned capture. */
 void NgAcquisitionObserve(TNgAcquisition *acquisition, unsigned prn)
 {
-    if (!acquisition)
+    if (!acquisition) {
         return;
+    }
     NgMutexLock(&acquisition->mutex);
     acquisition->observedPrn = NgSatellitePrnValid(acquisition->constellation, prn) ? prn : 0;
     acquisition->observedUntil = NgMonotonicSeconds() + 2;
@@ -886,9 +976,10 @@ void NgAcquisitionObserve(TNgAcquisition *acquisition, unsigned prn)
 /** Scheduling budget affects only cooperative waiting, never acquisition arithmetic. */
 void NgAcquisitionSetBudget(TNgAcquisition *acquisition, unsigned yieldMilliseconds)
 {
-    if (acquisition)
+    if (acquisition) {
         NgAtomicSet(&acquisition->yieldMilliseconds,
                     (int)(yieldMilliseconds > 20 ? 20 : yieldMilliseconds));
+    }
 }
 
 /** Snapshot memory is copied under its own short lock. */
@@ -932,8 +1023,9 @@ void NgAcquisitionReadSearchSpace(TNgAcquisition *acquisition, unsigned prn,
 {
     memset(space, 0, sizeof(*space));
     if (!acquisition || !acquisition->spaces || prn < acquisition->config.firstPrn ||
-        prn > acquisition->config.lastPrn)
+        prn > acquisition->config.lastPrn) {
         return;
+    }
     NgMutexLock(&acquisition->mutex);
     *space = acquisition->spaces[prn - acquisition->config.firstPrn];
     NgMutexUnlock(&acquisition->mutex);

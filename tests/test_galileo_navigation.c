@@ -15,8 +15,9 @@
 static void Field(unsigned char *data, unsigned offset, unsigned count, unsigned value)
 {
     unsigned k;
-    for (k = 0; k < count; k++)
+    for (k = 0; k < count; k++) {
         data[offset + k] = (unsigned char)((value >> (count - k - 1)) & 1u);
+    }
 }
 
 /** Independent parity by population count. */
@@ -40,8 +41,9 @@ static void Half(TNgNavigation *n, const unsigned char bits[120], unsigned inver
         coded[2 * k] = (unsigned char)Parity(state & 0x4fu);
         coded[2 * k + 1] = (unsigned char)(Parity(state & 0x6du) ^ 1u);
     }
-    for (k = 0; k < 240; k++)
+    for (k = 0; k < 240; k++) {
         interleaved[(k & 7u) * 30 + k / 8] = coded[k];
+    }
     for (k = 0; k < 10; k++) {
         unsigned symbol = ((0x160u >> (9 - k)) & 1u) ^ inverted;
         NgNavigationGalileoPrompt(n, symbol ? -20 : 20, 1, n->snapshot.symbols * 9600 + 9600);
@@ -64,18 +66,22 @@ static void Page(TNgNavigation *n, unsigned inverted, int corrupt, const unsigne
     memcpy(even + 2, data, 112);
     odd[0] = 1;
     memcpy(odd + 2, data + 112, 16);
-    if (osnma)
-        for (k = 0; k < 40; ++k)
+    if (osnma) {
+        for (k = 0; k < 40; ++k) {
             odd[18 + k] = (unsigned char)((osnma[k / 8] >> (7 - k % 8)) & 1u);
+        }
+    }
     for (k = 0; k < 220; k++) {
         unsigned bit = k < 114 ? even[k] : k < 196 ? odd[k - 114] : 0;
         crc = (crc << 1) | bit;
-        if (crc & 0x1000000u)
+        if (crc & 0x1000000u) {
             crc ^= 0x1864cfbu;
+        }
     }
     Field(odd, 82, 24, crc);
-    if (corrupt)
+    if (corrupt) {
         odd[90] ^= 1;
+    }
     Half(n, even, inverted);
     Half(n, odd, inverted);
 }

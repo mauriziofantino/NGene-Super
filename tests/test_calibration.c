@@ -50,34 +50,38 @@ static int Acquire(void *ctx, TNgIqView *view, unsigned timeout, TNgError *error
     (void)error;
     CHECK(active);
     memcpy(fixtureSamples, noiseSamples, sizeof(fixtureSamples));
-    if (fixturePolicy == NG_GAIN_POLICY_RTL_E4000)
+    if (fixturePolicy == NG_GAIN_POLICY_RTL_E4000) {
         for (k = 0; k < 32768; k++) {
             fixtureSamples[k].i = (int8_t)round(noiseSamples[k].i * e4000Scale);
             fixtureSamples[k].q = (int8_t)round(noiseSamples[k].q * e4000Scale);
         }
+    }
     if (selectionSignal) {
         int preferred = fixtureLna == 32 && fixtureVga == 8;
-        if (fixtureAmp || (!preferred && !(fixtureLna == 8 && fixtureVga == 32)))
+        if (fixtureAmp || (!preferred && !(fixtureLna == 8 && fixtureVga == 32))) {
             memset(fixtureSamples, 0, sizeof(fixtureSamples));
-        else if (preferred)
+        } else if (preferred) {
             for (k = 0; k < 32768; k++) {
                 fixtureSamples[k].i = (int8_t)(fixtureSamples[k].i + 3);
                 fixtureSamples[k].q = (int8_t)(fixtureSamples[k].q + 3);
             }
+        }
     }
-    if (!uniformSignal && fixtureVga && reads >= 4)
+    if (!uniformSignal && fixtureVga && reads >= 4) {
         for (k = 0; k < 32768; k++) {
             fixtureSamples[k].i = (int8_t)(k % 2 ? 127 : -128);
             fixtureSamples[k].q = (int8_t)(k % 2 ? -128 : 127);
         }
+    }
     memset(view, 0, sizeof(*view));
     view->samples = fixtureSamples;
     view->format = NG_FORMAT_CI8;
     view->meta.count = 32768;
     ++reads;
     NgAtomicSet(&captureReady, reads);
-    if (slowCapture)
+    if (slowCapture) {
         NgSleepMs(5);
+    }
     return NG_OK;
 }
 
@@ -135,8 +139,9 @@ static void SetFixtureGains(const TNgConfig *config)
     fixtureLna = config->lnaGainDb;
     fixtureAmp = config->rfAmp;
     CHECK(strcmp(config->serial, "fixture-device") == 0);
-    if (config->frontend == NG_FRONTEND_RTLSDR)
+    if (config->frontend == NG_FRONTEND_RTLSDR) {
         CHECK(!config->rtlAutoGain);
+    }
     if (fixturePolicy == NG_GAIN_POLICY_RTL_E4000) {
         CHECK(config->rtlIfGainDb >= 3 && config->rtlIfGainDb <= 56);
         /* At maximum RF and the driver-default 24 dB IF, only ~0.4% ADC RMS.
@@ -144,9 +149,10 @@ static void SetFixtureGains(const TNgConfig *config)
         e4000Scale =
             0.032 * pow(10.0, (config->rtlGainTenthsDb / 10.0 + config->rtlIfGainDb - 66.0) / 20.0);
     }
-    if (config->frontend == NG_FRONTEND_BLADERF)
+    if (config->frontend == NG_FRONTEND_BLADERF) {
         CHECK(config->bladeGainDb >= -12 && config->bladeGainDb <= -8 &&
               config->bladeGainDb % 2 == 0);
+    }
 }
 
 int NgFrontendOpenNative(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
@@ -327,11 +333,12 @@ int main(void)
     for (k = 0; k < 32768; k++) {
         int sum[2] = {0};
         unsigned j, c;
-        for (j = 0; j < 12; j++)
+        for (j = 0; j < 12; j++) {
             for (c = 0; c < 2; c++) {
                 state = state * 1664525u + 1013904223u;
                 sum[c] += (int)(state >> 28);
             }
+        }
         noiseSamples[k].i = (int8_t)(sum[0] - 90);
         noiseSamples[k].q = (int8_t)(sum[1] - 90);
     }
@@ -393,8 +400,9 @@ int main(void)
         NgAtomicSet(&captureReady, 0);
         NgAtomicSet(&cancelRequested, 0);
         CHECK(NgThreadStart(&worker, CancelWorker, &fixture) == 0);
-        for (waited = 0; waited < 2000 && !NgAtomicGet(&captureReady); ++waited)
+        for (waited = 0; waited < 2000 && !NgAtomicGet(&captureReady); ++waited) {
             NgSleepMs(1);
+        }
         CHECK(NgAtomicGet(&captureReady));
         requested = NgMonotonicSeconds();
         NgAtomicSet(&cancelRequested, 1);

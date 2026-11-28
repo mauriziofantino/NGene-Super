@@ -135,7 +135,7 @@ static void FixedDcHistograms(void)
     unsigned char retained[sizeof(raw)];
     TNgSampleFormat format;
     int pre;
-    for (format = NG_FORMAT_CI8; format <= NG_FORMAT_CI16; format = (TNgSampleFormat)(format + 1))
+    for (format = NG_FORMAT_CI8; format <= NG_FORMAT_CI16; format = (TNgSampleFormat)(format + 1)) {
         for (pre = 0; pre <= 1; ++pre) {
             TNgAnalysisConfig config;
             TNgAnalysis *analysis;
@@ -217,6 +217,7 @@ static void FixedDcHistograms(void)
             CHECK(fabs(snapshot.peakDbfs - 10 * log10(2 * pow(0.5 - 0.25 / limit, 2))) < 0.03);
             NgAnalysisDestroy(analysis);
         }
+    }
 }
 
 /**
@@ -421,8 +422,9 @@ int main(void)
         Submit(a, &v, 0);
         for (i = 0; i < 1000; i++) {
             NgAnalysisRead(a, &snapshot);
-            if (snapshot.sequence > previous)
+            if (snapshot.sequence > previous) {
                 break;
+            }
             NgSleepMs(1);
         }
         CHECK(snapshot.sequence > previous);

@@ -394,8 +394,9 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
     native.meta.count = b->count;
     if (!a->dcKnown[source] || a->dcFormat[source] != b->format) {
         if (NgIqCenterBlock(&native, a->centered, removedDc, &error) != NG_OK ||
-            BurstCurrent(a, b) == 0)
+            BurstCurrent(a, b) == 0) {
             return 0;
+        }
         a->dcOffset[source][0] = removedDc[0];
         a->dcOffset[source][1] = removedDc[1];
         a->dcFormat[source] = b->format;
@@ -405,8 +406,9 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         removedDc[0] = a->dcOffset[source][0];
         removedDc[1] = a->dcOffset[source][1];
         if (NgIqSubtractDc(&native, a->centered, removedDc, &error) != NG_OK ||
-            BurstCurrent(a, b) == 0)
+            BurstCurrent(a, b) == 0) {
             return 0;
+        }
     }
     memset(s, 0, sizeof(*s));
     s->histogramMin = -adcLimit;
@@ -449,8 +451,9 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                 }
                 stats[j]->zeros += v == 0;
                 rawClipping[j] += (unsigned)(raw == -adcLimit || raw == adcLimit - 1);
-                if (v < -adcLimit || v >= adcLimit)
+                if (v < -adcLimit || v >= adcLimit) {
                     histogramLimit = 2 * adcLimit;
+                }
             }
         }
         /* Widen the displayed axis only when subtracting the mean exceeds the
@@ -458,8 +461,9 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         s->histogramMin = -histogramLimit;
         s->histogramMax = histogramLimit - 1;
         for (k = 0; k < c->histogramPairs; ++k) {
-            if (k % 1024 == 0 && BurstCurrent(a, b) == 0)
+            if (k % 1024 == 0 && BurstCurrent(a, b) == 0) {
                 return 0;
+            }
             ++s->histogramI[(unsigned)(a->centered[2 * k] + histogramLimit) * c->histogramBins /
                             (unsigned)(2 * histogramLimit)];
             ++s->histogramQ[(unsigned)(a->centered[2 * k + 1] + histogramLimit) * c->histogramBins /
@@ -485,15 +489,17 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             NgSearchFftDestroy(a->searchPlan);
             a->searchPlan = NULL;
             a->searchPlanSize = 0;
-            if (NgSearchFftCreate(n, &a->searchPlan, &error) != NG_OK)
+            if (NgSearchFftCreate(n, &a->searchPlan, &error) != NG_OK) {
                 return 0;
+            }
             a->searchPlanSize = n;
         }
         /* Offset subtraction can extend beyond the ADC range. Keep every FFT
          * component inside its Q14 contract, then restore power normalization. */
         for (k = 0; k < 2 * b->count; ++k) {
-            if (k % 2048 == 0 && BurstCurrent(a, b) == 0)
+            if (k % 2048 == 0 && BurstCurrent(a, b) == 0) {
                 return 0;
+            }
             if (a->centered[k] < -adcLimit || a->centered[k] > adcLimit) {
                 fftAttenuated = 1;
                 break;
@@ -537,34 +543,40 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             if (BurstCurrent(a, b) == 0) {
                 return 0;
             }
-            if (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED)
+            if (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED) {
                 for (k = 0; k < n; ++k) {
                     int iValue, qValue;
                     iValue = a->centered[2 * (offset + k)];
                     qValue = a->centered[2 * (offset + k) + 1];
                     {
                         int32_t product = (int32_t)iValue * fftScale * a->window[k];
-                        if (b->format == NG_FORMAT_CI16)
+                        if (b->format == NG_FORMAT_CI16) {
                             product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
-                        if (fftAttenuated)
+                        }
+                        if (fftAttenuated) {
                             product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                        }
                         a->input[2 * k] = (int16_t)Shift15(product);
                     }
                     {
                         int32_t product = (int32_t)qValue * fftScale * a->window[k];
-                        if (b->format == NG_FORMAT_CI16)
+                        if (b->format == NG_FORMAT_CI16) {
                             product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
-                        if (fftAttenuated)
+                        }
+                        if (fftAttenuated) {
                             product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                        }
                         a->input[2 * k + 1] = (int16_t)Shift15(product);
                     }
                 }
+            }
             if (BurstCurrent(a, b) == 0) {
                 return 0;
             }
             if (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED) {
-                if (NgFftExecute(a->plan, n, a->input, a->output, &error) != NG_OK)
+                if (NgFftExecute(a->plan, n, a->input, a->output, &error) != NG_OK) {
                     return 0;
+                }
                 NgPowerAccumulate(a->output, a->power, n);
             } else {
                 /* Preserve the centered/windowed input before int16 narrowing. */
@@ -932,10 +944,12 @@ void NgAnalysisInterest(TNgAnalysis *analysis, unsigned mask, double expiresSeco
  */
 void NgAnalysisPause(TNgAnalysis *analysis, int paused)
 {
-    if (!analysis || NgAtomicGet(&analysis->paused) == (paused != 0))
+    if (!analysis || NgAtomicGet(&analysis->paused) == (paused != 0)) {
         return;
-    if (paused)
+    }
+    if (paused) {
         NgAtomicSet(&analysis->paused, 1);
+    }
     if (NgMutexTryLock(&analysis->mutex)) {
         CancelLane(analysis, 0);
         CancelLane(analysis, 1);
@@ -952,8 +966,9 @@ int NgAnalysisSubmitAt(TNgAnalysis *analysis, const TNgIqView *view, int preCond
     if (analysis == NULL || view == NULL || view->meta.count == 0) {
         return NG_OK;
     }
-    if (NgAtomicGet(&analysis->paused))
+    if (NgAtomicGet(&analysis->paused)) {
         return NG_OK;
+    }
     if (view->samples == NULL || NgSampleBytes(view->format) == 0) {
         return NG_ERROR;
     }

@@ -68,8 +68,9 @@ int NgFrontendOpenNative(const TNgConfig *config, TNgFrontend *frontend, TNgErro
 int NgFrontendCalibrationNext(const TNgConfig *config, TNgFrontend *frontend, TNgError *error)
 {
 #ifdef NGENE_HAVE_RTLSDR
-    if (config->frontend == NG_FRONTEND_RTLSDR)
+    if (config->frontend == NG_FRONTEND_RTLSDR) {
         return NgRtlsdrCalibrationNext(config, frontend, error);
+    }
 #else
     (void)config;
     (void)frontend;
@@ -189,8 +190,9 @@ int NgFrontendList(TNgFrontendKind kind, FILE *output, TNgError *error)
         return NgFail(error, "Missing enumeration output");
     }
 #ifdef NGENE_HAVE_SIGE
-    if (kind == NG_FRONTEND_SIGE)
+    if (kind == NG_FRONTEND_SIGE) {
         return NgSigeList(output, error);
+    }
 #endif
 #ifdef NGENE_HAVE_HACKRF
     if (kind == NG_FRONTEND_HACKRF) {

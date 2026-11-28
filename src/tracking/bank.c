@@ -83,8 +83,9 @@ static void Refresh(TNgChannelPool *pool)
         if (NgSatellitePrnValid((TNgConstellation)pool->slots[k].constellation,
                                 pool->slots[k].prn)) {
             const TNgBroadcast *b = &pool->slots[k].navigation.broadcast;
-            if (b->subframe1Received || b->subframe2Received || b->subframe3Received)
+            if (b->subframe1Received || b->subframe2Received || b->subframe3Received) {
                 pool->broadcast[pool->slots[k].constellation - 1][pool->slots[k].prn - 1] = *b;
+            }
         }
         if (!pool->slots[k].active) {
             memset(&pool->slots[k], 0, sizeof(pool->slots[k]));
@@ -103,11 +104,14 @@ static void Refresh(TNgChannelPool *pool)
 static unsigned FreeSlot(const TNgChannelPool *pool, unsigned system, int forDisplay)
 {
     unsigned pass, k;
-    for (pass = 0; pass < 2; ++pass)
-        for (k = 0; k < pool->config.channelCount; ++k)
+    for (pass = 0; pass < 2; ++pass) {
+        for (k = 0; k < pool->config.channelCount; ++k) {
             if (!pool->slots[k].active && (!forDisplay || pool->slots[k].state == 0) &&
-                pool->reservation[k] == (pass == 0 ? system : 0u))
+                pool->reservation[k] == (pass == 0 ? system : 0u)) {
                 return k;
+            }
+        }
+    }
     return pool->config.channelCount;
 }
 
@@ -119,8 +123,9 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
     uint64_t mask[NG_CONSTELLATION_COUNT] = {0};
     unsigned k, system, active = 0;
     if (pool->haveWindow && pool->epoch == window->meta.epoch &&
-        pool->firstSample == window->meta.firstSample && pool->count == window->meta.count)
+        pool->firstSample == window->meta.firstSample && pool->count == window->meta.count) {
         return NG_OK;
+    }
     if (pool->haveWindow &&
         (pool->epoch != window->meta.epoch || pool->expected != window->meta.firstSample ||
          (window->meta.flags & NG_BLOCK_GAP))) {
@@ -129,23 +134,28 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         memset(&pool->pvt, 0, sizeof(pool->pvt));
         pool->lastPvtSample = 0;
     }
-    for (k = 0; k < pool->config.channelCount; ++k)
-        if (pool->slots[k].active)
+    for (k = 0; k < pool->config.channelCount; ++k) {
+        if (pool->slots[k].active) {
             ++active;
-    for (k = 0; k < pool->config.channelCount; ++k)
+        }
+    }
+    for (k = 0; k < pool->config.channelCount; ++k) {
         NgTrackingObserve(pool->tracking[k], pool->observedChannel == k + 1);
+    }
     {
         /* Galileo integrations cost more per sample: start them first so that the barrier
          * does not wait for a long job claimed last. */
         unsigned n = 0, pass;
-        for (pass = 0; pass < 3; ++pass)
+        for (pass = 0; pass < 3; ++pass) {
             for (k = 0; k < pool->config.channelCount; ++k) {
                 unsigned rank = !pool->slots[k].active              ? 2u
                                 : pool->slots[k].constellation == 2 ? 0u
                                                                     : 1u;
-                if (rank == pass)
+                if (rank == pass) {
                     pool->order[n++] = k;
+                }
             }
+        }
     }
     {
         int measure;
@@ -153,20 +163,24 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         double duration = (double)window->meta.count / pool->sampleRate;
         pool->budgetSamples += window->meta.count;
         measure = (double)pool->budgetSamples >= pool->sampleRate * 0.01;
-        if (measure)
+        if (measure) {
             started = NgMonotonicSeconds();
-        if (active && NgChannelDispatchProcess(pool->dispatch, window, error) != NG_OK)
+        }
+        if (active && NgChannelDispatchProcess(pool->dispatch, window, error) != NG_OK) {
             return NG_ERROR;
+        }
         if (measure && duration > 0) {
             double finished = NgMonotonicSeconds();
             double weight = (double)pool->budgetSamples / pool->sampleRate / 0.1;
-            if (weight > 1)
+            if (weight > 1) {
                 weight = 1;
-            if (active)
+            }
+            if (active) {
                 pool->trackingLoad +=
                     weight * ((finished - started) / duration - pool->trackingLoad);
-            else
+            } else {
                 pool->trackingLoad = 0;
+            }
             pool->budgetSamples = 0;
         }
     }
@@ -180,19 +194,23 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
     }
     pool->haveWindow = 1;
     Refresh(pool);
-    for (system = 0; system < NG_CONSTELLATION_COUNT; ++system)
+    for (system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
         NgAcquisitionRead(pool->acquisition[system], &searches[system]);
+    }
     NgAcquisitionReadResults(pool->acquisition[NG_CONSTELLATION_BEIDOU - 1], beidouResults);
-    for (k = 0; k < pool->config.channelCount; ++k)
-        if (pool->slots[k].active)
+    for (k = 0; k < pool->config.channelCount; ++k) {
+        if (pool->slots[k].active) {
             mask[pool->slots[k].constellation - 1] |= UINT64_C(1) << (pool->slots[k].prn - 1);
+        }
+    }
     for (;;) {
         const TNgAcquisitionResult *best = NULL;
         unsigned bestSystem = 0, bestSlot = 0, prn;
         for (system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
             unsigned slot = FreeSlot(pool, system + 1, 0);
-            if (slot == pool->config.channelCount)
+            if (slot == pool->config.channelCount) {
                 continue;
+            }
             const int beidou = system + 1 == NG_CONSTELLATION_BEIDOU;
             const unsigned lastPrn = beidou ? NG_SATELLITE_MAX_PRN : NG_LEGACY_MAX_PRN;
             const TNgAcquisitionResult *results = beidou ? beidouResults : searches[system].results;
@@ -203,8 +221,9 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
                     seed->firstSample > window->meta.firstSample ||
                     (mask[system] & (UINT64_C(1) << (prn - 1))) ||
                     (used->confirmed && used->epoch == seed->epoch &&
-                     used->firstSample >= seed->firstSample))
+                     used->firstSample >= seed->firstSample)) {
                     continue;
+                }
                 int preferred =
                     pool->reservation[slot] == 0 && pool->config.autoPriority == system + 1;
                 int previousPreferred = best && pool->reservation[bestSlot] == 0 &&
@@ -218,11 +237,13 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
                 }
             }
         }
-        if (!best)
+        if (!best) {
             break;
+        }
         if (NgTrackingSetSignal(pool->tracking[bestSlot], bestSystem + 1, error) != NG_OK ||
-            NgTrackingSeed(pool->tracking[bestSlot], best, error) != NG_OK)
+            NgTrackingSeed(pool->tracking[bestSlot], best, error) != NG_OK) {
             return NG_ERROR;
+        }
         pool->jobs[bestSlot].state = NG_CHANNEL_TRACKING;
         NgTrackingRestoreBroadcast(pool->tracking[bestSlot],
                                    &pool->broadcast[bestSystem][best->prn - 1]);
@@ -231,9 +252,11 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         Refresh(pool);
     }
     active = 0;
-    for (k = 0; k < pool->config.channelCount; ++k)
-        if (pool->slots[k].active)
+    for (k = 0; k < pool->config.channelCount; ++k) {
+        if (pool->slots[k].active) {
             ++active;
+        }
+    }
     for (system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
         unsigned slot = FreeSlot(pool, system + 1, 1);
         unsigned quota = 0, totalLimit = pool->config.channelCount - active;
@@ -243,22 +266,27 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
          * signal, independent of the number of cores and tracking workers. */
         unsigned budgeted = NgAcquisitionAdvanceSignal(pool->acquisition[system], pool->epoch,
                                                        pool->expected, pool->sampleRate);
-        for (k = 0; k < pool->config.channelCount; ++k)
+        for (k = 0; k < pool->config.channelCount; ++k) {
             if (!pool->slots[k].active &&
-                (pool->reservation[k] == 0 || pool->reservation[k] == system + 1))
+                (pool->reservation[k] == 0 || pool->reservation[k] == system + 1)) {
                 ++quota;
-        if (budgeted)
+            }
+        }
+        if (budgeted) {
             budget = budgeted;
-        else if (active && capacity) {
+        } else if (active && capacity) {
             double headroom = 1.0 - pool->trackingLoad / 0.85;
             budget = headroom > 0 ? (unsigned)((double)capacity * headroom) : 0;
-            if (headroom > 0 && !budget)
+            if (headroom > 0 && !budget) {
                 budget = 1;
-            if (totalLimit > budget)
+            }
+            if (totalLimit > budget) {
                 totalLimit = budget;
+            }
         }
-        if (pool->catchingUp)
+        if (pool->catchingUp) {
             budget = totalLimit = 0;
+        }
         NgAcquisitionSetParallelism(pool->acquisition[system], totalLimit, quota, budget);
         unsigned delay = !active || budgeted         ? 0u
                          : pool->trackingLoad > 0.95 ? 20u
@@ -272,8 +300,9 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
             unsigned prn = searches[system].currentPrns[lane];
             slot = FreeSlot(pool, system + 1, 1);
             if (!prn || slot == pool->config.channelCount ||
-                (mask[system] & (UINT64_C(1) << (prn - 1))))
+                (mask[system] & (UINT64_C(1) << (prn - 1)))) {
                 continue;
+            }
             pool->slots[slot].state = 1;
             pool->slots[slot].constellation = system + 1;
             pool->slots[slot].prn = prn;
@@ -289,16 +318,18 @@ static int Accumulate(TNgChannelPool *pool, const TNgIqView *window, TNgError *e
     size_t offset = 0, stride = NgSampleBytes(window->format);
     if (pool->haveInput && pool->lastInput.epoch == window->meta.epoch &&
         pool->lastInput.firstSample == window->meta.firstSample &&
-        pool->lastInput.count == window->meta.count)
+        pool->lastInput.count == window->meta.count) {
         return NG_OK;
+    }
     int discontinuity = (window->meta.flags & NG_BLOCK_GAP) ||
                         (pool->haveInput && (pool->lastInput.epoch != window->meta.epoch ||
                                              pool->lastInput.firstSample + pool->lastInput.count !=
                                                  window->meta.firstSample));
     if (discontinuity && pool->pending.meta.count) {
         /* The batch before a discontinuity is contiguous signal: process it, then restart. */
-        if (Frame(pool, &pool->pending, error) != NG_OK)
+        if (Frame(pool, &pool->pending, error) != NG_OK) {
             return NG_ERROR;
+        }
         pool->pending.meta.count = 0;
     }
     pool->lastInput = window->meta;
@@ -311,10 +342,12 @@ static int Accumulate(TNgChannelPool *pool, const TNgIqView *window, TNgError *e
                                                             offset * stride);
             direct.meta.firstSample += offset;
             direct.meta.count -= offset;
-            if (offset)
+            if (offset) {
                 direct.meta.flags &= ~(unsigned)NG_BLOCK_GAP;
-            if (direct.meta.flags & NG_BLOCK_HARDWARE_TIME)
+            }
+            if (direct.meta.flags & NG_BLOCK_HARDWARE_TIME) {
                 direct.meta.hardwareTimestamp += offset;
+            }
             return Frame(pool, &direct, error);
         }
         if (!pool->pending.meta.count) {
@@ -322,14 +355,17 @@ static int Accumulate(TNgChannelPool *pool, const TNgIqView *window, TNgError *e
             pool->pending.samples = (const TNgIq8 *)(const void *)pool->batch;
             pool->pending.meta.firstSample += offset;
             pool->pending.meta.count = 0;
-            if (offset)
+            if (offset) {
                 pool->pending.meta.flags &= ~(unsigned)NG_BLOCK_GAP;
-            if (pool->pending.meta.flags & NG_BLOCK_HARDWARE_TIME)
+            }
+            if (pool->pending.meta.flags & NG_BLOCK_HARDWARE_TIME) {
                 pool->pending.meta.hardwareTimestamp += offset;
+            }
         }
         size_t take = pool->batchLimit - pool->pending.meta.count;
-        if (take > window->meta.count - offset)
+        if (take > window->meta.count - offset) {
             take = window->meta.count - offset;
+        }
         memcpy(pool->batch + pool->pending.meta.count * stride,
                (const unsigned char *)(const void *)window->samples + offset * stride,
                take * stride);
@@ -338,8 +374,9 @@ static int Accumulate(TNgChannelPool *pool, const TNgIqView *window, TNgError *e
         /* A discontinuity is handled at once, so slots stop on the first gap window. */
         if (pool->pending.meta.count == pool->batchLimit ||
             (window->meta.flags & NG_BLOCK_PARTIAL) || discontinuity) {
-            if (Frame(pool, &pool->pending, error) != NG_OK)
+            if (Frame(pool, &pool->pending, error) != NG_OK) {
                 return NG_ERROR;
+            }
             pool->pending.meta.count = 0;
         }
     }
@@ -352,8 +389,9 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
 {
     TNgTrackingBank *bank = context;
     TNgChannel *capture = &bank->pool->captures[bank->system];
-    if (Accumulate(bank->pool, window, error) != NG_OK)
+    if (Accumulate(bank->pool, window, error) != NG_OK) {
         return NG_ERROR;
+    }
     if (bank->pool->haveWindow &&
         (bank->pool->pvt.epoch != bank->pool->epoch || !bank->pool->lastPvtSample ||
          bank->pool->expected < bank->pool->lastPvtSample ||
@@ -377,12 +415,14 @@ static const TNgChannelOps bankOps = {
 static void DestroyPool(TNgChannelPool *pool)
 {
     unsigned k;
-    if (!pool)
+    if (!pool) {
         return;
+    }
     NgEgnosDestroy(pool->egnos);
     NgChannelDispatchDestroy(pool->dispatch);
-    for (k = 0; k < pool->config.channelCount; ++k)
+    for (k = 0; k < pool->config.channelCount; ++k) {
         NgTrackingDestroy(pool->tracking[k]);
+    }
     free(pool);
 }
 
@@ -395,10 +435,12 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
     TNgChannelPool *pool;
     unsigned k;
     *out = NULL;
-    if (!acquisition)
+    if (!acquisition) {
         return NG_OK;
-    if (NgTrackingValidate(config, error) != NG_OK)
+    }
+    if (NgTrackingValidate(config, error) != NG_OK) {
         return NG_ERROR;
+    }
     bank = calloc(1, sizeof(*bank));
     pool = calloc(1, sizeof(*pool));
     if (!bank || !pool) {
@@ -439,8 +481,9 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
         NgTrackingBankDestroy(bank);
         return NG_ERROR;
     }
-    for (k = 0; k < config->channelCount; ++k)
+    for (k = 0; k < config->channelCount; ++k) {
         pool->order[k] = k;
+    }
     NgChannelDispatchSetOrder(pool->dispatch, pool->order);
     Refresh(pool);
     channel->ops = &bankOps;
@@ -453,16 +496,18 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
 void NgTrackingBankRead(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[32])
 {
     memset(snapshots, 0, sizeof(*snapshots) * 32);
-    if (bank)
+    if (bank) {
         memcpy(snapshots, bank->pool->slots, sizeof(*snapshots) * 32);
+    }
 }
 
 /** Publish one unified array, independent of signal subscriber order. */
 void NgTrackingBankReadAll(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[64])
 {
     memset(snapshots, 0, sizeof(*snapshots) * 64);
-    if (bank)
+    if (bank) {
         memcpy(snapshots, bank->pool->slots, sizeof(*snapshots) * 64);
+    }
 }
 
 void NgTrackingBankReadEgnos(TNgTrackingBank *bank, TNgTrackingSnapshot *snapshot)
@@ -485,51 +530,60 @@ int NgTrackingBankBackgroundAllowed(TNgTrackingBank *bank)
 
 void NgTrackingBankBackpressure(TNgTrackingBank *bank, int available, double occupancyPercent)
 {
-    if (!bank)
+    if (!bank) {
         return;
-    if (!available)
+    }
+    if (!available) {
         bank->pool->catchingUp = 0;
-    else if (occupancyPercent >= 75)
+    } else if (occupancyPercent >= 75) {
         bank->pool->catchingUp = 1;
-    else if (occupancyPercent <= 50)
+    } else if (occupancyPercent <= 50) {
         bank->pool->catchingUp = 0;
+    }
 }
 
 /** PVT snapshots contain values only and share the receiver-thread publication barrier. */
 void NgTrackingBankReadPvt(TNgTrackingBank *bank, TNgPvtSnapshot *snapshot)
 {
     memset(snapshot, 0, sizeof(*snapshot));
-    if (bank)
+    if (bank) {
         *snapshot = bank->pool->pvt;
+    }
 }
 
 /** Only the owner frees shared slots; non-owner subscribers retain no resources. */
 void NgTrackingBankDestroy(TNgTrackingBank *bank)
 {
-    if (!bank)
+    if (!bank) {
         return;
-    if (bank->ownsPool)
+    }
+    if (bank->ownsPool) {
         DestroyPool(bank->pool);
+    }
     free(bank);
 }
 
 /** Merge both strategies into the same total slot capacity and fixed worker budget. */
 int NgTrackingBankLink(TNgTrackingBank *gps, TNgTrackingBank *galileo, TNgError *error)
 {
-    if (!gps || !galileo || gps->pool == galileo->pool)
+    if (!gps || !galileo || gps->pool == galileo->pool) {
         return NG_OK;
+    }
     if (gps->pool->config.channelCount != galileo->pool->config.channelCount ||
         gps->pool->config.gpsChannels != galileo->pool->config.gpsChannels ||
         gps->pool->config.galileoChannels != galileo->pool->config.galileoChannels ||
         gps->pool->config.beidouChannels != galileo->pool->config.beidouChannels ||
-        gps->pool->config.autoPriority != galileo->pool->config.autoPriority)
+        gps->pool->config.autoPriority != galileo->pool->config.autoPriority) {
         return NgFail(error, "Both signal subscribers must share the receiver channel allocation");
+    }
     const unsigned target = galileo->system;
-    if (gps->pool->acquisition[target])
+    if (gps->pool->acquisition[target]) {
         return NgFail(error, "Duplicate signal subscriber");
+    }
     if (NgAcquisitionLink(gps->pool->acquisition[gps->system], galileo->pool->acquisition[target],
-                          error) != NG_OK)
+                          error) != NG_OK) {
         return NG_ERROR;
+    }
     gps->pool->captures[target] = galileo->pool->captures[target];
     gps->pool->acquisition[target] = galileo->pool->acquisition[target];
     DestroyPool(galileo->pool);

@@ -48,8 +48,9 @@ static const uint32_t boundaries[2][4][2] = {{{053773116u, 042711657u},
 static uint32_t Pack24(const int8_t *chips)
 {
     uint32_t bits = 0;
-    for (unsigned i = 0; i < 24; ++i)
+    for (unsigned i = 0; i < 24; ++i) {
         bits = (bits << 1) | (uint32_t)(chips[i] < 0);
+    }
     return bits;
 }
 
@@ -61,8 +62,9 @@ static void CheckCodes(void)
     CHECK(NgBeidouB1cGenerate(64, NG_BEIDOU_B1C_PILOT, chips, &error) == NG_ERROR);
     CHECK(NgBeidouB1cGenerate(1, (TNgBeidouB1cComponent)2, chips, &error) == NG_ERROR);
     CHECK(NgBeidouB1cGenerate(1, NG_BEIDOU_B1C_DATA, NULL, &error) == NG_ERROR);
-    for (unsigned i = 0; i < NG_BEIDOU_B1C_LENGTH; ++i)
+    for (unsigned i = 0; i < NG_BEIDOU_B1C_LENGTH; ++i) {
         CHECK(chips[i] == 0);
+    }
 
     for (unsigned c = 0; c < 2; ++c) {
         for (unsigned prn = 1; prn <= 63; ++prn) {
@@ -72,8 +74,9 @@ static void CheckCodes(void)
                 CHECK(chips[i] == 1 || chips[i] == -1);
                 hash = (hash ^ (uint32_t)(chips[i] < 0)) * UINT32_C(16777619);
             }
-            if (hash != expected[c][prn - 1])
+            if (hash != expected[c][prn - 1]) {
                 fprintf(stderr, "primary component %u PRN %u hash mismatch\n", c, prn);
+            }
             CHECK(hash == expected[c][prn - 1]);
         }
         for (unsigned i = 0; i < sizeof(boundaryPrns) / sizeof(*boundaryPrns); ++i) {

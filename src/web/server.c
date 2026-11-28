@@ -148,8 +148,9 @@ static void CalibrationWorker(void *context)
     server->calibrationResult = result;
     server->calibrationError = error;
     server->calibrationSeconds = NgMonotonicSeconds() - server->calibrationStarted;
-    if (rc == NG_OK && CalibrationCancelled(server))
+    if (rc == NG_OK && CalibrationCancelled(server)) {
         rc = NG_END;
+    }
     server->calibrationState = rc == NG_OK ? 2 : rc == NG_END ? 4 : 3;
     NgMutexUnlock(&server->commandMutex);
 }
@@ -159,11 +160,13 @@ static void CalibrationWorker(void *context)
 static int StartCalibration(TNgWebServer *server, const TNgConfig *config, uint64_t revision,
                             TNgError *error)
 {
-    if (server->calibrationState == 1)
+    if (server->calibrationState == 1) {
         return NgFail(error, "Gain calibration is already running");
+    }
     if (config->frontend == NG_FRONTEND_FILE || config->frontend == NG_FRONTEND_SIGE ||
-        !NgFrontendAvailable(config->frontend))
+        !NgFrontendAvailable(config->frontend)) {
         return NgFail(error, "Select an available SDR with adjustable gains");
+    }
     if (server->calibrationThreadStarted) {
         NgThreadJoin(server->calibrationThread);
         server->calibrationThreadStarted = 0;
@@ -246,8 +249,9 @@ static cJSON *CalibrationJson(TNgWebServer *server)
     Number(reply, "gain_min_db", result->capabilities.gainMinDb);
     Number(reply, "gain_max_db", result->capabilities.gainMaxDb);
     Number(reply, "gain_step_db", result->capabilities.gainStepDb);
-    for (index = 0; index < result->capabilities.tunerGainCount; ++index)
+    for (index = 0; index < result->capabilities.tunerGainCount; ++index) {
         cJSON_AddItemToArray(gains, cJSON_CreateNumber(result->capabilities.tunerGains[index]));
+    }
     cJSON_AddItemToObject(reply, "tuner_gains_tenths_db", gains);
     return reply;
 }
@@ -582,14 +586,15 @@ static int ReadAnalysisConfig(cJSON *body, TNgAnalysisConfig *out, TNgError *err
             return NgFail(error, "Expected string: %s", key);
         }
         if (strcmp(key, "fft_mode") == 0) {
-            if (strcmp(v->valuestring, "float") == 0)
+            if (strcmp(v->valuestring, "float") == 0) {
                 out->fftMode = NG_SEARCH_FFT_FLOAT;
-            else if (strcmp(v->valuestring, "integer_precise") == 0)
+            } else if (strcmp(v->valuestring, "integer_precise") == 0) {
                 out->fftMode = NG_SEARCH_FFT_INTEGER_PRECISE;
-            else if (strcmp(v->valuestring, "integer_scaled") == 0)
+            } else if (strcmp(v->valuestring, "integer_scaled") == 0) {
                 out->fftMode = NG_SEARCH_FFT_INTEGER_SCALED;
-            else
+            } else {
                 return NgFail(error, "Invalid analysis FFT arithmetic");
+            }
             continue;
         }
         if (strcmp(key, "window") == 0) {
@@ -660,8 +665,9 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             unsigned tap;
             const TNgTrackingSnapshot *t = &status->tracking[channelIndex];
             cJSON *row, *taps;
-            if (!t->channelId)
+            if (!t->channelId) {
                 continue;
+            }
             row = cJSON_CreateObject();
             cJSON_AddItemToArray(channels, row);
             Number(row, "channel_id", t->channelId);
@@ -680,10 +686,11 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             Counter(row, "navigation_parity_errors", t->navigation.parityErrors);
             Counter(row, "navigation_boundary_sample", t->navigation.boundarySample);
             cJSON_AddBoolToObject(row, "cn0_valid", t->cn0Valid);
-            if (t->cn0Valid)
+            if (t->cn0Valid) {
                 Number(row, "cn0_db_hz", t->cn0DbHz);
-            else
+            } else {
                 cJSON_AddNullToObject(row, "cn0_db_hz");
+            }
             cJSON_AddBoolToObject(row, "main_peak_verified", t->mainPeakVerified);
             Number(row, "code_delay_chips", t->codeDelayChips);
             Number(row, "prn", t->prn);
@@ -746,8 +753,9 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             Number(p, "residual_rms_m", s->residualRms);
             Number(p, "clock_gps_m", s->clockGps);
             Number(p, "clock_galileo_m", s->clockGalileo);
-            if (s->beidou)
+            if (s->beidou) {
                 Number(p, "clock_beidou_m", s->clockBeidou);
+            }
             Number(p, "velocity_x_mps", s->velocity[0]);
             Number(p, "velocity_y_mps", s->velocity[1]);
             Number(p, "velocity_z_mps", s->velocity[2]);
@@ -780,10 +788,12 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         Number(acquisition, "execution_limit", status->acquisition.executionLimit);
         {
             cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
-            for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
-                if (status->acquisition.currentPrns[lane])
+            for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane) {
+                if (status->acquisition.currentPrns[lane]) {
                     cJSON_AddItemToArray(prns,
                                          cJSON_CreateNumber(status->acquisition.currentPrns[lane]));
+                }
+            }
         }
         Counter(acquisition, "searches", status->acquisition.searches);
         Counter(acquisition, "skipped_samples", status->acquisition.skippedSamples);
@@ -792,8 +802,9 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         for (prn = 0; prn < 32; ++prn) {
             const TNgAcquisitionResult *found = &status->acquisition.results[prn];
             cJSON *item;
-            if (found->prn == 0)
+            if (found->prn == 0) {
                 continue;
+            }
             item = cJSON_CreateObject();
             Number(item, "prn", found->prn);
             cJSON_AddBoolToObject(item, "confirmed", found->confirmed);
@@ -821,10 +832,12 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         Number(acquisition, "execution_limit", status->galileoAcquisition.executionLimit);
         {
             cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
-            for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
-                if (status->galileoAcquisition.currentPrns[lane])
+            for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane) {
+                if (status->galileoAcquisition.currentPrns[lane]) {
                     cJSON_AddItemToArray(
                         prns, cJSON_CreateNumber(status->galileoAcquisition.currentPrns[lane]));
+                }
+            }
         }
         Counter(acquisition, "searches", status->galileoAcquisition.searches);
         Counter(acquisition, "skipped_samples", status->galileoAcquisition.skippedSamples);
@@ -833,8 +846,9 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         for (prn = 0; prn < 32; ++prn) {
             const TNgAcquisitionResult *found = &status->galileoAcquisition.results[prn];
             cJSON *item;
-            if (found->prn == 0)
+            if (found->prn == 0) {
                 continue;
+            }
             item = cJSON_CreateObject();
             Number(item, "prn", found->prn);
             cJSON_AddBoolToObject(item, "confirmed", found->confirmed);
@@ -860,13 +874,16 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         Counter(acquisition, "skipped_samples", snapshot->skippedSamples);
         Counter(acquisition, "gaps", snapshot->gaps);
         String(acquisition, "message", snapshot->message);
-        for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
-            if (snapshot->currentPrns[lane])
+        for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane) {
+            if (snapshot->currentPrns[lane]) {
                 cJSON_AddItemToArray(prns, cJSON_CreateNumber(snapshot->currentPrns[lane]));
+            }
+        }
         for (unsigned prn = 0; prn < NG_SATELLITE_MAX_PRN; ++prn) {
             const TNgAcquisitionResult *found = &status->beidouResults[prn];
-            if (!found->prn)
+            if (!found->prn) {
                 continue;
+            }
             cJSON *item = cJSON_CreateObject();
             Number(item, "prn", found->prn);
             cJSON_AddBoolToObject(item, "confirmed", found->confirmed);
@@ -961,10 +978,11 @@ static cJSON *SearchSpaceJson(TNgControl *control, unsigned prn, int galileo)
         cJSON_AddBoolToObject(object, "valid", 0);
         return object;
     }
-    if (galileo)
+    if (galileo) {
         NgControlGalileoSearchSpace(control, prn, space);
-    else
+    } else {
         NgControlAcquisitionSearchSpace(control, prn, space);
+    }
     cJSON_AddBoolToObject(object, "valid", space->valid);
     if (!space->valid) {
         free(space);
@@ -992,8 +1010,9 @@ static cJSON *SearchSpaceJson(TNgControl *control, unsigned prn, int galileo)
         cJSON_AddItemToArray(frequencies, cJSON_CreateNumber(galileo     ? -5000 + row * 87.0
                                                              : row == 15 ? 5000
                                                                          : -5000 + row * 667.0));
-        for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column)
+        for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column) {
             cJSON_AddItemToArray(values, cJSON_CreateNumber(space->power[row][column]));
+        }
         cJSON_AddItemToArray(power, values);
     }
     free(space);
@@ -1546,8 +1565,9 @@ static int Handle(struct mg_connection *connection, void *context)
             mg_write(connection, ngFrequencyUnitsJs, ngFrequencyUnitsJsLength);
             return 200;
         }
-        if (strcmp(path, "/api/v1/module-schema") == 0)
+        if (strcmp(path, "/api/v1/module-schema") == 0) {
             return JsonReply(connection, 200, cJSON_Duplicate(server->moduleSchema, 1));
+        }
         if (strcmp(path, "/style.css") == 0) {
             Headers(connection, 200, "text/css; charset=utf-8", ngStyleCssLength);
             mg_write(connection, ngStyleCss, ngStyleCssLength);
@@ -1587,15 +1607,20 @@ static int Handle(struct mg_connection *connection, void *context)
             int galileo;
             char *end;
             unsigned long prn;
-            if (query == NULL || mg_get_var(query, strlen(query), "prn", value, sizeof(value)) <= 0)
+            if (query == NULL ||
+                mg_get_var(query, strlen(query), "prn", value, sizeof(value)) <= 0) {
                 return Failure(connection, 400, "Expected GPS PRN 1..32");
+            }
             prn = strtoul(value, &end, 10);
-            if (*end != 0 || prn < 1 || prn > 32)
+            if (*end != 0 || prn < 1 || prn > 32) {
                 return Failure(connection, 400, "Expected GPS PRN 1..32");
-            if (mg_get_var(query, strlen(query), "signal", signal, sizeof(signal)) < 0)
+            }
+            if (mg_get_var(query, strlen(query), "signal", signal, sizeof(signal)) < 0) {
                 snprintf(signal, sizeof(signal), "gps");
-            if (strcmp(signal, "gps") != 0 && strcmp(signal, "galileo") != 0)
+            }
+            if (strcmp(signal, "gps") != 0 && strcmp(signal, "galileo") != 0) {
                 return Failure(connection, 400, "Expected signal gps or galileo");
+            }
             galileo = strcmp(signal, "galileo") == 0;
             return JsonReply(connection, 200, SearchSpaceJson(control, (unsigned)prn, galileo));
         }
@@ -1725,8 +1750,9 @@ static int Handle(struct mg_connection *connection, void *context)
         if (!cJSON_IsString(job) || strcmp(job->valuestring, id) != 0) {
             code = Failure(connection, 409, "Calibration job changed; refresh its status");
         } else {
-            if (server->calibrationState == 1)
+            if (server->calibrationState == 1) {
                 NgAtomicSet(&server->calibrationCancel, 1);
+            }
             code = JsonReply(connection, 202, CalibrationJson(server));
         }
         NgMutexUnlock(&server->commandMutex);
@@ -1754,13 +1780,16 @@ static int Handle(struct mg_connection *connection, void *context)
             int result = NG_ERROR;
             if (fwrite(ini->valuestring, 1, strlen(ini->valuestring), input) ==
                     strlen(ini->valuestring) &&
-                fseek(input, 0, SEEK_SET) == 0)
+                fseek(input, 0, SEEK_SET) == 0) {
                 result = NgConfigRead(input, &config, &error);
+            }
             fclose(input);
-            if (result == NG_OK)
+            if (result == NG_OK) {
                 result = NgControlValidate(&config, &error);
-            if (result == NG_OK)
+            }
+            if (result == NG_OK) {
                 result = StartCalibration(server, &config, revision, &error);
+            }
             if (result != NG_OK) {
                 code = Failure(connection, 400,
                                error.message[0] ? error.message : "SDR calibration failed");
@@ -1914,13 +1943,14 @@ static int Handle(struct mg_connection *connection, void *context)
             } else {
                 NgMutexLock(&server->commandMutex);
                 if (server->calibrationState == 1 ||
-                    NgControlConfigure(control, &config, revision, &error) != NG_OK)
+                    NgControlConfigure(control, &config, revision, &error) != NG_OK) {
                     code = Failure(connection, 409,
                                    server->calibrationState == 1
                                        ? "Cancel gain calibration before applying a profile"
                                        : error.message);
-                else
+                } else {
                     code = ConfigReply(control, connection);
+                }
                 NgMutexUnlock(&server->commandMutex);
             }
         }
@@ -2200,9 +2230,10 @@ static cJSON *LoadModuleSchema(TNgError *error)
         text[count] = '\0';
         schema = cJSON_ParseWithOpts(text, NULL, 1);
         free(text);
-    } else
+    } else {
         schema = cJSON_ParseWithLength((const char *)ngModuleParametersJson,
                                        ngModuleParametersJsonLength);
+    }
     if (!schema || !cJSON_IsObject(schema) ||
         cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(schema, "version")) != 1 ||
         !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(schema, "modules")) ||
@@ -2296,8 +2327,9 @@ int NgWebRun(const TNgConfig *config, unsigned port, const char *outputDirectory
     NgAtomicSet(&server.quit, 1);
     NgAtomicSet(&server.calibrationCancel, 1);
     mg_stop(server.http);
-    if (server.calibrationThreadStarted)
+    if (server.calibrationThreadStarted) {
         NgThreadJoin(server.calibrationThread);
+    }
     cJSON_Delete(server.moduleSchema);
     NgControlDestroy(server.control);
     mg_exit_library();

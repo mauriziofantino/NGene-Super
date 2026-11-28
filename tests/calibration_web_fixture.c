@@ -25,11 +25,13 @@ int NgGainCalibrateControlled(const TNgConfig *config, TNgGainCalibration *resul
         result->selected.rtlGainTenthsDb = 420;
         result->selected.rtlIfGainDb = 50;
     }
-    if (mode == 4)
+    if (mode == 4) {
         return NgFail(error, "Simulated SDR transport failure");
+    }
     for (k = 0; k < count; ++k) {
-        if (callbacks->cancelled(callbacks->context))
+        if (callbacks->cancelled(callbacks->context)) {
             return NG_END;
+        }
         result->tested = 3 * k;
         callbacks->progress(callbacks->context, config, result);
         NgSleepMs(10);

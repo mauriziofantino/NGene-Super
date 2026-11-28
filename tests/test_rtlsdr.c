@@ -268,8 +268,9 @@ int main(void)
         int sum = 0;
         ifCalls = 0;
         CHECK(NgRtlsdrOpen(&config, &source, &error) == NG_OK && ifCalls == 6);
-        for (index = 0; index < 6; ++index)
+        for (index = 0; index < 6; ++index) {
             sum += ifGains[index];
+        }
         CHECK(sum == config.rtlIfGainDb);
         CHECK(ifGains[0] == (sum >= 12 ? 6 : -3));
         CHECK(ifGains[1] >= 0 && ifGains[1] <= 9 && ifGains[1] % 3 == 0);

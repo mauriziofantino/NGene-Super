@@ -55,8 +55,9 @@ static TNgTrackingSnapshot Run(int square, int xorMode, size_t split, int observ
     NgTrackingObserve(tracking, observed);
     for (n = 0; n < 20480;) {
         size_t count = 20480 - n;
-        if (count > split)
+        if (count > split) {
             count = split;
+        }
         window.samples = xorMode ? (const TNgIq8 *)(wideSamples + 4 * n) : samples + n;
         window.format = xorMode ? NG_FORMAT_CI16 : NG_FORMAT_CI8;
         window.meta.epoch = 7;
@@ -70,11 +71,12 @@ static TNgTrackingSnapshot Run(int square, int xorMode, size_t split, int observ
     CHECK(hypot(snapshot.i[snapshot.tapCount / 2], snapshot.q[snapshot.tapCount / 2]) > 40);
     CHECK(hypot(snapshot.i[snapshot.tapCount / 2], snapshot.q[snapshot.tapCount / 2]) >
           hypot(snapshot.i[snapshot.tapCount / 2 - 1], snapshot.q[snapshot.tapCount / 2 - 1]));
-    if (xorMode)
+    if (xorMode) {
         for (n = 0; n < snapshot.tapCount; n++) {
             snapshot.i[n] /= 256;
             snapshot.q[n] /= 256;
         }
+    }
     window.meta.firstSample++;
     CHECK(NgTrackingProcess(tracking, &window, &error) == NG_OK);
     {
@@ -107,9 +109,9 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     stream.sampleRateHz = 2048000;
     stream.digitalIfHz = -210000;
     stream.spectrumInverted = inverted;
-    if (system == 1)
+    if (system == 1) {
         CHECK(NgGpsCaGenerate(7, chips, &error) == NG_OK);
-    else {
+    } else {
         FILE *file = fopen(NGENE_TEST_SOURCE_DIR "/tests/data/galileo-e1b-prn7.bin", "rb");
         CHECK(file);
         CHECK(fread(chips, 1, 4092, file) == 4092);
@@ -127,11 +129,13 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
         for (n = 0; n < 4096; n++) {
             double phase = fmod(173.25 + (double)(first + n) * codeRate / 2048000, period);
             int sign = chips[(size_t)phase];
-            if (((first + n) / (system == 1 ? 40960u : 8192u)) % 2u)
+            if (((first + n) / (system == 1 ? 40960u : 8192u)) % 2u) {
                 sign = -sign;
+            }
             double angle = 6.2831853071795864769 * (double)(first + n) * (-209650.0) / 2048000;
-            if (system == 2 && phase - floor(phase) >= 0.5)
+            if (system == 2 && phase - floor(phase) >= 0.5) {
                 sign = -sign;
+            }
             samples[n].i = (int8_t)lround(50 * sign * cos(angle));
             samples[n].q = (int8_t)lround(50 * sign * sin(angle) * (inverted ? -1 : 1));
         }
@@ -145,8 +149,9 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     fprintf(stderr, "system %u inverted %d sign %d Doppler %.6f DLL %.6f PLL %d\n", system,
             inverted, offsetSign, snapshot.dopplerHz, snapshot.dllError, snapshot.pll);
     CHECK(snapshot.active && snapshot.pll);
-    if (system == NG_CONSTELLATION_GPS)
+    if (system == NG_CONSTELLATION_GPS) {
         CHECK(snapshot.loopCoherentMs == coherentMs);
+    }
     CHECK(fabs(snapshot.dopplerHz - 350) < 0.5);
     CHECK(fabs(snapshot.dllError) < 0.05);
     if (seconds > 1) {
@@ -155,9 +160,9 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     }
     if (system == 2) {
         unsigned middle = snapshot.tapCount / 2;
-        if (fabs(codeError) > 0.3)
+        if (fabs(codeError) > 0.3) {
             CHECK(!snapshot.mainPeakVerified);
-        else {
+        } else {
             CHECK(snapshot.mainPeakVerified);
             CHECK(hypot(snapshot.i[middle], snapshot.q[middle]) >
                   hypot(snapshot.i[middle - 1], snapshot.q[middle - 1]));
@@ -255,8 +260,9 @@ static void ReplicaParity(void)
         for (trial = 0; trial < 5; ++trial) {
             size_t count = counts[trial], n;
             NgTrackingCodePhases(phases, count, 0.123456, 1023000.0 + 0.123, 16000000.0);
-            for (n = 0; n < count; n++)
+            for (n = 0; n < count; n++) {
                 CHECK(phases[n] == 0.123456 + (double)n * (1023000.0 + 0.123) / 16000000.0);
+            }
             if (count >= 3) {
                 phases[count - 3] = nextafter((double)period, 0);
                 phases[count - 2] = (double)period;
@@ -269,8 +275,9 @@ static void ReplicaParity(void)
                 for (n = 0; n < count; ++n) {
                     double wrapped = fmod(fmod(phases[n] - offset, period) + period, period);
                     int sign = primary[(size_t)wrapped];
-                    if (system == 2 && wrapped - floor(wrapped) >= 0.5)
+                    if (system == 2 && wrapped - floor(wrapped) >= 0.5) {
                         sign = -sign;
+                    }
                     CHECK(replica[n] == (float)sign);
                 }
             }
@@ -299,7 +306,7 @@ static void MixPrefixParity(void)
         input[n].i = (int8_t)(Uniform(&state) * 255 - 127);
         input[n].q = (int8_t)(Uniform(&state) * 255 - 127);
     }
-    for (c = 0; c < sizeof(counts) / sizeof(counts[0]); ++c)
+    for (c = 0; c < sizeof(counts) / sizeof(counts[0]); ++c) {
         for (mode = 0; mode < 4; ++mode) {
             int square = mode & 1, inverted = (mode >> 1) & 1;
             size_t count = counts[c];
@@ -315,6 +322,7 @@ static void MixPrefixParity(void)
                                  inverted);
             CHECK(memcmp(expected, actual, sizeof(double) * 2 * (count + 1)) == 0);
         }
+    }
 }
 
 /** Byte SIMD products must agree with an independent widened scalar rotation. */
@@ -329,7 +337,7 @@ static void QuantizedMixContract(void)
         input[k].i = (int8_t)(k == 0 ? -128 : (int)(k * 71) % 256 - 128);
         input[k].q = (int8_t)(k == 1 ? -128 : (int)(k * 43) % 256 - 128);
     }
-    for (mode = 4; mode <= 16; mode *= 2)
+    for (mode = 4; mode <= 16; mode *= 2) {
         for (inverted = 0; inverted < 2; ++inverted) {
             NgSearchMixPrefixCi8Arithmetic(prefix, input, 65, 8183800, 38500, 0.37, inverted, mode);
             ci = cos(-6.28318530717958647692 * 0.37);
@@ -360,6 +368,7 @@ static void QuantizedMixContract(void)
                 ci = next;
             }
         }
+    }
 }
 
 /** Opt-in four-lane carrier: same mixed samples up to float rounding of a double carrier
@@ -376,7 +385,7 @@ static void LanesContract(void)
         input[n].i = (int8_t)(Uniform(&state) * 255 - 127);
         input[n].q = (int8_t)(Uniform(&state) * 255 - 127);
     }
-    for (c = 0; c < sizeof(counts) / sizeof(counts[0]); ++c)
+    for (c = 0; c < sizeof(counts) / sizeof(counts[0]); ++c) {
         for (mode = 0; mode < 4; ++mode) {
             int square = mode & 1, inverted = (mode >> 1) & 1;
             size_t count = counts[c], flips = 0;
@@ -387,11 +396,13 @@ static void LanesContract(void)
             for (n = 1; n <= count; ++n) {
                 double di = (one[2 * n] - one[2 * n - 2]) - (four[2 * n] - four[2 * n - 2]);
                 double dq = (one[2 * n + 1] - one[2 * n - 1]) - (four[2 * n + 1] - four[2 * n - 1]);
-                if (fabs(di) > 1e-4 || fabs(dq) > 1e-4)
+                if (fabs(di) > 1e-4 || fabs(dq) > 1e-4) {
                     ++flips;
+                }
             }
             CHECK(square ? flips <= 1 : flips == 0);
         }
+    }
 }
 
 /** Chip-run correlation against the per-sample replica oracle. Runs must follow the exact
@@ -430,8 +441,9 @@ static void RunCorrelationContract(void)
         double offset =
             exact ? ((double)(trial % 9) - 4.0) * 0.0625 : (Uniform(&state) - 0.5) * 4.0;
         double i, q, ri, rq, magnitudeI = 0, magnitudeQ = 0;
-        if (exact && span > period - base)
+        if (exact && span > period - base) {
             base = 0;
+        }
         NgTrackingCodePhases(phases, count, base, codeRate, rate);
         NgTrackingReplica(replica, phases, count, boc ? expanded : primary, period, offset, boc);
         NgSearchCorrelate(values, replica, count, 0, &ri, &rq);
@@ -456,14 +468,17 @@ int main(void)
     TNgTrackingSnapshot hidden = Run(0, 0, 20480, 0);
     CHECK(hidden.tapCount == 3 && hidden.dopplerHz == a.dopplerHz &&
           hidden.codeRateHz == a.codeRateHz);
-    for (k = 0; k < 3; ++k)
+    for (k = 0; k < 3; ++k) {
         CHECK(hidden.i[k] == a.i[k + 3] && hidden.q[k] == a.q[k + 3]);
+    }
     CHECK(c.endSample == d.endSample);
-    for (k = 0; k < c.tapCount; k++)
+    for (k = 0; k < c.tapCount; k++) {
         CHECK(fabs(c.i[k] - d.i[k]) < 0.002);
+    }
     CHECK(a.endSample == b.endSample);
-    for (k = 0; k < a.tapCount; k++)
+    for (k = 0; k < a.tapCount; k++) {
         CHECK(fabs(a.i[k] - b.i[k]) < 0.002);
+    }
     NgTrackingDefaults(&config);
     config.tapCount = 4;
     CHECK(NgTrackingValidate(&config, &error) == NG_ERROR);

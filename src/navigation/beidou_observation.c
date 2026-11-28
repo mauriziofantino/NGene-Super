@@ -11,8 +11,9 @@
 static uint64_t Read(const uint8_t *data, unsigned *bit, unsigned width)
 {
     uint64_t value = 0;
-    for (unsigned n = 0; n < width; ++n, ++*bit)
+    for (unsigned n = 0; n < width; ++n, ++*bit) {
         value = (value << 1) | (uint64_t)((data[*bit / 8] >> (7u - *bit % 8)) & 1);
+    }
     return value;
 }
 
@@ -40,8 +41,9 @@ static int DecodePair(const TNgBcnv1Frame *frame, double tow, TNgOrbit *orbit,
     orbit->toe = 300.0 * (double)Read(data, &bit, 11);
     const unsigned type = (unsigned)Read(data, &bit, 2);
     const double deltaA = Signed(data, &bit, 26, -9);
-    if (type != 2 && type != 3)
+    if (type != 2 && type != 3) {
         return 0;
+    }
     orbit->sqrtA = sqrt((type == 3 ? 27906100.0 : 42162200.0) + deltaA);
     orbit->axisRate = Signed(data, &bit, 25, -21);
     orbit->deltaN = NG_BDS_PI * Signed(data, &bit, 17, -44);
@@ -78,20 +80,25 @@ int NgBcnv1Accept(TNgBcnv1Cache *cache, const TNgBcnv1Frame *frame, uint64_t epo
 {
     if (!cache || !frame || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, frame->prn) ||
         frame->week >= NG_BDS_WN_MODULUS || frame->hour >= 168 || frame->soh >= 200 ||
-        frame->iodc >= 1024 || frame->iode >= 256 || (cache->prn && cache->prn != frame->prn))
+        frame->iodc >= 1024 || frame->iode >= 256 || (cache->prn && cache->prn != frame->prn)) {
         return NG_ERROR;
-    if (cache->prn && epoch < cache->epoch)
+    }
+    if (cache->prn && epoch < cache->epoch) {
         return NG_END;
+    }
     const unsigned tow = frame->hour * 3600u + frame->soh * 18u;
     TNgBcnv1Cache next = {0};
     if (cache->prn && epoch == cache->epoch) {
         const unsigned deltaWeek =
             (frame->week + NG_BDS_WN_MODULUS - cache->week) % NG_BDS_WN_MODULUS;
         const double elapsed = (double)deltaWeek * NG_BDT_WEEK_SECONDS + tow - cache->tow;
-        if (firstSample <= cache->firstSample || elapsed <= 0 || deltaWeek >= NG_BDS_WN_MODULUS / 2)
+        if (firstSample <= cache->firstSample || elapsed <= 0 ||
+            deltaWeek >= NG_BDS_WN_MODULUS / 2) {
             return NG_END;
-        if (elapsed <= NG_BCNV1_MAX_BROADCAST_AGE)
+        }
+        if (elapsed <= NG_BCNV1_MAX_BROADCAST_AGE) {
             next = *cache;
+        }
     }
     TNgOrbit orbit = {0};
     TNgBroadcastClock clock = {0};
@@ -101,8 +108,9 @@ int NgBcnv1Accept(TNgBcnv1Cache *cache, const TNgBcnv1Frame *frame, uint64_t epo
         next.broadcast.ephemeridesReceived = 1;
     }
     if (fabs(Age(tow, next.broadcast.eph.toe)) > NG_BCNV1_MAX_BROADCAST_AGE ||
-        fabs(Age(tow, next.broadcast.clk.toc)) > NG_BCNV1_MAX_BROADCAST_AGE)
+        fabs(Age(tow, next.broadcast.clk.toc)) > NG_BCNV1_MAX_BROADCAST_AGE) {
         next.broadcast.ephemeridesReceived = 0;
+    }
     next.broadcast.satelliteId = (int)frame->prn;
     next.broadcast.eph.health = frame->pageId < 1 || frame->pageId > 4 || frame->health ||
                                 frame->dif || frame->sif || frame->aif;
@@ -143,12 +151,14 @@ int NgBcnv1Navigation(const TNgBcnv1Cache *cache, uint64_t epoch, uint64_t sampl
                       TNgNavigationSnapshot *navigation)
 {
     if (!cache || !navigation ||
-        (component != NG_BEIDOU_B1C_DATA && component != NG_BEIDOU_B1C_PILOT))
+        (component != NG_BEIDOU_B1C_DATA && component != NG_BEIDOU_B1C_PILOT)) {
         return NG_ERROR;
+    }
     if (!cache->prn || !cache->broadcast.ephemeridesReceived || cache->broadcast.eph.health ||
         epoch != cache->epoch || sample < cache->firstSample || !isfinite(advanceChips) ||
-        advanceChips < 0 || advanceChips > NG_BCNV1_MAX_ANCHOR_AGE * NG_BEIDOU_B1C_RATE_HZ)
+        advanceChips < 0 || advanceChips > NG_BCNV1_MAX_ANCHOR_AGE * NG_BEIDOU_B1C_RATE_HZ) {
         return NG_END;
+    }
     double time = cache->tow + advanceChips / NG_BEIDOU_B1C_RATE_HZ;
     unsigned week = cache->week;
     if (time >= NG_BDT_WEEK_SECONDS) {
@@ -156,12 +166,14 @@ int NgBcnv1Navigation(const TNgBcnv1Cache *cache, uint64_t epoch, uint64_t sampl
         week = (week + 1) % NG_BDS_WN_MODULUS;
     }
     if (fabs(Age(time, cache->broadcast.eph.toe)) > NG_BCNV1_MAX_BROADCAST_AGE ||
-        fabs(Age(time, cache->broadcast.clk.toc)) > NG_BCNV1_MAX_BROADCAST_AGE)
+        fabs(Age(time, cache->broadcast.clk.toc)) > NG_BCNV1_MAX_BROADCAST_AGE) {
         return NG_END;
+    }
     TNgNavigationSnapshot next = {0};
     next.broadcast = cache->broadcast;
-    if (component == NG_BEIDOU_B1C_DATA)
+    if (component == NG_BEIDOU_B1C_DATA) {
         next.broadcast.clk.tGroupDelay += next.broadcast.clk.beidouDataIsc;
+    }
     next.broadcast.wn = (int)week;
     next.transmitTimeSeconds = time;
     next.towSeconds = (unsigned)time;
@@ -174,8 +186,9 @@ int NgBcnv1Navigation(const TNgBcnv1Cache *cache, uint64_t epoch, uint64_t sampl
 int NgBdtToGps(unsigned bdtWeek, double bdtTow, unsigned *gpsWeek, double *gpsTow)
 {
     if (!gpsWeek || !gpsTow || bdtWeek > UINT_MAX - NG_BDT_GPS_WEEK_ORIGIN - 1 ||
-        !isfinite(bdtTow) || bdtTow < 0 || bdtTow >= NG_BDT_WEEK_SECONDS)
+        !isfinite(bdtTow) || bdtTow < 0 || bdtTow >= NG_BDT_WEEK_SECONDS) {
         return NG_ERROR;
+    }
     double time = bdtTow + NG_BDT_TO_GPST_SECONDS;
     unsigned week = bdtWeek + NG_BDT_GPS_WEEK_ORIGIN;
     if (time >= NG_BDT_WEEK_SECONDS) {

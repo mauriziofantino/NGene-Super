@@ -7,18 +7,20 @@
 
 /** Receiver-thread GEO state and private search worker for one auxiliary channel. */
 struct TNgEgnos {
-    TNgAcquisition *search;
-    void *workspace;
-    TNgChannel capture;
-    TNgTracking *tracker;
-    TNgSbasStream decoder;
-    TNgSbasCorrections bank;
-    double blockUntil[2];
-    double rate;
-    uint64_t epoch, expected;
-    uint64_t used[2];
-    unsigned usedMask, active;
-    int haveInput;
+    TNgAcquisition *search;  /**< Private GEO search runner. */
+    void *workspace;         /**< Owned PCPS workspace for GEO replicas. */
+    TNgChannel capture;      /**< Borrowed registration from the search runner. */
+    TNgTracking *tracker;    /**< Owned C/A tracking instance. */
+    TNgSbasStream decoder;   /**< Frame and convolutional decoder state. */
+    TNgSbasCorrections bank; /**< Corrections from the current GEO assignment. */
+    double blockUntil[2];    /**< Per-GEO end of MT0 exclusion in signal seconds. */
+    double rate;             /**< Native common sample rate in hertz. */
+    uint64_t epoch;          /**< Current continuity generation. */
+    uint64_t expected;       /**< Exclusive end of the last processed window. */
+    uint64_t used[2];        /**< Last assigned capture origin per GEO. */
+    unsigned usedMask;       /**< Indicates which previous origins are meaningful. */
+    unsigned active;         /**< One-based search index of the assigned GEO, or zero. */
+    int haveInput;           /**< Set after the first observed window. */
 };
 
 /** Preserve the GPS PCPS stages with the private GEO replica workspace. */
@@ -116,13 +118,14 @@ int NgEgnosProcess(TNgEgnos *egnos, const TNgIqView *view, int searchAllowed, TN
         TNgAcquisitionResult results[NG_SATELLITE_MAX_PRN];
         NgAcquisitionReadResults(egnos->search, results);
         const TNgAcquisitionResult *chosen = NULL;
-        for (unsigned k = 0; k < 2; ++k) {
-            const TNgAcquisitionResult *candidate = &results[k];
+        for (unsigned geoIndex = 0; geoIndex < 2; ++geoIndex) {
+            const TNgAcquisitionResult *candidate = &results[geoIndex];
             if (!candidate->confirmed || candidate->epoch != egnos->epoch ||
                 candidate->firstSample > view->meta.firstSample ||
                 (double)(view->meta.firstSample - candidate->firstSample) > egnos->rate ||
-                ((egnos->usedMask & (1u << k)) && candidate->firstSample <= egnos->used[k]) ||
-                (double)view->meta.firstSample / egnos->rate < egnos->blockUntil[k]) {
+                ((egnos->usedMask & (1u << geoIndex)) &&
+                 candidate->firstSample <= egnos->used[geoIndex]) ||
+                (double)view->meta.firstSample / egnos->rate < egnos->blockUntil[geoIndex]) {
                 continue;
             }
             if (!chosen || candidate->completedSeconds < chosen->completedSeconds) {
@@ -171,16 +174,18 @@ unsigned NgEgnosPrn(const TNgEgnos *egnos)
 /** Forward diagnostic tap interest to the private tracker. */
 void NgEgnosObserve(TNgEgnos *egnos, int observed)
 {
-    if (egnos)
+    if (egnos) {
         NgTrackingObserve(egnos->tracker, observed);
+    }
 }
 
 /** Snapshot the auxiliary slot, including search state before a PRN is assigned. */
 void NgEgnosRead(const TNgEgnos *egnos, TNgTrackingSnapshot *snapshot)
 {
     memset(snapshot, 0, sizeof(*snapshot));
-    if (!egnos)
+    if (!egnos) {
         return;
+    }
     if (egnos->active) {
         NgTrackingRead(egnos->tracker, snapshot);
         snapshot->navigation.validSubframes = egnos->bank.frameCount;

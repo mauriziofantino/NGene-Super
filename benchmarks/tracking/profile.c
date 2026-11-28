@@ -29,8 +29,9 @@ int main(void)
     TNgSearchFft *fft = NULL;
     TNgError error = {{0}};
     if (!values || !carrier || !phases || !replica || NgGpsCaGenerate(7, chips, &error) != NG_OK ||
-        NgSearchFftCreate(4096, &fft, &error) != NG_OK)
+        NgSearchFftCreate(4096, &fft, &error) != NG_OK) {
         return 1;
+    }
     for (k = 0; k < count; ++k) {
         values[k].i = (float)(k % 127);
         values[k].q = (float)(k % 63);

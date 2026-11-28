@@ -183,8 +183,9 @@ static int Push(TNgRing *ring, const TNgIqView *input, int convert, unsigned tim
                 NgMutexUnlock(&ring->mutex);
                 return NG_ERROR;
             }
-        } else
+        } else {
             memcpy(destination, input->samples, input->meta.count * ring->stride);
+        }
         ring->metadata[ring->head] = input->meta;
         ring->head = (ring->head + 1) % ring->capacity;
         ++ring->used;

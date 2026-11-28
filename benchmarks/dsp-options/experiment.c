@@ -160,10 +160,12 @@ static void Prepare(Block *b, size_t n, double fs, double ifHz, double codeOffse
             b->mj[p] = b->j[p] < 0 ? 255 : 0;
             b->negativesR += (unsigned)(b->mr[p] != 0);
             b->negativesJ += (unsigned)(b->mj[p] != 0);
-            if (b->mr[p])
+            if (b->mr[p]) {
                 b->br[p / 32] |= UINT32_C(1) << (p % 32);
-            if (b->mj[p])
+            }
+            if (b->mj[p]) {
                 b->bj[p / 32] |= UINT32_C(1) << (p % 32);
+            }
         }
     }
 }
@@ -192,8 +194,9 @@ static int64_t Dot16Scalar(const int16_t *x, const int16_t *w, size_t n)
 {
     int64_t sum = 0;
     size_t k;
-    for (k = 0; k < n; k++)
+    for (k = 0; k < n; k++) {
         sum += (int32_t)x[k] * w[k];
+    }
     return sum;
 }
 #ifdef DSP_OPTIONS_AVX2
@@ -206,11 +209,13 @@ static int Avx2Available(void)
 #ifdef _MSC_VER
     int info[4];
     __cpuid(info, 0);
-    if (info[0] < 7)
+    if (info[0] < 7) {
         return 0;
+    }
     __cpuid(info, 1);
-    if ((info[2] & (3 << 27)) != (3 << 27) || (_xgetbv(0) & 6) != 6)
+    if ((info[2] & (3 << 27)) != (3 << 27) || (_xgetbv(0) & 6) != 6) {
         return 0;
+    }
     __cpuidex(info, 7, 0);
     return (info[1] & (1 << 5)) != 0;
 #else
@@ -238,18 +243,21 @@ static int64_t Dot16(const int16_t *x, const int16_t *w, size_t n)
     size_t k = 0;
     int64_t sum = 0;
 #ifdef DSP_OPTIONS_AVX2
-    if (useAvx2)
+    if (useAvx2) {
         return DspOptionsDot16Avx2(x, w, n);
+    }
 #endif
 #ifdef SSE
     __m128i acc = _mm_setzero_si128();
-    for (; k + 8 <= n; k += 8)
+    for (; k + 8 <= n; k += 8) {
         acc = AddWide(acc, _mm_madd_epi16(_mm_loadu_si128((const __m128i *)(x + k)),
                                           _mm_loadu_si128((const __m128i *)(w + k))));
+    }
     sum = Finish(acc);
 #endif
-    for (; k < n; k++)
+    for (; k < n; k++) {
         sum += (int32_t)x[k] * w[k];
+    }
     return sum;
 }
 
@@ -258,8 +266,9 @@ static int64_t Dot8(const int8_t *x, const int16_t *w, size_t n)
     size_t k = 0;
     int64_t sum = 0;
 #ifdef DSP_OPTIONS_AVX2
-    if (useAvx2)
+    if (useAvx2) {
         return DspOptionsDot8Avx2(x, w, n);
+    }
 #endif
 #ifdef SSE
     __m128i acc = _mm_setzero_si128(), zero = _mm_setzero_si128();
@@ -272,8 +281,9 @@ static int64_t Dot8(const int8_t *x, const int16_t *w, size_t n)
     }
     sum = Finish(acc);
 #endif
-    for (; k < n; k++)
+    for (; k < n; k++) {
         sum += (int32_t)x[k] * w[k];
+    }
     return sum;
 }
 
@@ -321,9 +331,11 @@ static Complex Bits(const Block *b)
                     << 16;
         } else
 #endif
-            for (t = 0; t < count; t++)
-                if (b->x8[k + t] < 0)
+            for (t = 0; t < count; t++) {
+                if (b->x8[k + t] < 0) {
                     bits |= UINT32_C(1) << t;
+                }
+            }
         r += (int)count - 2 * (int)Pop((bits ^ b->br[k / 32]) & mask);
         j += (int)count - 2 * (int)Pop((bits ^ b->bj[k / 32]) & mask);
     }
@@ -367,14 +379,16 @@ static void RotationReuse(void)
     size_t k, tap, clipped = 0;
     double phase = 0.137;
     CHECK(NgGpsCaGenerate(7, chips, &error) == NG_OK);
-    for (tap = 0; tap < TAPS; tap++)
+    for (tap = 0; tap < TAPS; tap++) {
         CHECK(NgGpsCaNcoInit(&code[tap], fs, 1023000, offsets[tap], &error) == NG_OK);
+    }
     for (k = 0; k < N; k++) {
         double direct = 0.137 + hz * (double)k / fs;
         int x = (int)(k % 256) - 128, y = 127 - (int)((73 * k) % 256);
         long c, s;
-        if (k == SPLIT)
+        if (k == SPLIT) {
             phase = fmod(phase, 1.0);
+        }
         CHECK(fabs(remainder(phase - direct, 1.0)) < 1e-11);
         c = lround(32767 * cos(2 * PI * phase));
         s = lround(32767 * sin(2 * PI * phase));
@@ -463,12 +477,13 @@ static void Contracts(void)
     CHECK(RescaleByte(-128 * 32768, &clipped) == -128 && clipped == 0);
     CHECK(RescaleByte(128 * 32768, &clipped) == 127 && clipped == 1);
     CHECK(RescaleByte(-181 * 32768, &clipped) == -128 && clipped == 2);
-    for (v = -128; v <= 127; v++)
+    for (v = -128; v <= 127; v++) {
         for (sign = 0; sign <= 1; sign++) {
             uint8_t a = (uint8_t)v ^ (sign ? 255 : 0);
             int y = a >= 128 ? (int)a - 256 : (int)a;
             CHECK(y + sign == (sign ? -v : v));
         }
+    }
     for (k = 0; k < 521; k++) {
         x[k] = (int8_t)((int)(k % 256) - 128);
         wide[k] = x[k];
@@ -486,13 +501,15 @@ static void Contracts(void)
         CHECK(Dot8(x, w, n) == Dot16Scalar(wide, w, n));
         CHECK(Dot16(wide, w, n) == Dot16Scalar(wide, w, n));
     }
-    for (k = 0; k < 521; k++)
+    for (k = 0; k < 521; k++) {
         wide[k] = (int16_t)(k % 2 ? -32768 : 32767);
+    }
     CHECK(Dot16(wide, w, 521) == Dot16Scalar(wide, w, 521));
     Prepare(&block, 16003, 16000000, 0, 0);
     Generate(&block, 16000000, 0, 0.05, 0.14, 0, 0);
-    for (k = 0; k < 2 * block.n; k++)
+    for (k = 0; k < 2 * block.n; k++) {
         block.x16[k] = (int16_t)((int)block.x8[k] * 16);
+    }
     {
         Complex a = Run(&block, 1, 0.14), b = Run(&block, 2, 0.14);
         CHECK(fabs(a.i - b.i) < 1e-10 && fabs(a.q - b.q) < 1e-10);
@@ -549,13 +566,13 @@ static NOINLINE void Adapter(const Block *b, int mode)
     }
 #endif
     for (; k < n; k++) {
-        if (mode == 1)
+        if (mode == 1) {
             compact[k] = (uint8_t)b->x8[k] ^ 128u;
-        else if (mode == 2)
+        } else if (mode == 2) {
             common[k] = (int16_t)((int)b->x8[k] * 256);
-        else if (mode == 3)
+        } else if (mode == 3) {
             common[k] = (int16_t)((int)b->x16[k] * 16);
-        else {
+        } else {
             int x = (int)floor(((double)b->x16[k] + 8) / 16);
             compact[k] = (uint8_t)(x > 127 ? 127 : x);
         }
@@ -572,20 +589,25 @@ static void AdapterTiming(void)
     Prepare(&block, 16003, 16000000, 0, 0);
     Generate(&block, 16000000, 0, 0.03, 0.14, 0, 0);
     /* Validate all adapter modes including unaligned vector tails and every Q11 level. */
-    for (k = 0; k < 2 * block.n; k++)
+    for (k = 0; k < 2 * block.n; k++) {
         block.x16[k] = (int16_t)((int)(k % 4096) - 2048);
+    }
     for (m = 0; m < 5; m++) {
         double samples[15];
         Adapter(&block, m);
         for (k = 0; k < 2 * block.n; k++) {
-            if (m == 0)
+            if (m == 0) {
                 CHECK(compact[k] == (uint8_t)block.x8[k]);
-            if (m == 1)
+            }
+            if (m == 1) {
                 CHECK(compact[k] == ((uint8_t)block.x8[k] ^ 128u));
-            if (m == 2)
+            }
+            if (m == 2) {
                 CHECK(common[k] == (int)block.x8[k] * 256);
-            if (m == 3)
+            }
+            if (m == 3) {
                 CHECK(common[k] == (int)block.x16[k] * 16);
+            }
             if (m == 4) {
                 int x = (int)floor(((double)block.x16[k] + 8) / 16);
                 CHECK(compact[k] == (uint8_t)(x > 127 ? 127 : x));
@@ -633,12 +655,13 @@ static void Timing(void)
                     sink += z.i + z.q;
                 }
                 elapsed = Now() - start;
-                if (elapsed < 0.003)
+                if (elapsed < 0.003) {
                     r *= 2;
+                }
             } while (elapsed < 0.003);
             reps[mode] = r;
         }
-        for (round = 0; round < 15; round++)
+        for (round = 0; round < 15; round++) {
             for (mode = 0; mode < MODES; mode++) {
                 int m = (mode + round) % MODES;
                 unsigned t;
@@ -649,6 +672,7 @@ static void Timing(void)
                 }
                 times[m][round] = (Now() - start) * 1e6 / reps[m];
             }
+        }
         for (mode = 0; mode < MODES; mode++) {
             qsort(times[mode], 15, sizeof(double), Compare);
             printf("timing,%s,%zu,%.4f,%.4f,%.3f\n", names[mode], sizes[s], times[mode][7],
@@ -681,10 +705,12 @@ static void Quality(void)
                 double phase = atan2(z.q * reference.i - z.i * reference.q,
                                      z.i * reference.i + z.q * reference.q) *
                                180 / PI;
-                if (m == 1)
+                if (m == 1) {
                     CHECK(error < 0.001);
-                if (m == 2)
+                }
+                if (m == 2) {
                     CHECK(error < 0.01);
+                }
                 printf("quality,%s,%s,%.0f,%.8f,%.6f\n", cases[c], names[m], ifHz, error, phase);
             }
             {
@@ -721,12 +747,15 @@ static void Harmonics(void)
         for (m = 0; m < MODES; m++) {
             Complex z = Run(&block, m, 0.14);
             double amplitude = hypot(z.i, z.q);
-            if (!h)
+            if (!h) {
                 fundamental[m] = amplitude;
-            if (h && m <= 2)
+            }
+            if (h && m <= 2) {
                 CHECK(amplitude / fundamental[m] < 0.01);
-            if (h && m == 3)
+            }
+            if (h && m == 3) {
                 CHECK(fabs(amplitude / fundamental[m] - 1.0 / fabs((double)harmonics[h])) < 0.005);
+            }
             printf("harmonic,%s,%d,%.8f\n", names[m], harmonics[h], amplitude / fundamental[m]);
         }
     }
@@ -756,16 +785,18 @@ static void Sensitivity(void)
             }
             rng = seed;
             Generate(&block, 16000000, ifHz, 0.003, 0.14, 0, 0);
-            for (m = 0; m < MODES; m++)
+            for (m = 0; m < MODES; m++) {
                 response[m] += Run(&block, m, 0.14).i - off[m];
+            }
         }
         for (m = 0; m < MODES; m++) {
             double var = (square[m] - sum[m] * sum[m] / trials) / (trials - 1);
             deflection[m] = pow(response[m] / trials, 2) / var;
         }
-        for (m = 1; m < MODES; m++)
+        for (m = 1; m < MODES; m++) {
             printf("sensitivity,%s,%.0f,%u,%.6f\n", names[m], ifHz, trials,
                    10 * log10(deflection[0] / deflection[m]));
+        }
     }
 }
 
@@ -782,8 +813,9 @@ static void Work(void *context)
     unsigned k;
     double start, total = 0;
     NgAtomicSet(&w->ready, 1);
-    while (!NgAtomicGet(&w->go))
+    while (!NgAtomicGet(&w->go)) {
         NgSleepMs(1);
+    }
     start = Now();
     for (k = 0; k < w->repetitions; k++) {
         Complex z = Run(&block, w->mode, 0.14);
@@ -800,7 +832,7 @@ static void Parallel(void)
     Prepare(&block, 16000, 16000000, 4000000, 0);
     Generate(&block, 16000000, 4000000, 0.01, 0.14, 0, 0);
     puts("parallel,mode,workers,median_Mcomplex_s,p95_batch_us_per_window");
-    for (mode = 1; mode < MODES; mode++)
+    for (mode = 1; mode < MODES; mode++) {
         for (count = 1; count <= 4; count *= 2) {
             double rates[7], latencies[7];
             for (round = 0; round < 7; round++) {
@@ -813,15 +845,19 @@ static void Parallel(void)
                     workers[k].repetitions = 8192;
                     CHECK(NgThreadStart(&threads[k], Work, &workers[k]) == 0);
                 }
-                for (k = 0; k < count; k++)
-                    while (!NgAtomicGet(&workers[k].ready))
+                for (k = 0; k < count; k++) {
+                    while (!NgAtomicGet(&workers[k].ready)) {
                         NgSleepMs(1);
-                for (k = 0; k < count; k++)
+                    }
+                }
+                for (k = 0; k < count; k++) {
                     NgAtomicSet(&workers[k].go, 1);
+                }
                 for (k = 0; k < count; k++) {
                     NgThreadJoin(threads[k]);
-                    if (workers[k].elapsed > longest)
+                    if (workers[k].elapsed > longest) {
                         longest = workers[k].elapsed;
+                    }
                     sink += workers[k].value;
                     CHECK(fabs(workers[k].value - workers[0].value) < 1e-9);
                 }
@@ -832,6 +868,7 @@ static void Parallel(void)
             qsort(latencies, 7, sizeof(double), Compare);
             printf("parallel,%s,%u,%.3f,%.4f\n", names[mode], count, rates[3], latencies[6]);
         }
+    }
 }
 
 static NOINLINE void StreamCopy(const int8_t *input, const int16_t *input16, void *output,
@@ -852,8 +889,9 @@ static NOINLINE void StreamCopy(const int8_t *input, const int16_t *input16, voi
         _mm_storeu_si128((__m128i *)(out + k + 8), _mm_slli_epi16(_mm_unpackhi_epi8(v, sign), 8));
     }
 #endif
-    for (; k < components; k++)
+    for (; k < components; k++) {
         out[k] = (int16_t)((int)input[k] * 256);
+    }
 }
 
 static void StreamTiming(void)
@@ -880,10 +918,11 @@ static void StreamTiming(void)
             samples[round] = (Now() - start) * 1000;
             sink += dest[(size_t)round * 4093];
         }
-        if (mode == 0)
+        if (mode == 0) {
             CHECK(memcmp(source, dest, components) == 0);
-        else
+        } else {
             CHECK(memcmp(source16, dest, components * 2u) == 0);
+        }
         qsort(samples, 15, sizeof(double), Compare);
         printf("stream,%s,%zu,%.4f,%.4f,%.3f\n", labels[mode], components / 2, samples[7],
                samples[14], (double)components / 2 / samples[7] / 1000);

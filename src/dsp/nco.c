@@ -8,8 +8,9 @@ static uint64_t CyclePhase(double cycles)
     int negative = phase < 0.0;
     uint64_t result;
     uint32_t hi, lo;
-    if (negative)
+    if (negative) {
         phase = -phase;
+    }
     /* Split the conversion to avoid a double-to-uint64 cast near UINT64_MAX. */
     upper = phase * 4294967296.0;
     hi = (uint32_t)upper;
@@ -36,8 +37,9 @@ int NgNcoInit(TNgCarrierNco *nco, double sampleRateHz, double frequencyHz, doubl
               TNgError *error)
 {
     if (nco == NULL || !isfinite(sampleRateHz) || sampleRateHz <= 0.0 || !isfinite(frequencyHz) ||
-        !isfinite(phaseCycles) || !isfinite(frequencyHz / sampleRateHz))
+        !isfinite(phaseCycles) || !isfinite(frequencyHz / sampleRateHz)) {
         return NgFail(error, "Invalid carrier NCO parameters");
+    }
     nco->phase = CyclePhase(phaseCycles);
     nco->step = CyclePhase(frequencyHz / sampleRateHz);
     return NG_OK;

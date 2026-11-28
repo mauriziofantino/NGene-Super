@@ -53,8 +53,9 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
         double time = (double)k / rate;
         double codePhase = fmod(phase + time * 1023000.0 * (1 + doppler / 1575420000.0), 1023);
         double carrier = 6.283185307179586 * ((double)digitalIf + doppler) * time + 0.71;
-        if (rate == 8183800)
+        if (rate == 8183800) {
             carrier = -carrier;
+        }
         double amplitude =
             signal && (!truncated || time < 0.024) ? 5 * chips[(size_t)codePhase] : 0;
         samples[k].i = (int8_t)lround(amplitude * cos(carrier) + 28 * Noise(&random) + 2.3);
@@ -81,8 +82,9 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
     CHECK(next == NG_CHANNEL_ACQUISITION);
     for (tries = 0; tries < 3000; ++tries) {
         NgAcquisitionRead(acquisition, &snapshot);
-        if (snapshot.searches != 0)
+        if (snapshot.searches != 0) {
             break;
+        }
         NgSleepMs(10);
     }
     printf("rate=%u IF=%lld square=%d xor=%d signal=%d truncated=%d searches=%llu "
@@ -105,12 +107,14 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
         CHECK(space.result.firstSample == 1000000);
         CHECK(space.result.confirmed == snapshot.results[6].confirmed);
         CHECK(space.threshold > 0);
-        for (row = 0; row < NG_ACQUISITION_DOPPLER_BINS; ++row)
+        for (row = 0; row < NG_ACQUISITION_DOPPLER_BINS; ++row) {
             for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column) {
                 CHECK(isfinite(space.power[row][column]) && space.power[row][column] >= 0);
-                if (space.power[row][column] > maximum)
+                if (space.power[row][column] > maximum) {
                     maximum = space.power[row][column];
+                }
             }
+        }
         CHECK(fabs(maximum - space.result.peakRatio) < 1e-5 * (1 + maximum));
         if (signal) {
             unsigned peakColumn =
@@ -165,8 +169,9 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
         double time = (double)k / rate;
         double codePhase = fmod(phase + time * 1023000.0 * (1 + doppler / 1575420000.0), 4092);
         double carrier = 6.283185307179586 * ((double)digitalIf + doppler) * time + 0.71;
-        if (rate == 8183800)
+        if (rate == 8183800) {
             carrier = -carrier;
+        }
         double amplitude =
             signal && (!truncated || time < 0.096)
                 ? 5 * chips[(size_t)codePhase] * ((codePhase - floor(codePhase)) < 0.5 ? 1 : -1)
@@ -204,8 +209,9 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
     CHECK(next == NG_CHANNEL_ACQUISITION);
     for (tries = 0; tries < 3000; ++tries) {
         NgAcquisitionRead(acquisition, &snapshot);
-        if (snapshot.searches != 0)
+        if (snapshot.searches != 0) {
             break;
+        }
         NgSleepMs(10);
     }
     printf("rate=%u IF=%lld square=%d xor=%d signal=%d truncated=%d searches=%llu "
@@ -228,8 +234,9 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
         for (row = 0; row < space.dopplerBins; ++row) {
             for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column) {
                 CHECK(isfinite(space.power[row][column]) && space.power[row][column] >= 0);
-                if (space.power[row][column] > maximum)
+                if (space.power[row][column] > maximum) {
                     maximum = space.power[row][column];
+                }
             }
         }
         CHECK(fabs(maximum - snapshot.results[6].peakRatio) < 1e-5 * (1 + maximum));
@@ -255,18 +262,21 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
         while (followed < followCount) {
             size_t take = followCount - followed;
             size_t n;
-            if (take > 4096)
+            if (take > 4096) {
                 take = 4096;
+            }
             for (n = 0; n < take; ++n) {
                 double time = (double)(future + followed + n) / rate;
                 double unwrapped = phase + time * 1023000.0 * (1 + doppler / 1575420000.0);
                 double chip = fmod(unwrapped, 4092);
                 double angle = 6.283185307179586 * ((double)digitalIf + doppler) * time + 0.71;
                 double amplitude = 5 * chips[(size_t)chip] * (chip - floor(chip) < 0.5 ? 1 : -1);
-                if (((unsigned long long)floor(unwrapped / 4092)) % 2u)
+                if (((unsigned long long)floor(unwrapped / 4092)) % 2u) {
                     amplitude = -amplitude;
-                if (stream.spectrumInverted)
+                }
+                if (stream.spectrumInverted) {
                     angle = -angle;
+                }
                 int i = (int)lround(amplitude * cos(angle) + 28 * Noise(&random) + 2.3);
                 int q = (int)lround(amplitude * sin(angle) + 28 * Noise(&random) - 1.7);
                 samples[n].i = (int8_t)i;
@@ -341,8 +351,9 @@ static int Kernels(void)
         NgSearchFftExecuteMode(fft, values, 1, (TNgSearchFftMode)mode);
         CHECK(fabs(values[3].i - 0.37) < (mode == NG_SEARCH_FFT_INTEGER_PRECISE ? 0.002 : 0.02));
     }
-    for (k = 0; k < 16; ++k)
+    for (k = 0; k < 16; ++k) {
         code[k] = k % 2 ? -1.0f : 1.0f;
+    }
     NgSearchCorrelate(values, code, 15, 0, &pi, &pq);
     NgSearchCorrelate(values, code, 15, 1, &xi, &xq);
     CHECK(pi == xi && pq == xq);
@@ -366,8 +377,9 @@ static int FixtureSearch(void *context, const TNgAcquisitionCapture *capture, un
     (void)config;
     (void)error;
     NgAtomicSet(&fixture->entered, 1);
-    while (!NgAtomicGet(&fixture->release) && !cancel(cancelContext))
+    while (!NgAtomicGet(&fixture->release) && !cancel(cancelContext)) {
         NgSleepMs(1);
+    }
     if (cancel(cancelContext)) {
         NgAtomicSet(&fixture->cancelled, 1);
         return NG_END;
@@ -413,21 +425,24 @@ static int Ownership(void)
     window.meta.epoch = 1;
     CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &window, &next,
                                &error) == NG_OK);
-    for (wait = 0; wait < 1000 && !NgAtomicGet(&fixture.entered); ++wait)
+    for (wait = 0; wait < 1000 && !NgAtomicGet(&fixture.entered); ++wait) {
         NgSleepMs(1);
+    }
     CHECK(NgAtomicGet(&fixture.entered));
     window.meta.epoch = 2;
     window.meta.firstSample = count;
     window.meta.flags = NG_BLOCK_GAP;
     CHECK(channel.ops->process(channel.context, &channel.id, channel.state, &window, &next,
                                &error) == NG_OK);
-    for (wait = 0; wait < 1000 && !NgAtomicGet(&fixture.cancelled); ++wait)
+    for (wait = 0; wait < 1000 && !NgAtomicGet(&fixture.cancelled); ++wait) {
         NgSleepMs(1);
+    }
     CHECK(NgAtomicGet(&fixture.cancelled));
     for (wait = 0; wait < 1000; ++wait) {
         NgAcquisitionRead(acquisition, &snapshot);
-        if (!snapshot.searching)
+        if (!snapshot.searching) {
             break;
+        }
         NgSleepMs(1);
     }
     CHECK(snapshot.searches == 0 && snapshot.gaps == 1);
@@ -440,8 +455,9 @@ static int Ownership(void)
     memset(samples, 0, 2 * count * sizeof(*samples));
     for (wait = 0; wait < 1000; ++wait) {
         NgAcquisitionRead(acquisition, &snapshot);
-        if (snapshot.searches != 0)
+        if (snapshot.searches != 0) {
             break;
+        }
         NgSleepMs(1);
     }
     CHECK(snapshot.searches == 1);
@@ -554,8 +570,9 @@ static int GridGeometryContract(void)
         CHECK(NgAcquisitionValidateGrid(cases[k].signal, cases[k].rate, cases[k].periodMs,
                                         cases[k].size,
                                         &error) == (cases[k].valid ? NG_OK : NG_ERROR));
-        if (!cases[k].valid)
+        if (!cases[k].valid) {
             CHECK(strstr(error.message, cases[k].signal) != NULL);
+        }
     }
     return 0;
 }
@@ -647,8 +664,9 @@ static int BeidouScenario(void)
     CHECK(result.confirmed && result.prn == prn && result.epoch == 9 &&
           result.firstSample == capture.origin.firstSample);
     CHECK(fabs(result.codePhaseChips - phase) < 0.15);
-    if (fabs(result.dopplerHz - doppler) > 7)
+    if (fabs(result.dopplerHz - doppler) > 7) {
         fprintf(stderr, "B1C recovered %.1f Hz for %.1f Hz\n", result.dopplerHz, doppler);
+    }
     CHECK(fabs(result.dopplerHz - doppler) <= 7);
     NgAcquisitionGalileoFree(workspace);
     free(samples);
@@ -658,14 +676,18 @@ static int BeidouScenario(void)
 /** Run RF formats/rates, sinusoidal/square mixing, noise and independent confirmation cases. */
 int main(int argc, char **argv)
 {
-    if (argc == 2 && strcmp(argv[1], "--verify-beidou") == 0)
+    if (argc == 2 && strcmp(argv[1], "--verify-beidou") == 0) {
         return BeidouScenario();
-    if (argc == 2 && strcmp(argv[1], "--benchmark") == 0)
+    }
+    if (argc == 2 && strcmp(argv[1], "--benchmark") == 0) {
         return BenchmarkFft();
-    if (argc == 2 && strcmp(argv[1], "--benchmark-pcps") == 0)
+    }
+    if (argc == 2 && strcmp(argv[1], "--benchmark-pcps") == 0) {
         return BenchmarkIntegerPcps(1);
-    if (argc == 2 && strcmp(argv[1], "--verify-pcps") == 0)
+    }
+    if (argc == 2 && strcmp(argv[1], "--verify-pcps") == 0) {
         return BenchmarkIntegerPcps(0);
+    }
     if (argc == 2 && strcmp(argv[1], "--verify-grid") == 0) {
         CHECK(GridGeometryContract() == 0);
         return NativeGridContract();

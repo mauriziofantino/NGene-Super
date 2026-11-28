@@ -11,12 +11,14 @@ static inline int E4000AllocateStage(unsigned stage, int remaining, int gains[6]
                                       {2, 1, 0}, {15, 12, 9, 6, 3}, {15, 12, 9, 6, 3}};
     static const unsigned counts[6] = {2, 4, 4, 3, 5, 5};
     unsigned k;
-    if (stage == 6)
+    if (stage == 6) {
         return remaining == 0;
+    }
     for (k = 0; k < counts[stage]; ++k) {
         gains[stage] = choices[stage][k];
-        if (E4000AllocateStage(stage + 1, remaining - gains[stage], gains))
+        if (E4000AllocateStage(stage + 1, remaining - gains[stage], gains)) {
             return 1;
+        }
     }
     return 0;
 }

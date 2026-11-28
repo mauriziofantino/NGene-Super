@@ -33,36 +33,45 @@ static void CheckDop(const TNgPvtSnapshot *s)
     double augmented[6][12] = {{0}};
     unsigned columns = 3, clock[3] = {0};
     const unsigned present[] = {s->gps, s->galileo, s->beidou};
-    for (unsigned c = 0; c < 3; ++c)
-        if (present[c])
+    for (unsigned c = 0; c < 3; ++c) {
+        if (present[c]) {
             clock[c] = columns++;
+        }
+    }
     for (unsigned k = 0; k < s->skyCount; ++k) {
         const TNgPvtSatelliteView *sky = &s->sky[k];
         double row[6] = {cos(sky->elevation) * sin(sky->azimuth),
                          cos(sky->elevation) * cos(sky->azimuth), sin(sky->elevation)};
         row[clock[sky->constellation - 1]] = -1;
-        for (unsigned i = 0; i < columns; ++i)
-            for (unsigned j = 0; j < columns; ++j)
+        for (unsigned i = 0; i < columns; ++i) {
+            for (unsigned j = 0; j < columns; ++j) {
                 augmented[i][j] += row[i] * row[j];
+            }
+        }
     }
-    for (unsigned i = 0; i < columns; ++i)
+    for (unsigned i = 0; i < columns; ++i) {
         augmented[i][i + columns] = 1;
+    }
     for (unsigned i = 0; i < columns; ++i) {
         const double scale = augmented[i][i];
         CHECK(scale > 1e-10);
-        for (unsigned j = 0; j < 2 * columns; ++j)
+        for (unsigned j = 0; j < 2 * columns; ++j) {
             augmented[i][j] /= scale;
+        }
         for (unsigned k = 0; k < columns; ++k) {
-            if (k == i)
+            if (k == i) {
                 continue;
+            }
             const double factor = augmented[k][i];
-            for (unsigned j = 0; j < 2 * columns; ++j)
+            for (unsigned j = 0; j < 2 * columns; ++j) {
                 augmented[k][j] -= factor * augmented[i][j];
+            }
         }
     }
     double trace = 0;
-    for (unsigned i = 0; i < columns; ++i)
+    for (unsigned i = 0; i < columns; ++i) {
         trace += augmented[i][i + columns];
+    }
     CHECK(fabs(s->gdop - sqrt(trace)) < 1e-8);
     CHECK(fabs(s->hdop - sqrt(augmented[0][columns] + augmented[1][columns + 1])) < 1e-8);
     CHECK(fabs(s->vdop - sqrt(augmented[2][columns + 2])) < 1e-8);
@@ -82,9 +91,11 @@ static void Fixture(unsigned mask, int rollover)
     unsigned k, j, active[3], count = 0;
     const double biases[3] = {0, 35, -47};
     unsigned nextPrn[3] = {1, 1, 1};
-    for (unsigned system = 0; system < 3; ++system)
-        if (mask & (1u << system))
+    for (unsigned system = 0; system < 3; ++system) {
+        if (mask & (1u << system)) {
             active[count++] = system;
+        }
+    }
     for (k = 0; k < 10; k++) {
         TNgTrackingSnapshot *t = &channels[k];
         TNgBroadcast *b = &t->navigation.broadcast;
@@ -134,8 +145,9 @@ static void Fixture(unsigned mask, int rollover)
             unsigned axis;
             CHECK(NgPvtSatellite(b, t->constellation, tx + 0.05, xp, scratch, &cp, &d));
             CHECK(NgPvtSatellite(b, t->constellation, tx - 0.05, xm, scratch, &cm, &d));
-            for (axis = 0; axis < 3; axis++)
+            for (axis = 0; axis < 3; axis++) {
                 CHECK(fabs((xp[axis] - xm[axis]) / 0.1 - velocity[axis]) < 0.01);
+            }
             CHECK(fabs((cp - cm) / 0.1 - drift) < 1e-12);
         }
         {
@@ -143,11 +155,12 @@ static void Fixture(unsigned mask, int rollover)
             vs[0] = cos(angle) * velocity[0] + sin(angle) * velocity[1];
             vs[1] = -sin(angle) * velocity[0] + cos(angle) * velocity[1];
             vs[2] = velocity[2];
-            for (j = 0; j < 3; j++)
+            for (j = 0; j < 3; j++) {
                 rate += (rotated[j] - receiver[j]) / range *
                         (vs[j] - (j == 0   ? 12
                                   : j == 1 ? -3
                                            : 1));
+            }
             t->dopplerHz = -(rate + 0.7 - C * drift) * 1575420000.0 / C;
         }
     }
@@ -161,15 +174,17 @@ static void Fixture(unsigned mask, int rollover)
           solution.hdop * solution.hdop + solution.vdop * solution.vdop);
     if (mask & 1u) {
         TNgPvtSnapshot corrected;
-        for (k = 0; k < 10; ++k)
+        for (k = 0; k < 10; ++k) {
             if (channels[k].constellation == 1) {
                 channels[k].navigation.broadcast.ionoReceived = 1;
                 channels[k].navigation.broadcast.iono.betaGps[0] = 72000;
             }
+        }
         NgPvtCompute(channels, 7, 2400000, 2400000, &corrected);
         CHECK(corrected.available && fabs(corrected.clockGps - solution.clockGps) > 0.1);
-        for (k = 0; k < 10; ++k)
+        for (k = 0; k < 10; ++k) {
             channels[k].navigation.broadcast.ionoReceived = 0;
+        }
     }
     if (mask & 1u) {
         TNgPvtSnapshot biased, augmented;
@@ -205,9 +220,10 @@ static void Fixture(unsigned mask, int rollover)
     const double clocks[] = {solution.clockGps, solution.clockGalileo, solution.clockBeidou};
     for (unsigned system = 0; system < 3; ++system) {
         CHECK((admitted[system] > 0) == ((mask & (1u << system)) != 0));
-        if (admitted[system])
+        if (admitted[system]) {
             CHECK(fabs((clocks[system] - clocks[active[0]]) -
                        (biases[system] - biases[active[0]])) < 0.2);
+        }
     }
     for (k = 0; k < solution.skyCount; k++) {
         const TNgPvtSatelliteView *sky = &solution.sky[k];
@@ -230,8 +246,9 @@ static void Fixture(unsigned mask, int rollover)
         double east = -sin(lon) * dx + cos(lon) * dy;
         double north = -sin(lat) * cos(lon) * dx - sin(lat) * sin(lon) * dy + cos(lat) * dz;
         double az = atan2(east, north);
-        if (az < 0)
+        if (az < 0) {
             az += 6.283185307179586;
+        }
         double up = cos(lat) * cos(lon) * dx + cos(lat) * sin(lon) * dy + sin(lat) * dz;
         CHECK(fabs(sky->azimuth - az) < 1e-7 && fabs(sky->elevation - asin(up / range)) < 1e-7);
     }
@@ -251,8 +268,9 @@ static void Fixture(unsigned mask, int rollover)
         NgPvtCompute(channels, 7, 2400000, 2400000, &solution);
         CHECK(!solution.available && solution.satellites == 10);
     }
-    for (k = 0; k < 10; k++)
+    for (k = 0; k < 10; k++) {
         channels[k].epoch = 8;
+    }
     NgPvtCompute(channels, 7, 2400000, 2400000, &solution);
     CHECK(!solution.available);
     channels[0].epoch = 7;

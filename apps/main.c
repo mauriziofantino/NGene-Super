@@ -235,8 +235,9 @@ int main(int argc, char **argv)
         NgFrontendDestroy(&frontend);
         return 1;
     }
-    if (acquisition)
+    if (acquisition) {
         acquisitionCount++;
+    }
     if (!config.recordOnly &&
         NgAcquisitionCreateGalileo(&config.galileoAcquisition, &frontend.info, &galileoAcquisition,
                                    &acquisitionChannels[acquisitionCount], &error) != NG_OK) {
@@ -245,12 +246,14 @@ int main(int argc, char **argv)
         NgFrontendDestroy(&frontend);
         return 1;
     }
-    if (galileoAcquisition)
+    if (galileoAcquisition) {
         acquisitionCount++;
+    }
     if (!config.recordOnly && config.beidouAcquisition.enabled) {
         if (NgAcquisitionCreateBeidou(&config.beidouAcquisition, &frontend.info, &beidouAcquisition,
-                                      &acquisitionChannels[acquisitionCount], &error) != NG_OK)
+                                      &acquisitionChannels[acquisitionCount], &error) != NG_OK) {
             goto cleanup;
+        }
         ++acquisitionCount;
     }
     {
@@ -259,8 +262,9 @@ int main(int argc, char **argv)
                                                            beidouAcquisition};
         unsigned system;
         for (system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
-            if (!workers[system])
+            if (!workers[system]) {
                 continue;
+            }
             if (NgTrackingBankCreate(&config.tracking, &frontend.info, workers[system],
                                      &acquisitionChannels[trackingIndex++], &trackingBanks[system],
                                      &error) != NG_OK) {
@@ -269,8 +273,9 @@ int main(int argc, char **argv)
         }
     }
     if (NgTrackingBankLink(trackingBanks[0], trackingBanks[1], &error) != NG_OK ||
-        NgTrackingBankLink(trackingBanks[0], trackingBanks[2], &error) != NG_OK)
+        NgTrackingBankLink(trackingBanks[0], trackingBanks[2], &error) != NG_OK) {
         goto cleanup;
+    }
     result = NgReceiverRun(&config, &frontend, &conditioner,
                            acquisitionCount ? acquisitionChannels : NULL, acquisitionCount,
                            ShouldStop, NULL, &stats, &error);
@@ -287,12 +292,13 @@ int main(int argc, char **argv)
                snapshot.searches, snapshot.skippedSamples, snapshot.gaps);
         for (prn = 0; prn < 32; ++prn) {
             const TNgAcquisitionResult *found = &snapshot.results[prn];
-            if (found->prn != 0)
+            if (found->prn != 0) {
                 printf("GPS PRN%02u %s Doppler=%.1f Hz code_phase=%.6f chips peak/threshold=%.3f "
                        "confirmation=%u/4 epoch=%" PRIu64 " sample=%" PRIu64 "\n",
                        found->prn, found->confirmed ? "CONFIRMED" : "not confirmed",
                        found->dopplerHz, found->codePhaseChips, found->peakRatio, found->successes,
                        found->epoch, found->firstSample);
+            }
         }
     }
     if (galileoAcquisition != NULL) {
@@ -304,18 +310,20 @@ int main(int argc, char **argv)
                snapshot.searches, snapshot.skippedSamples, snapshot.gaps);
         for (prn = 0; prn < 32; ++prn) {
             const TNgAcquisitionResult *found = &snapshot.results[prn];
-            if (found->prn != 0)
+            if (found->prn != 0) {
                 printf(
                     "Galileo PRN%02u %s Doppler=%.1f Hz code_phase=%.6f chips peak/threshold=%.3f "
                     "confirmation=%u/4 epoch=%" PRIu64 " sample=%" PRIu64 "\n",
                     found->prn, found->confirmed ? "CONFIRMED" : "not confirmed", found->dopplerHz,
                     found->codePhaseChips, found->peakRatio, found->successes, found->epoch,
                     found->firstSample);
+            }
         }
     }
 cleanup:
-    for (unsigned system = 0; system < NG_CONSTELLATION_COUNT; ++system)
+    for (unsigned system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
         NgTrackingBankDestroy(trackingBanks[system]);
+    }
     NgAcquisitionDestroy(beidouAcquisition);
     NgAcquisitionDestroy(acquisition);
     NgAcquisitionDestroy(galileoAcquisition);

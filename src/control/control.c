@@ -321,6 +321,14 @@ static void Started(void *context, const TNgStreamInfo *info)
     NgMutexUnlock(&c->mutex);
 }
 
+/** Forward ingress occupancy to the shared tracking scheduler. */
+static void Backpressure(void *context, const TNgFrontendStats *stats)
+{
+    TNgControl *c = context;
+    NgTrackingBankBackpressure(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
+                               stats->ingressAvailable, stats->ingress.occupancyPercent);
+}
+
 /**
  * @brief Offer a conditioned window to diagnostics and the active recorder.
  *
@@ -334,13 +342,6 @@ static void Started(void *context, const TNgStreamInfo *info)
  *
  * @return NG_OK normally; NG_ERROR when recorder submit fails.
  */
-static void Backpressure(void *context, const TNgFrontendStats *stats)
-{
-    TNgControl *c = context;
-    NgTrackingBankBackpressure(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
-                               stats->ingressAvailable, stats->ingress.occupancyPercent);
-}
-
 static int Block(void *context, const TNgIqView *view, TNgError *error)
 {
     TNgControl *c = context;
@@ -399,8 +400,9 @@ static void ArchiveSearchSpaces(TNgControl *c)
                                    c->status.tracking[c->observedChannel - 1].constellation == 1 &&
                                    c->status.tracking[c->observedChannel - 1].prn == k + 1)) &&
             (!archived->prn || result->epoch != archived->epoch ||
-             result->firstSample != archived->firstSample))
+             result->firstSample != archived->firstSample)) {
             NgAcquisitionReadSearchSpace(c->acquisition, k + 1, &c->searchSpaces[k]);
+        }
     }
     for (k = 0; k < 32; ++k) {
         const TNgAcquisitionResult *result = &c->status.galileoAcquisition.results[k];
@@ -410,8 +412,9 @@ static void ArchiveSearchSpaces(TNgControl *c)
                                    c->status.tracking[c->observedChannel - 1].constellation == 2 &&
                                    c->status.tracking[c->observedChannel - 1].prn == k + 1)) &&
             (!archived->prn || result->epoch != archived->epoch ||
-             result->firstSample != archived->firstSample))
+             result->firstSample != archived->firstSample)) {
             NgAcquisitionReadSearchSpace(c->galileoAcquisition, k + 1, &c->galileoSearchSpaces[k]);
+        }
     }
 }
 
@@ -501,39 +504,46 @@ static void ReceiverWorker(void *context)
             c->workerResult =
                 NgAcquisitionCreate(&c->runConfig.acquisition, &source.info, &c->acquisition,
                                     &acquisitionChannels[acquisitionCount], &c->workerError);
-            if (c->workerResult == NG_OK && c->acquisition)
+            if (c->workerResult == NG_OK && c->acquisition) {
                 c->workerResult = NgTrackingBankCreate(
                     &c->runConfig.tracking, &source.info, c->acquisition,
                     &acquisitionChannels[acquisitionCount], &c->trackingBanks[0], &c->workerError);
-            if (c->acquisition)
+            }
+            if (c->acquisition) {
                 acquisitionCount++;
+            }
         }
         if (c->workerResult == NG_OK && !c->runConfig.recordOnly) {
             c->workerResult = NgAcquisitionCreateGalileo(
                 &c->runConfig.galileoAcquisition, &source.info, &c->galileoAcquisition,
                 &acquisitionChannels[acquisitionCount], &c->workerError);
-            if (c->workerResult == NG_OK && c->galileoAcquisition)
+            if (c->workerResult == NG_OK && c->galileoAcquisition) {
                 c->workerResult = NgTrackingBankCreate(
                     &c->runConfig.tracking, &source.info, c->galileoAcquisition,
                     &acquisitionChannels[acquisitionCount], &c->trackingBanks[1], &c->workerError);
-            if (c->galileoAcquisition)
+            }
+            if (c->galileoAcquisition) {
                 acquisitionCount++;
+            }
         }
-        if (c->workerResult == NG_OK)
+        if (c->workerResult == NG_OK) {
             c->workerResult =
                 NgTrackingBankLink(c->trackingBanks[0], c->trackingBanks[1], &c->workerError);
+        }
         if (c->workerResult == NG_OK && !c->runConfig.recordOnly) {
             c->workerResult = NgAcquisitionCreateBeidou(
                 &c->runConfig.beidouAcquisition, &source.info, &c->beidouAcquisition,
                 &acquisitionChannels[acquisitionCount], &c->workerError);
-            if (c->workerResult == NG_OK)
+            if (c->workerResult == NG_OK) {
                 c->workerResult =
                     NgTrackingBankCreate(&c->runConfig.tracking, &source.info, c->beidouAcquisition,
                                          &acquisitionChannels[acquisitionCount++],
                                          &c->trackingBanks[2], &c->workerError);
-            if (c->workerResult == NG_OK)
+            }
+            if (c->workerResult == NG_OK) {
                 c->workerResult =
                     NgTrackingBankLink(c->trackingBanks[0], c->trackingBanks[2], &c->workerError);
+            }
         }
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
             c->workerResult = NgReceiverRunEx(
@@ -981,8 +991,9 @@ void NgControlAcquisitionSearchSpace(TNgControl *control, unsigned prn,
                                      TNgAcquisitionSearchSpace *space)
 {
     memset(space, 0, sizeof(*space));
-    if (prn < 1 || prn > 32)
+    if (prn < 1 || prn > 32) {
         return;
+    }
     NgMutexLock(&control->mutex);
     *space = control->searchSpaces[prn - 1];
     NgMutexUnlock(&control->mutex);
@@ -993,8 +1004,9 @@ void NgControlGalileoSearchSpace(TNgControl *control, unsigned prn,
                                  TNgAcquisitionSearchSpace *space)
 {
     memset(space, 0, sizeof(*space));
-    if (prn < 1 || prn > 32)
+    if (prn < 1 || prn > 32) {
         return;
+    }
     NgMutexLock(&control->mutex);
     *space = control->galileoSearchSpaces[prn - 1];
     NgMutexUnlock(&control->mutex);

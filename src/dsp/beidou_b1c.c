@@ -44,14 +44,17 @@ int NgBeidouB1cGenerate(unsigned prn, TNgBeidouB1cComponent component,
 {
     uint8_t legendre[WEIL_LENGTH] = {0};
     const PrimaryParameters *parameters;
-    if (!chips || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn))
+    if (!chips || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn)) {
         return NgFail(error, "B1C primary requires a buffer and PRN in 1..63");
-    if (component != NG_BEIDOU_B1C_DATA && component != NG_BEIDOU_B1C_PILOT)
+    }
+    if (component != NG_BEIDOU_B1C_DATA && component != NG_BEIDOU_B1C_PILOT) {
         return NgFail(error, "Invalid B1C primary component");
+    }
 
     /* Each nonzero square has two roots, x and N-x. The zero entry stays zero. */
-    for (uint32_t x = 1; x <= WEIL_LENGTH / 2; ++x)
+    for (uint32_t x = 1; x <= WEIL_LENGTH / 2; ++x) {
         legendre[x * x % WEIL_LENGTH] = 1;
+    }
 
     parameters = component == NG_BEIDOU_B1C_DATA ? dataParameters : pilotParameters;
     const unsigned start = parameters[prn - 1].start - 1u;

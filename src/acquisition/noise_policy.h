@@ -19,10 +19,11 @@ static double AcquisitionThreshold(unsigned periods, double pfa)
             term *= x / (double)k;
             sum += term;
         }
-        if (exp(-x) * sum > pfa)
+        if (exp(-x) * sum > pfa) {
             low = x;
-        else
+        } else {
             high = x;
+        }
     }
     return (low + high) * 0.5;
 }

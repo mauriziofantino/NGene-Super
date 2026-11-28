@@ -56,15 +56,17 @@ static TNgAcquisitionSnapshot Run(unsigned limit)
     NgAcquisitionSetParallelism(a, limit, 8, limit);
     for (tries = 0; tries < 10000; tries++) {
         NgAcquisitionRead(a, &snapshot);
-        if (snapshot.activeSearches > maximum)
+        if (snapshot.activeSearches > maximum) {
             maximum = snapshot.activeSearches;
+        }
         CHECK(snapshot.poolActive <= snapshot.parallelCapacity);
         if (limit > 1 && !suspended && snapshot.activeSearches >= 4) {
             NgAcquisitionSetParallelism(a, 0, 8, 0);
             for (unsigned wait = 0; wait < 1000; wait++) {
                 NgAcquisitionRead(a, &snapshot);
-                if (!snapshot.poolExecuting)
+                if (!snapshot.poolExecuting) {
                     break;
+                }
                 NgSleepMs(1);
             }
             CHECK(!snapshot.poolExecuting && snapshot.poolActive >= 4);
@@ -76,19 +78,23 @@ static TNgAcquisitionSnapshot Run(unsigned limit)
             NgAcquisitionSetParallelism(a, limit, 8, 1);
             suspended = 1;
         }
-        if (suspended)
+        if (suspended) {
             CHECK(snapshot.poolExecuting <= 1);
-        if (snapshot.searches == 8 && !snapshot.poolActive)
+        }
+        if (snapshot.searches == 8 && !snapshot.poolActive) {
             break;
+        }
         NgSleepMs(1);
     }
     CHECK(snapshot.searches == 8 && tries < 10000);
-    if (limit > 1)
+    if (limit > 1) {
         CHECK(suspended);
-    if (limit == 1)
+    }
+    if (limit == 1) {
         CHECK(maximum == 1);
-    else
+    } else {
         CHECK(maximum >= 4);
+    }
     printf("native acquisition limit=%u observed=%u capacity=%u searches=%llu\n", limit, maximum,
            snapshot.parallelCapacity, (unsigned long long)snapshot.searches);
     NgAcquisitionDestroy(a);
@@ -101,8 +107,9 @@ static int ThreadClockMeasures(void)
 {
     double cpu = NgThreadCpuSeconds(), wall = NgMonotonicSeconds();
     volatile double sink = 0;
-    while (NgMonotonicSeconds() - wall < 0.05)
+    while (NgMonotonicSeconds() - wall < 0.05) {
         sink += 1.0;
+    }
     return NgThreadCpuSeconds() - cpu >= 0.025;
 }
 
@@ -187,15 +194,18 @@ static int MockSearch(void *context, const TNgAcquisitionCapture *capture, unsig
     CHECK(capture->count == 2048);
     if (NgAtomicGet(&mock->block)) {
         NgAtomicSet(&mock->entered, 1);
-        while (!cancel(cancelContext))
+        while (!cancel(cancelContext)) {
             NgSleepMs(1);
+        }
         NgAtomicSet(&mock->cancelled, 1);
         return NG_ERROR;
     }
-    if (mock->order)
+    if (mock->order) {
         mock->order[(*mock->count)++] = 100u * (unsigned)mock->system + prn;
-    if (prn == 63)
+    }
+    if (prn == 63) {
         CHECK(capture->displayPrn == 63);
+    }
     result->prn = prn;
     result->epoch = capture->origin.epoch;
     result->firstSample = capture->origin.firstSample;
@@ -226,8 +236,9 @@ static void WaitMock(TNgAcquisition *a, uint64_t searches)
     TNgAcquisitionSnapshot snapshot;
     for (unsigned i = 0; i < 5000; ++i) {
         NgAcquisitionRead(a, &snapshot);
-        if (snapshot.searches == searches && !snapshot.poolActive)
+        if (snapshot.searches == searches && !snapshot.poolActive) {
             return;
+        }
         NgSleepMs(1);
     }
     CHECK(0 && "mock acquisition timed out");
@@ -268,13 +279,15 @@ static void ThreeConstellations(void)
     CHECK(snapshot.parallelCapacity == 3);
 
     NgAcquisitionSetParallelism(a[0], 0, 1, 0);
-    for (unsigned i = 0; i < 3; ++i)
+    for (unsigned i = 0; i < 3; ++i) {
         FeedMock(&channels[i], 0);
+    }
     NgAcquisitionSetParallelism(a[0], 1, 1, 1);
     WaitMock(a[2], 3);
     CHECK(count == sizeof(expected) / sizeof(*expected));
-    for (unsigned i = 0; i < count; ++i)
+    for (unsigned i = 0; i < count; ++i) {
         CHECK(order[i] == expected[i]);
+    }
     for (unsigned i = 0; i < 3; ++i) {
         NgAcquisitionReadResults(a[i], results);
         CHECK(results[31].prn == 32 && results[31].dopplerHz == (double)mocks[i].system);
@@ -328,8 +341,9 @@ static void BeidouPrnLimits(void)
 
     NgAtomicSet(&mock.block, 1);
     FeedMock(&channel, 2048);
-    for (unsigned i = 0; i < 5000 && !NgAtomicGet(&mock.entered); ++i)
+    for (unsigned i = 0; i < 5000 && !NgAtomicGet(&mock.entered); ++i) {
         NgSleepMs(1);
+    }
     CHECK(NgAtomicGet(&mock.entered));
     NgAcquisitionDestroy(a);
     CHECK(NgAtomicGet(&mock.cancelled));

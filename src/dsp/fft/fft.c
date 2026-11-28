@@ -381,8 +381,9 @@ int NgFftReference(const TNgFftPlan *plan, size_t size, const int16_t *input, in
 const char *NgFftBackend(void)
 {
 #ifdef NGENE_EXPERIMENTAL_Q14_AVX2
-    if (NgDspAvx2Available())
+    if (NgDspAvx2Available()) {
         return "AVX2/SSE2";
+    }
 #endif
 #ifdef NGENE_FFT_RUNTIME_SSE2
     if (NgFftSimdAvailable() == 0) {

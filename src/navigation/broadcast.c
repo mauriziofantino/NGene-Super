@@ -632,10 +632,12 @@ static int NgParseGpsSubframe2(TNgNavParser *parser)
     eph->toe = 16.0 * NgExtractField(parser->subframe, GPS_SUBF2_TOE_FIRST_BYTE_IDX,
                                      GPS_SUBF2_TOE_LAST_BYTE_IDX, GPS_SUBF2_TOE_BITS_OF_FIRST_BYTE,
                                      GPS_SUBF2_TOE_BITS_OF_LAST_BYTE);
-    if (eph->eccentricity > GPS_MAXIMUM_ECCENTRICITY)
+    if (eph->eccentricity > GPS_MAXIMUM_ECCENTRICITY) {
         return FAILURE_RETURN;
-    if (eph->toe > GPS_MAXIMUM_TOC)
+    }
+    if (eph->toe > GPS_MAXIMUM_TOC) {
         return FAILURE_RETURN;
+    }
     navMsg->subframe2Received = TRUE_FLAG;
 
     return SUCCESS_RETURN;
@@ -959,11 +961,12 @@ static int NgParseGalWord05(TNgNavParser *parser)
 static void Commit(TNgBroadcast *b, int galileo)
 {
     int complete = b->subframe1Received && b->subframe2Received && b->subframe3Received;
-    if (galileo)
+    if (galileo) {
         complete = complete && b->subframe4Received && b->subframe5Received &&
                    b->ephTmp.iode1 == b->ephTmp.iode2 && b->ephTmp.iode2 == b->ephTmp.iode4;
-    else
+    } else {
         complete = complete && ((b->clkTmp.iodc & 255) == b->ephTmp.iode2);
+    }
     complete = complete && b->ephTmp.iode2 == b->ephTmp.iode3;
     if (complete && isfinite(b->ephTmp.sqrtA) && b->ephTmp.sqrtA > 4000 && b->ephTmp.sqrtA < 7000 &&
         b->ephTmp.eccentricity >= 0 && b->ephTmp.eccentricity < 1 && b->ephTmp.toe >= 0 &&
@@ -983,15 +986,17 @@ static void NgParseGpsIono(TNgNavParser *p)
     unsigned page = (unsigned)NgExtractField(p->subframe, 8, 9, 4, 2);
     unsigned dataId = (unsigned)NgExtractField(p->subframe, 8, 8, 4, 6);
     unsigned k;
-    if (dataId != 1 || page != 56)
+    if (dataId != 1 || page != 56) {
         return;
+    }
     for (k = 0; k < 8; ++k) {
         double value = ldexp(
             (double)NgExtractTwoCompField(p->subframe, first[k], first[k] + 1, 6, 2, 8), shift[k]);
-        if (k < 4)
+        if (k < 4) {
             b->iono.alphaGps[k] = value;
-        else
+        } else {
             b->iono.betaGps[k - 4] = value;
+        }
     }
     b->ionoReceived = 1;
 }
@@ -1009,16 +1014,18 @@ int NgBroadcastGps(TNgBroadcast *broadcast, const uint32_t words[10], unsigned i
         p.subframe[4 * k + 2] = (unsigned char)(words[k] >> 8);
         p.subframe[4 * k + 3] = (unsigned char)words[k];
     }
-    if (id == 1)
+    if (id == 1) {
         result = NgParseGpsSubframe1(&p);
-    else if (id == 2)
+    } else if (id == 2) {
         result = NgParseGpsSubframe2(&p);
-    else if (id == 3)
+    } else if (id == 3) {
         result = NgParseGpsSubframe3(&p);
-    else if (id == 4)
+    } else if (id == 4) {
         NgParseGpsIono(&p);
-    if (!result)
+    }
+    if (!result) {
         Commit(broadcast, 0);
+    }
     return result;
 }
 

@@ -35,9 +35,10 @@ static const uint8_t encoded[] = {
 /** Write a signed or unsigned field as its two's-complement wire bits. */
 static void Pack(uint8_t *data, unsigned *cursor, unsigned width, int64_t value)
 {
-    for (unsigned i = 0; i < width; ++i, ++*cursor)
+    for (unsigned i = 0; i < width; ++i, ++*cursor) {
         data[*cursor / 8] |=
             (uint8_t)((((uint64_t)value >> (width - 1 - i)) & 1u) << (7u - *cursor % 8));
+    }
 }
 
 /** Assemble known signed IGSO elements independently of the unpacker. */
@@ -53,8 +54,9 @@ static TNgBcnv1Frame Fixture(void)
     TNgBcnv1Frame frame = {
         .prn = 63, .week = 501, .hour = 167, .soh = 199, .iodc = 18, .iode = 18, .pageId = 1};
     unsigned bit = 39;
-    for (unsigned k = 0; k < sizeof(widths) / sizeof(*widths); ++k)
+    for (unsigned k = 0; k < sizeof(widths) / sizeof(*widths); ++k) {
         Pack(frame.sf2, &bit, widths[k], values[k]);
+    }
     CHECK(bit == 569);
     return frame;
 }
@@ -110,8 +112,9 @@ int main(void)
     CheckBdgimPage();
     TNgBcnv1Frame expected = Fixture(), frame;
     int8_t symbols[NG_BCNV1_FRAME_SYMBOLS];
-    for (size_t n = 0; n < sizeof(symbols); ++n)
+    for (size_t n = 0; n < sizeof(symbols); ++n) {
         symbols[n] = (encoded[n / 8] >> (7u - n % 8)) & 1 ? -100 : 100;
+    }
     CHECK(NgBcnv1Decode(symbols, 63, &frame) == NG_OK);
     CHECK(frame.prn == expected.prn && frame.week == expected.week && frame.hour == expected.hour &&
           frame.soh == expected.soh && frame.iodc == expected.iodc && frame.iode == expected.iode &&

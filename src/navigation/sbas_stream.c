@@ -20,8 +20,8 @@ static void Deliver(TNgSbasLane *lane, TNgSbasCorrections *bank, double now, uns
         return;
     }
     unsigned preamble = 0;
-    for (unsigned k = 0; k < 8; ++k) {
-        preamble = (preamble << 1) | lane->bits[(lane->bit + k) % 250];
+    for (unsigned bitIndex = 0; bitIndex < 8; ++bitIndex) {
+        preamble = (preamble << 1) | lane->bits[(lane->bit + bitIndex) % 250];
     }
     unsigned invert = 0;
     if (preamble == 0xac || preamble == 0x65 || preamble == 0x39) {
@@ -34,8 +34,9 @@ static void Deliver(TNgSbasLane *lane, TNgSbasCorrections *bank, double now, uns
         return;
     }
     uint8_t frame[NG_SBAS_FRAME_BYTES] = {0};
-    for (unsigned k = 0; k < 250; ++k) {
-        frame[k / 8] |= (uint8_t)((lane->bits[(lane->bit + k) % 250] ^ invert) << (7 - k % 8));
+    for (unsigned bitIndex = 0; bitIndex < 250; ++bitIndex) {
+        frame[bitIndex / 8] |=
+            (uint8_t)((lane->bits[(lane->bit + bitIndex) % 250] ^ invert) << (7 - bitIndex % 8));
     }
     (void)NgSbasPushFrame(bank, frame, now);
 }

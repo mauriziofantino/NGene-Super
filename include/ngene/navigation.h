@@ -50,23 +50,71 @@ typedef struct {
     } galileo;                                   /**< Four-ms Galileo symbol decoder. */
 } TNgNavigation;
 
-/** Reset all timing and fragments on assignment, RF gap or loss of qualification. */
+/** @brief Reset the symbol decoder, week-time anchor and broadcast cache.
+ * @param[out] navigation Channel-owned state. Call before first use or reassignment.
+ */
 void NgNavigationReset(TNgNavigation *navigation);
-/** Discard demodulation/timing after carrier loss, retaining the per-satellite broadcast cache. */
+
+/** @brief Invalidate symbol and time synchronization after carrier loss.
+ * @param[in,out] navigation Channel-owned state. Retains the satellite broadcast cache.
+ */
 void NgNavigationLoseTiming(TNgNavigation *navigation);
-/** Verify and polarity-correct one GPS word, including preceding D29 and D30. */
+
+/** @brief Verify a GPS LNAV word with its preceding D29 and D30 bits.
+ * @param[in,out] word Packed 32-bit value. Data polarity is corrected before checking.
+ * @return One for a parity-valid word, zero otherwise.
+ */
 int NgNavigationGpsParity(uint32_t *word);
-/** Feed one GPS data bit; used by the prompt demodulator and deterministic fixtures. */
+
+/** @brief Feed one already-demodulated GPS LNAV data bit.
+ * @param[in,out] navigation Channel-owned word and subframe decoder.
+ * @param[in] bit Binary data value.
+ * @param[in] endSample Exclusive sample index of the bit boundary.
+ */
 void NgNavigationGpsBit(TNgNavigation *navigation, unsigned bit, uint64_t endSample);
-/** Feed each complete 1-ms GPS prompt exactly once; FLL epochs never contribute bits. */
+
+/** @brief Feed one complete 1-ms GPS prompt while retaining the native LNAV cadence.
+ * @param[in,out] navigation Channel-owned synchronization and decoder state.
+ * @param[in] i Coherent in-phase prompt sum in native ADC units.
+ * @param[in] q Coherent quadrature prompt sum in native ADC units.
+ * @param[in] pll Nonzero when the carrier loop is in PLL.
+ * @param[in] endSample Exclusive sample index of the prompt.
+ * @param[in] transitionChecks Required count of consistent 20-ms transition intervals.
+ * FLL input clears symbol timing. The caller must serialize all accesses to the state.
+ */
 void NgNavigationGpsPromptWithChecks(TNgNavigation *navigation, double i, double q, int pll,
                                      uint64_t endSample, unsigned transitionChecks);
+
+/** @brief Feed one GPS prompt using the default five transition checks.
+ * @param[in,out] navigation Channel-owned synchronization and decoder state.
+ * @param[in] i Coherent in-phase prompt sum in native ADC units.
+ * @param[in] q Coherent quadrature prompt sum in native ADC units.
+ * @param[in] pll Nonzero when the carrier loop is in PLL.
+ * @param[in] endSample Exclusive sample index of the prompt.
+ */
 void NgNavigationGpsPrompt(TNgNavigation *navigation, double i, double q, int pll,
                            uint64_t endSample);
-/** Feed each coherent 4-ms E1-B prompt once; page parity/CRC establishes data validity. */
+
+/** @brief Feed one coherent 4-ms Galileo E1-B prompt into I/NAV.
+ * @param[in,out] navigation Channel-owned framing and decoder state.
+ * @param[in] i Coherent in-phase prompt sum in native ADC units.
+ * @param[in] pll Nonzero when the carrier loop is in PLL.
+ * @param[in] endSample Exclusive sample index of the symbol.
+ */
 void NgNavigationGalileoPrompt(TNgNavigation *navigation, double i, int pll, uint64_t endSample);
-/** Parse already parity-validated GPS words into the per-satellite broadcast cache. */
+
+/** @brief Update the broadcast cache from ten parity-validated GPS words.
+ * @param[in,out] broadcast Satellite cache owned by the caller.
+ * @param[in] words Ten validated LNAV words in transmission order.
+ * @param[in] id LNAV subframe number.
+ * @return Decoder status.
+ */
 int NgBroadcastGps(TNgBroadcast *broadcast, const uint32_t words[10], unsigned id);
-/** Parse a CRC-validated I/NAV data word; returns one when it supplies GST. */
+
+/** @brief Update the broadcast cache from a CRC-validated Galileo I/NAV word.
+ * @param[in,out] broadcast Satellite cache owned by the caller.
+ * @param[in] data Sixteen bytes of decoded word data.
+ * @return One when the word supplies a GST anchor, zero otherwise.
+ */
 int NgBroadcastGalileo(TNgBroadcast *broadcast, const unsigned char data[16]);
 #endif

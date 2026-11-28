@@ -70,29 +70,29 @@ struct TNgTracking {
 };
 
 /** Recalculate the legacy filters at assignment for the signal's coherent period. */
-static void CalculateLoopCoefficients(TNgTracking *t, unsigned milliseconds)
+static void CalculateLoopCoefficients(TNgTracking *tracking, unsigned milliseconds)
 {
     const double delta = (double)milliseconds / 1000.0;
-    t->snapshot.loopCoherentMs = milliseconds;
-    const TNgLoopSettings *settings = t->config.loops[t->system - 1];
+    tracking->snapshot.loopCoherentMs = milliseconds;
+    const TNgLoopSettings *settings = tracking->config.loops[tracking->system - 1];
     for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
         const double bw = settings[loop].bandwidthHz;
         const double gain = settings[loop].gain;
-        if (t->system == NG_CONSTELLATION_BEIDOU) {
+        if (tracking->system == NG_CONSTELLATION_BEIDOU) {
             /* Keep the B1C 10-ms first-order frequency/code and PI carrier laws.
              * Scale their existing gains relative to the configured nominal bandwidth. */
             const double ratio = bw / (loop == NG_LOOP_DLL ? 2.0 : 15.0);
-            t->loopStep[loop] = (loop == NG_LOOP_DLL   ? 0.075
-                                 : loop == NG_LOOP_FLL ? 0.55
-                                                       : 0.48) *
-                                ratio / gain;
-            t->loopIntegral[loop] = 0.12 * ratio * ratio / gain;
+            tracking->loopStep[loop] = (loop == NG_LOOP_DLL   ? 0.075
+                                        : loop == NG_LOOP_FLL ? 0.55
+                                                              : 0.48) *
+                                       ratio / gain;
+            tracking->loopIntegral[loop] = 0.12 * ratio * ratio / gain;
         } else {
             const double wn = bw / 0.53;
             const double t1 = (gain * (loop == NG_LOOP_PLL ? delta * 1000.0 : 1.0)) / (wn * wn);
             const double t2 = sqrt(2.0) / wn;
-            t->loopStep[loop] = t2 / t1;
-            t->loopIntegral[loop] = delta / t1;
+            tracking->loopStep[loop] = t2 / t1;
+            tracking->loopIntegral[loop] = delta / t1;
         }
     }
 }
@@ -152,14 +152,16 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
          config->mixerBits != 16) ||
         config->dopplerSmoothingMs > 10000 || config->tapCount < 3 ||
         config->tapCount > NG_TRACKING_MAX_TAPS || !(config->tapCount & 1u) ||
-        !isfinite(config->spacingChips) || config->spacingChips <= 0 || config->spacingChips > 1)
+        !isfinite(config->spacingChips) || config->spacingChips <= 0 || config->spacingChips > 1) {
         return NgFail(error, "Invalid tracking modes or multi-correlator geometry");
+    }
     for (unsigned signal = 0; signal < NG_TRACKING_EGNOS_SIGNAL; ++signal) {
         for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
             const TNgLoopSettings settings = config->loops[signal][loop];
             if (!(settings.bandwidthHz >= 0.1 && settings.bandwidthHz <= 50) ||
-                !(settings.gain >= 0.1 && settings.gain <= 20))
+                !(settings.gain >= 0.1 && settings.gain <= 20)) {
                 return NgFail(error, "Invalid tracking filter bandwidth or gain");
+            }
         }
     }
     return NG_OK;
@@ -170,19 +172,24 @@ int NgTrackingCreate(const TNgTrackingConfig *config, const TNgStreamInfo *strea
                      unsigned constellation, TNgTracking **out, TNgError *error)
 {
     TNgTracking *tracking;
-    if (!out)
+    if (!out) {
         return NgFail(error, "Missing tracking destination");
+    }
     *out = NULL;
-    if (NgTrackingValidate(config, error) != NG_OK)
+    if (NgTrackingValidate(config, error) != NG_OK) {
         return NG_ERROR;
+    }
     if (!stream || stream->sampleRateHz < 2048000 || stream->sampleRateHz > 20000000 ||
-        (constellation < 1 || constellation > NG_CONSTELLATION_COUNT))
+        (constellation < 1 || constellation > NG_CONSTELLATION_COUNT)) {
         return NgFail(error, "Unsupported tracking stream or constellation");
-    if (config->mixerBits != 0 && stream->format != NG_FORMAT_CI8)
+    }
+    if (config->mixerBits != 0 && stream->format != NG_FORMAT_CI8) {
         return NgFail(error, "Byte arithmetic requires a CI8 common stream");
+    }
     tracking = calloc(1, sizeof(*tracking));
-    if (!tracking)
+    if (!tracking) {
         return NgFail(error, "Cannot allocate tracking workspace");
+    }
     tracking->config = *config;
     tracking->observeRequested = 1;
     tracking->stream = *stream;
@@ -197,8 +204,9 @@ int NgTrackingCreate(const TNgTrackingConfig *config, const TNgStreamInfo *strea
 /** Reuse a slot's private workspace for a supported primary code without allocating. */
 int NgTrackingSetSignal(TNgTracking *tracking, unsigned constellation, TNgError *error)
 {
-    if (!tracking || (constellation < 1 || constellation > NG_CONSTELLATION_COUNT))
+    if (!tracking || (constellation < 1 || constellation > NG_CONSTELLATION_COUNT)) {
         return NgFail(error, "Invalid tracking signal assignment");
+    }
     tracking->system = constellation;
     tracking->period = constellation == 1   ? 1023u
                        : constellation == 2 ? 4092u
@@ -212,8 +220,9 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     unsigned k;
     if (!tracking || !result || !result->confirmed ||
         !NgSatellitePrnValid((TNgConstellation)tracking->system, result->prn) ||
-        !isfinite(result->dopplerHz) || !isfinite(result->codePhaseChips))
+        !isfinite(result->dopplerHz) || !isfinite(result->codePhaseChips)) {
         return NgFail(error, "Tracking requires a finite confirmed acquisition seed");
+    }
     memset(&tracking->snapshot, 0, sizeof(tracking->snapshot));
     tracking->m2 = tracking->m4 = tracking->cn0Smooth = 0;
     tracking->cn0Samples = 0;
@@ -257,25 +266,30 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     double spacing = tracking->system == NG_CONSTELLATION_GPS
                          ? tracking->config.spacingChips
                          : tracking->config.galileoSpacingChips;
-    if (tracking->system == NG_CONSTELLATION_BEIDOU && tracking->config.beidouSpacingChips > 0)
+    if (tracking->system == NG_CONSTELLATION_BEIDOU && tracking->config.beidouSpacingChips > 0) {
         spacing = tracking->config.beidouSpacingChips;
-    for (k = 0; k < tracking->config.tapCount; ++k)
+    }
+    for (k = 0; k < tracking->config.tapCount; ++k) {
         tracking->snapshot.offset[k] = tracking->offsets[k] =
             ((double)k - tracking->config.tapCount / 2u) * spacing;
+    }
     memset(tracking->sumI, 0, sizeof(tracking->sumI));
     memset(tracking->sumQ, 0, sizeof(tracking->sumQ));
-    if (tracking->system == 1)
+    if (tracking->system == 1) {
         return NgGpsCaGenerate(result->prn, tracking->chips, error);
+    }
     if (tracking->system == NG_CONSTELLATION_BEIDOU) {
         int8_t primary[NG_BEIDOU_B1C_LENGTH];
-        if (NgBeidouB1cGenerate(result->prn, NG_BEIDOU_B1C_DATA, primary, error) != NG_OK)
+        if (NgBeidouB1cGenerate(result->prn, NG_BEIDOU_B1C_DATA, primary, error) != NG_OK) {
             return NG_ERROR;
+        }
         for (k = 0; k < NG_BEIDOU_B1C_LENGTH; ++k) {
             tracking->beidouData[2 * k] = primary[k];
             tracking->beidouData[2 * k + 1] = (int8_t)-primary[k];
         }
-        if (NgBeidouB1cGenerate(result->prn, NG_BEIDOU_B1C_PILOT, primary, error) != NG_OK)
+        if (NgBeidouB1cGenerate(result->prn, NG_BEIDOU_B1C_PILOT, primary, error) != NG_OK) {
             return NG_ERROR;
+        }
         for (k = 0; k < NG_BEIDOU_B1C_LENGTH; ++k) {
             tracking->chips[2 * k] = primary[k];
             tracking->chips[2 * k + 1] = (int8_t)-primary[k];
@@ -290,37 +304,42 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     return NG_OK;
 }
 
-static double Loop(const TNgTracking *t, unsigned loop, double previous, double error,
+static double Loop(const TNgTracking *tracking, unsigned loop, double previous, double error,
                    double oldError)
 {
-    return previous + t->loopStep[loop] * (error - oldError) + t->loopIntegral[loop] * error;
+    return previous + tracking->loopStep[loop] * (error - oldError) +
+           tracking->loopIntegral[loop] * error;
 }
 
 /** Classic M2/M4 moment estimator, adapted to a full precision complex carrier.
  * Unlike the packed IF path, no fixed carrier quantization correction is added.
  * This observation never changes acquisition thresholds or certifies navigation lock. */
-static void EstimateCn0(TNgTracking *t, double i, double q, double duration)
+static void EstimateCn0(TNgTracking *tracking, double promptInPhase, double promptQuadrature,
+                        double duration)
 {
-    double power = i * i + q * q;
-    t->snapshot.cn0Valid = 0;
-    if (!t->cn0Samples) {
-        t->m2 = power;
-        t->m4 = power * power;
+    double power = promptInPhase * promptInPhase + promptQuadrature * promptQuadrature;
+    tracking->snapshot.cn0Valid = 0;
+    if (!tracking->cn0Samples) {
+        tracking->m2 = power;
+        tracking->m4 = power * power;
     } else {
-        t->m2 += (power - t->m2) / 100.0;
-        t->m4 += (power * power - t->m4) / 100.0;
+        tracking->m2 += (power - tracking->m2) / 100.0;
+        tracking->m4 += (power * power - tracking->m4) / 100.0;
     }
-    ++t->cn0Samples;
-    double squareSignal = 2 * t->m2 * t->m2 - t->m4;
-    if (t->cn0Samples >= 100 && squareSignal > 0 && duration > 0 && !t->config.squareCarrier) {
-        double signal = sqrt(squareSignal), noise = t->m2 - signal;
+    ++tracking->cn0Samples;
+    double squareSignal = 2 * tracking->m2 * tracking->m2 - tracking->m4;
+    if (tracking->cn0Samples >= 100 && squareSignal > 0 && duration > 0 &&
+        !tracking->config.squareCarrier) {
+        double signal = sqrt(squareSignal), noise = tracking->m2 - signal;
         if (noise > 0 && signal > 0) {
             double estimate = 10 * log10(signal / noise / duration);
             if (isfinite(estimate)) {
-                t->cn0Smooth =
-                    t->cn0Smooth == 0 ? estimate : t->cn0Smooth + (estimate - t->cn0Smooth) / 100.0;
-                t->snapshot.cn0DbHz = t->cn0Smooth;
-                t->snapshot.cn0Valid = 1;
+                tracking->cn0Smooth =
+                    tracking->cn0Smooth == 0
+                        ? estimate
+                        : tracking->cn0Smooth + (estimate - tracking->cn0Smooth) / 100.0;
+                tracking->snapshot.cn0DbHz = tracking->cn0Smooth;
+                tracking->snapshot.cn0Valid = 1;
             }
         }
     }
@@ -329,390 +348,466 @@ static void EstimateCn0(TNgTracking *t, double i, double q, double duration)
 /** Observe half-chip BOC probes over 100 ms. Classic's side-peak correction
  * helper is not called by its active tracking path. These observations therefore
  * qualify the acquisition handoff without changing code phase or search decisions. */
-static void QualifyGalileoPeak(TNgTracking *t, double i, double q)
+static void QualifyGalileoPeak(TNgTracking *tracking, double promptInPhase, double promptQuadrature)
 {
     unsigned side;
-    for (side = 0; side < 2; ++side)
-        t->peakPower[side == 0 ? 0 : 2] +=
-            t->sideI[side] * t->sideI[side] + t->sideQ[side] * t->sideQ[side];
-    t->peakPower[1] += i * i + q * q;
-    t->peakMs += 4;
-    memset(t->sideI, 0, sizeof(t->sideI));
-    memset(t->sideQ, 0, sizeof(t->sideQ));
-    if (t->peakMs < 100)
+    for (side = 0; side < 2; ++side) {
+        tracking->peakPower[side == 0 ? 0 : 2] += tracking->sideI[side] * tracking->sideI[side] +
+                                                  tracking->sideQ[side] * tracking->sideQ[side];
+    }
+    tracking->peakPower[1] += promptInPhase * promptInPhase + promptQuadrature * promptQuadrature;
+    tracking->peakMs += 4;
+    memset(tracking->sideI, 0, sizeof(tracking->sideI));
+    memset(tracking->sideQ, 0, sizeof(tracking->sideQ));
+    if (tracking->peakMs < 100) {
         return;
-    double left = t->peakPower[0], prompt = t->peakPower[1], right = t->peakPower[2];
-    t->snapshot.mainPeakVerified = prompt > left && prompt > right;
-    memset(t->peakPower, 0, sizeof(t->peakPower));
-    t->peakMs = 0;
+    }
+    double left = tracking->peakPower[0], prompt = tracking->peakPower[1],
+           right = tracking->peakPower[2];
+    tracking->snapshot.mainPeakVerified = prompt > left && prompt > right;
+    memset(tracking->peakPower, 0, sizeof(tracking->peakPower));
+    tracking->peakMs = 0;
 }
 
 /** Convert a complete B1C data prompt to a symbol and update BDT observations. */
-static void BeidouPrompt(TNgTracking *t, double prompt)
+static void BeidouPrompt(TNgTracking *tracking, double prompt)
 {
     TNgBcnv1Frame frame;
     uint64_t firstSample;
-    double scale = t->m2 > 0 ? 32.0 / sqrt(t->m2) : 0;
+    double scale = tracking->m2 > 0 ? 32.0 / sqrt(tracking->m2) : 0;
     int8_t symbol = (int8_t)lround(fmax(-127, fmin(127, scale * prompt)));
-    if (!t->snapshot.pll)
+    if (!tracking->snapshot.pll) {
         return;
-    if (t->bdt.prn)
-        ++t->bdtPeriods;
-    if (NgBcnv1Push(&t->bcnv1, t->seed.prn, t->seed.epoch, t->start, t->expected, symbol, &frame,
-                    &firstSample) == NG_OK &&
-        NgBcnv1Accept(&t->bdt, &frame, t->seed.epoch, firstSample) == NG_OK) {
-        t->bdtPeriods = t->bcnv1.elapsedSymbols;
-        ++t->bcnv1Frames;
     }
-    t->snapshot.navigation.towValid = 0;
-    if (t->bdt.prn) {
-        double chips = (double)t->bdtPeriods * NG_BEIDOU_B1C_LENGTH + t->codePhase;
-        NgBcnv1Navigation(&t->bdt, t->seed.epoch, t->expected, chips, NG_BEIDOU_B1C_DATA,
-                          &t->snapshot.navigation);
+    if (tracking->bdt.prn) {
+        ++tracking->bdtPeriods;
     }
-    t->snapshot.navigation.validSubframes = t->bcnv1Frames;
+    if (NgBcnv1Push(&tracking->bcnv1, tracking->seed.prn, tracking->seed.epoch, tracking->start,
+                    tracking->expected, symbol, &frame, &firstSample) == NG_OK &&
+        NgBcnv1Accept(&tracking->bdt, &frame, tracking->seed.epoch, firstSample) == NG_OK) {
+        tracking->bdtPeriods = tracking->bcnv1.elapsedSymbols;
+        ++tracking->bcnv1Frames;
+    }
+    tracking->snapshot.navigation.towValid = 0;
+    if (tracking->bdt.prn) {
+        double chips = (double)tracking->bdtPeriods * NG_BEIDOU_B1C_LENGTH + tracking->codePhase;
+        NgBcnv1Navigation(&tracking->bdt, tracking->seed.epoch, tracking->expected, chips,
+                          NG_BEIDOU_B1C_DATA, &tracking->snapshot.navigation);
+    }
+    tracking->snapshot.navigation.validSubframes = tracking->bcnv1Frames;
 }
 
 /** B3 loop gains for 10-ms prompts. The Costas phase and frequency errors
  * remove the unknown sign of the pilot's secondary-code symbol. */
-static void BeidouLoops(TNgTracking *t, double i, double q, double dll, double early, double late,
+static void BeidouLoops(TNgTracking *tracking, double promptInPhase, double promptQuadrature,
+                        double codeError, double earlyPower, double latePower,
                         double *reportedError)
 {
     const double tau = 6.2831853071795864769;
     const double duration = 0.01;
-    const double phase = 0.5 * atan2(2 * i * q, i * i - q * q) / tau;
-    const double dot = t->oldI * i + t->oldQ * q;
-    const double cross = t->oldI * q - t->oldQ * i;
+    const double phase =
+        0.5 *
+        atan2(2 * promptInPhase * promptQuadrature,
+              promptInPhase * promptInPhase - promptQuadrature * promptQuadrature) /
+        tau;
+    const double dot = tracking->oldI * promptInPhase + tracking->oldQ * promptQuadrature;
+    const double cross = tracking->oldI * promptQuadrature - tracking->oldQ * promptInPhase;
     const double residual =
         0.5 * atan2(2 * dot * cross, dot * dot - cross * cross) / (tau * duration);
-    const double power = i * i + q * q;
-    const int centered = power > 1.3 * fmax(early, late);
-    if (!t->snapshot.pll && t->snapshot.integrations) {
-        t->carrierHz += t->loopStep[NG_LOOP_FLL] * residual;
-        if (centered && fabs(residual) < 3)
-            ++t->beidouStable;
-        else
-            t->beidouStable = 0;
-        if (t->beidouStable >= 4)
-            t->snapshot.pll = 1;
+    const double power = promptInPhase * promptInPhase + promptQuadrature * promptQuadrature;
+    const int centered = power > 1.3 * fmax(earlyPower, latePower);
+    if (!tracking->snapshot.pll && tracking->snapshot.integrations) {
+        tracking->carrierHz += tracking->loopStep[NG_LOOP_FLL] * residual;
+        if (centered && fabs(residual) < 3) {
+            ++tracking->beidouStable;
+        } else {
+            tracking->beidouStable = 0;
+        }
+        if (tracking->beidouStable >= 4) {
+            tracking->snapshot.pll = 1;
+        }
     }
-    if (t->snapshot.pll) {
-        t->carrierHz += t->loopIntegral[NG_LOOP_PLL] * phase / duration;
-        t->carrierPhase = fmod(t->carrierPhase + t->loopStep[NG_LOOP_PLL] * phase + 1.0, 1.0);
+    if (tracking->snapshot.pll) {
+        tracking->carrierHz += tracking->loopIntegral[NG_LOOP_PLL] * phase / duration;
+        tracking->carrierPhase =
+            fmod(tracking->carrierPhase + tracking->loopStep[NG_LOOP_PLL] * phase + 1.0, 1.0);
     }
-    const double doppler = t->carrierHz - (double)t->stream.digitalIfHz;
+    const double doppler = tracking->carrierHz - (double)tracking->stream.digitalIfHz;
     /* Apply the code phase correction over the next period so that the decoder
      * sees exactly one coherent prompt for every primary-code boundary. */
-    t->snapshot.codeRateHz =
-        1023000 * (1 + doppler / 1575420000.0) + t->loopStep[NG_LOOP_DLL] * dll / duration;
+    tracking->snapshot.codeRateHz = 1023000 * (1 + doppler / 1575420000.0) +
+                                    tracking->loopStep[NG_LOOP_DLL] * codeError / duration;
     *reportedError = phase;
 }
 
 /** Extend GPS PLL/DLL integration only over aligned, same-bit prompt groups.
  * One-ms navigation prompts, measurements and lock supervision continue independently. */
-static int GpsLoopPrompt(TNgTracking *t, unsigned p, double *i, double *q, double *dll)
+static int GpsLoopPrompt(TNgTracking *tracking, unsigned promptTap, double *loopInPhase,
+                         double *loopQuadrature, double *codeError)
 {
-    const unsigned wanted = t->config.gpsCoherentMs;
-    if (wanted == 1 || t->system != NG_CONSTELLATION_GPS || t->egnosPrompt) {
+    const unsigned wanted = tracking->config.gpsCoherentMs;
+    if (wanted == 1 || tracking->system != NG_CONSTELLATION_GPS || tracking->egnosPrompt) {
         return 1;
     }
-    const int synchronized = t->snapshot.pll && t->navigation.snapshot.bitSynchronized;
+    const int synchronized =
+        tracking->snapshot.pll && tracking->navigation.snapshot.bitSynchronized;
     if (!synchronized) {
-        t->coherentPrompts = 0;
-        if (t->snapshot.loopCoherentMs != 1)
-            CalculateLoopCoefficients(t, 1);
+        tracking->coherentPrompts = 0;
+        if (tracking->snapshot.loopCoherentMs != 1) {
+            CalculateLoopCoefficients(tracking, 1);
+        }
         return 1;
     }
-    if (!t->coherentPrompts) {
-        if (t->navigation.bitMs % wanted != 0)
+    if (!tracking->coherentPrompts) {
+        if (tracking->navigation.bitMs % wanted != 0) {
             return 1;
-        memset(t->coherentI, 0, sizeof(t->coherentI));
-        memset(t->coherentQ, 0, sizeof(t->coherentQ));
+        }
+        memset(tracking->coherentI, 0, sizeof(tracking->coherentI));
+        memset(tracking->coherentQ, 0, sizeof(tracking->coherentQ));
     }
-    for (unsigned k = 0; k < 3; ++k) {
-        t->coherentI[k] += t->sumI[p - 1 + k];
-        t->coherentQ[k] += t->sumQ[p - 1 + k];
+    for (unsigned tapIndex = 0; tapIndex < 3; ++tapIndex) {
+        tracking->coherentI[tapIndex] += tracking->sumI[promptTap - 1 + tapIndex];
+        tracking->coherentQ[tapIndex] += tracking->sumQ[promptTap - 1 + tapIndex];
     }
-    if (++t->coherentPrompts < wanted)
+    if (++tracking->coherentPrompts < wanted) {
         return 0;
-    t->coherentPrompts = 0;
-    if (t->snapshot.loopCoherentMs != wanted)
-        CalculateLoopCoefficients(t, wanted);
-    *i = t->coherentI[1];
-    *q = t->coherentQ[1];
-    const double early = t->coherentI[0] * t->coherentI[0] + t->coherentQ[0] * t->coherentQ[0];
-    const double late = t->coherentI[2] * t->coherentI[2] + t->coherentQ[2] * t->coherentQ[2];
-    *dll = early + late > 0 ? 0.5 * (early - late) / (early + late) : 0;
+    }
+    tracking->coherentPrompts = 0;
+    if (tracking->snapshot.loopCoherentMs != wanted) {
+        CalculateLoopCoefficients(tracking, wanted);
+    }
+    *loopInPhase = tracking->coherentI[1];
+    *loopQuadrature = tracking->coherentQ[1];
+    const double early = tracking->coherentI[0] * tracking->coherentI[0] +
+                         tracking->coherentQ[0] * tracking->coherentQ[0];
+    const double late = tracking->coherentI[2] * tracking->coherentI[2] +
+                        tracking->coherentQ[2] * tracking->coherentQ[2];
+    *codeError = early + late > 0 ? 0.5 * (early - late) / (early + late) : 0;
     return 1;
 }
 
 /** Commit one coherent integration and update the channel loops. */
-static void Complete(TNgTracking *t)
+static void Complete(TNgTracking *tracking)
 {
-    unsigned k, p = t->config.tapCount / 2;
-    double e = t->sumI[p - 1] * t->sumI[p - 1] + t->sumQ[p - 1] * t->sumQ[p - 1];
-    double l = t->sumI[p + 1] * t->sumI[p + 1] + t->sumQ[p + 1] * t->sumQ[p + 1];
-    const int beidou = t->system == NG_CONSTELLATION_BEIDOU;
-    double i = beidou ? t->sumQ[p] : t->sumI[p];
-    double q = beidou ? -t->sumI[p] : t->sumQ[p];
+    unsigned tapIndex;
+    unsigned promptTap = tracking->config.tapCount / 2;
+    double earlyPower = tracking->sumI[promptTap - 1] * tracking->sumI[promptTap - 1] +
+                        tracking->sumQ[promptTap - 1] * tracking->sumQ[promptTap - 1];
+    double latePower = tracking->sumI[promptTap + 1] * tracking->sumI[promptTap + 1] +
+                       tracking->sumQ[promptTap + 1] * tracking->sumQ[promptTap + 1];
+    const int beidou = tracking->system == NG_CONSTELLATION_BEIDOU;
+    double promptInPhase = beidou ? tracking->sumQ[promptTap] : tracking->sumI[promptTap];
+    double promptQuadrature = beidou ? -tracking->sumI[promptTap] : tracking->sumQ[promptTap];
     double error = 0;
-    double dll = e + l > 0 ? (t->system == 1 ? 0.5 : 1.0 / 6.0) * (e - l) / (e + l) : 0;
-    double loopI = i, loopQ = q;
+    double dll = earlyPower + latePower > 0
+                     ? (tracking->system == 1 ? 0.5 : 1.0 / 6.0) * (earlyPower - latePower) /
+                           (earlyPower + latePower)
+                     : 0;
+    double loopI = promptInPhase, loopQ = promptQuadrature;
     if (beidou) {
-        BeidouLoops(t, i, q, dll * 6, e, l, &error);
-    } else if (GpsLoopPrompt(t, p, &loopI, &loopQ, &dll)) {
-        if (t->snapshot.pll) {
-            if (loopI != 0)
+        BeidouLoops(tracking, promptInPhase, promptQuadrature, dll * 6, earlyPower, latePower,
+                    &error);
+    } else if (GpsLoopPrompt(tracking, promptTap, &loopI, &loopQ, &dll)) {
+        if (tracking->snapshot.pll) {
+            if (loopI != 0) {
                 error = -atan(loopQ / loopI) / 6.2831853071795864769;
-        } else if (t->snapshot.integrations) {
-            double dot = t->oldI * i + t->oldQ * q;
-            double cross = t->oldI * q - i * t->oldQ;
-            if (dot != 0)
+            }
+        } else if (tracking->snapshot.integrations) {
+            double dot = tracking->oldI * promptInPhase + tracking->oldQ * promptQuadrature;
+            double cross = tracking->oldI * promptQuadrature - promptInPhase * tracking->oldQ;
+            if (dot != 0) {
                 error = -atan(cross / dot) / 6.2831853071795864769;
+            }
         }
         /* Complex exp(-j phase) reverses the Classic IF Q convention. */
-        t->carrierNco = Loop(t, t->snapshot.pll ? NG_LOOP_PLL : NG_LOOP_FLL, t->carrierNco, error,
-                             t->oldCarrierError);
-        t->codeNco = Loop(t, NG_LOOP_DLL, t->codeNco, dll, t->oldDllError);
-        t->carrierHz = t->initialCarrier - t->carrierNco;
-        t->snapshot.codeRateHz = t->initialCode + t->codeNco;
-        t->oldCarrierError = error;
-        t->oldDllError = dll;
+        tracking->carrierNco = Loop(tracking, tracking->snapshot.pll ? NG_LOOP_PLL : NG_LOOP_FLL,
+                                    tracking->carrierNco, error, tracking->oldCarrierError);
+        tracking->codeNco =
+            Loop(tracking, NG_LOOP_DLL, tracking->codeNco, dll, tracking->oldDllError);
+        tracking->carrierHz = tracking->initialCarrier - tracking->carrierNco;
+        tracking->snapshot.codeRateHz = tracking->initialCode + tracking->codeNco;
+        tracking->oldCarrierError = error;
+        tracking->oldDllError = dll;
     }
-    t->oldI = i;
-    t->oldQ = q;
-    t->snapshot.integrations++;
-    t->meanFrequency += (t->carrierHz - t->meanFrequency) / t->config.fllDecisionUpdates;
-    const unsigned periodMs = t->period / 1023u;
-    const unsigned decisionUpdates = (t->config.fllDecisionIntervalMs + periodMs - 1) / periodMs;
-    if (!beidou && !t->snapshot.pll && t->snapshot.integrations % decisionUpdates == 0) {
-        if (fabs(t->meanFrequency - t->oldMean) < t->config.fllTransitionHz) {
-            t->snapshot.pll = 1;
-            t->initialCarrier = t->carrierHz;
-            t->carrierNco = t->oldCarrierError = 0;
+    tracking->oldI = promptInPhase;
+    tracking->oldQ = promptQuadrature;
+    tracking->snapshot.integrations++;
+    tracking->meanFrequency +=
+        (tracking->carrierHz - tracking->meanFrequency) / tracking->config.fllDecisionUpdates;
+    const unsigned periodMs = tracking->period / 1023u;
+    const unsigned decisionUpdates =
+        (tracking->config.fllDecisionIntervalMs + periodMs - 1) / periodMs;
+    if (!beidou && !tracking->snapshot.pll &&
+        tracking->snapshot.integrations % decisionUpdates == 0) {
+        if (fabs(tracking->meanFrequency - tracking->oldMean) < tracking->config.fllTransitionHz) {
+            tracking->snapshot.pll = 1;
+            tracking->initialCarrier = tracking->carrierHz;
+            tracking->carrierNco = tracking->oldCarrierError = 0;
         }
-        t->oldMean = t->meanFrequency;
+        tracking->oldMean = tracking->meanFrequency;
     }
-    EstimateCn0(t, i / (double)t->accumulated, q / (double)t->accumulated,
-                (double)t->accumulated / t->stream.sampleRateHz);
-    if (t->system == 2)
-        QualifyGalileoPeak(t, i, q);
-    else
-        t->snapshot.mainPeakVerified = 1;
+    EstimateCn0(tracking, promptInPhase / (double)tracking->accumulated,
+                promptQuadrature / (double)tracking->accumulated,
+                (double)tracking->accumulated / tracking->stream.sampleRateHz);
+    if (tracking->system == 2) {
+        QualifyGalileoPeak(tracking, promptInPhase, promptQuadrature);
+    } else {
+        tracking->snapshot.mainPeakVerified = 1;
+    }
     /* Classic PLL power qualification and bounded relock. FLL convergence alone
        must never occupy a receiver slot indefinitely on noise or a lost signal.
        Full false-lock correction and NCO holdover remain separate supervision. */
-    t->lockAge += t->period / 1023u;
-    if (t->snapshot.pll) {
-        double ni = i / (double)t->accumulated, nq = q / (double)t->accumulated;
-        t->lockI = 0.99 * t->lockI + 0.01 * ni * ni;
-        t->lockQ = 0.99 * t->lockQ + 0.01 * nq * nq;
-        if (t->lockAge % 100u == 0) {
-            double total = t->lockI + t->lockQ;
-            double ratio = total > 0 ? (t->lockI - t->lockQ) / total : 0;
-            if (!t->qualified && ratio > 0.8)
-                t->qualified = 1;
-            if (t->qualified) {
-                const int belowCutoff = t->config.cn0CutoffDbHz > 0 && t->snapshot.cn0Valid &&
-                                        t->snapshot.cn0DbHz < t->config.cn0CutoffDbHz;
-                if (ratio < 0.4 || belowCutoff)
-                    t->failureMs += 100;
-                else if (ratio > 0.8)
-                    t->failureMs = 0;
-                if (t->failureMs > 1000)
-                    t->snapshot.active = 0;
+    tracking->lockAge += tracking->period / 1023u;
+    if (tracking->snapshot.pll) {
+        double ni = promptInPhase / (double)tracking->accumulated,
+               nq = promptQuadrature / (double)tracking->accumulated;
+        tracking->lockI = 0.99 * tracking->lockI + 0.01 * ni * ni;
+        tracking->lockQ = 0.99 * tracking->lockQ + 0.01 * nq * nq;
+        if (tracking->lockAge % 100u == 0) {
+            double total = tracking->lockI + tracking->lockQ;
+            double ratio = total > 0 ? (tracking->lockI - tracking->lockQ) / total : 0;
+            if (!tracking->qualified && ratio > 0.8) {
+                tracking->qualified = 1;
+            }
+            if (tracking->qualified) {
+                const int belowCutoff = tracking->config.cn0CutoffDbHz > 0 &&
+                                        tracking->snapshot.cn0Valid &&
+                                        tracking->snapshot.cn0DbHz < tracking->config.cn0CutoffDbHz;
+                if (ratio < 0.4 || belowCutoff) {
+                    tracking->failureMs += 100;
+                } else if (ratio > 0.8) {
+                    tracking->failureMs = 0;
+                }
+                if (tracking->failureMs > 1000) {
+                    tracking->snapshot.active = 0;
+                }
             }
         }
     }
-    if ((!t->snapshot.pll && t->lockAge >= 4000) || (!t->qualified && t->lockAge >= 8000))
-        t->snapshot.active = 0;
-    if (!t->snapshot.active) {
-        t->snapshot.navigation.towValid = 0;
+    if ((!tracking->snapshot.pll && tracking->lockAge >= 4000) ||
+        (!tracking->qualified && tracking->lockAge >= 8000)) {
+        tracking->snapshot.active = 0;
+    }
+    if (!tracking->snapshot.active) {
+        tracking->snapshot.navigation.towValid = 0;
         return;
     }
-    if (t->egnosPrompt) {
-        if (t->snapshot.pll) {
-            t->egnosPrompt(t->egnosContext, i / (double)t->accumulated, t->expected);
+    if (tracking->egnosPrompt) {
+        if (tracking->snapshot.pll) {
+            tracking->egnosPrompt(tracking->egnosContext,
+                                  promptInPhase / (double)tracking->accumulated,
+                                  tracking->expected);
         }
-    } else if (t->system == 1) {
-        NgNavigationGpsPromptWithChecks(&t->navigation, i, q, t->snapshot.pll, t->expected,
-                                        t->config.gpsTransitionChecks);
-        t->snapshot.navigation = t->navigation.snapshot;
-    } else if (t->system == NG_CONSTELLATION_GALILEO) {
-        NgNavigationGalileoPrompt(&t->navigation, i, t->snapshot.pll, t->expected);
-        t->snapshot.navigation = t->navigation.snapshot;
+    } else if (tracking->system == 1) {
+        NgNavigationGpsPromptWithChecks(&tracking->navigation, promptInPhase, promptQuadrature,
+                                        tracking->snapshot.pll, tracking->expected,
+                                        tracking->config.gpsTransitionChecks);
+        tracking->snapshot.navigation = tracking->navigation.snapshot;
+    } else if (tracking->system == NG_CONSTELLATION_GALILEO) {
+        NgNavigationGalileoPrompt(&tracking->navigation, promptInPhase, tracking->snapshot.pll,
+                                  tracking->expected);
+        tracking->snapshot.navigation = tracking->navigation.snapshot;
     }
-    if (t->system == NG_CONSTELLATION_BEIDOU) {
-        BeidouPrompt(t, t->beidouDataI / (double)t->accumulated);
-    } else if (t->navigation.snapshot.towValid) {
-        if (t->navigation.snapshot.boundarySample == t->expected) {
-            t->transmitBoundary = t->navigation.snapshot.towSeconds;
-            t->transmitMilliseconds = 0;
-            t->transmitTimeValid = 1;
-        } else if (t->transmitTimeValid) {
-            t->transmitMilliseconds += t->period / 1023u;
+    if (tracking->system == NG_CONSTELLATION_BEIDOU) {
+        BeidouPrompt(tracking, tracking->beidouDataI / (double)tracking->accumulated);
+    } else if (tracking->navigation.snapshot.towValid) {
+        if (tracking->navigation.snapshot.boundarySample == tracking->expected) {
+            tracking->transmitBoundary = tracking->navigation.snapshot.towSeconds;
+            tracking->transmitMilliseconds = 0;
+            tracking->transmitTimeValid = 1;
+        } else if (tracking->transmitTimeValid) {
+            tracking->transmitMilliseconds += tracking->period / 1023u;
         }
-        t->snapshot.navigation.transmitTimeSeconds =
-            fmod(t->transmitBoundary + (double)t->transmitMilliseconds / 1000.0 +
-                     t->codePhase / 1023000.0,
+        tracking->snapshot.navigation.transmitTimeSeconds =
+            fmod(tracking->transmitBoundary + (double)tracking->transmitMilliseconds / 1000.0 +
+                     tracking->codePhase / 1023000.0,
                  604800.0);
-        if (!t->transmitTimeValid)
-            t->snapshot.navigation.towValid = 0;
+        if (!tracking->transmitTimeValid) {
+            tracking->snapshot.navigation.towValid = 0;
+        }
     } else {
-        t->transmitTimeValid = 0;
+        tracking->transmitTimeValid = 0;
     }
-    double elapsed = (double)(t->start - t->seed.firstSample) / t->stream.sampleRateHz;
-    double reference = fmod(t->seed.codePhaseChips +
-                                elapsed * 1023000.0 * (1.0 + t->seed.dopplerHz / 1575420000.0),
-                            t->period);
-    double delay = reference - t->startPhase;
-    if (delay > t->period / 2.0)
-        delay -= t->period;
-    if (delay < -(double)t->period / 2.0)
-        delay += t->period;
-    t->snapshot.codeDelayChips = delay;
-    t->snapshot.firstSample = t->start;
-    t->snapshot.endSample = t->expected;
+    double elapsed =
+        (double)(tracking->start - tracking->seed.firstSample) / tracking->stream.sampleRateHz;
+    double reference =
+        fmod(tracking->seed.codePhaseChips +
+                 elapsed * 1023000.0 * (1.0 + tracking->seed.dopplerHz / 1575420000.0),
+             tracking->period);
+    double delay = reference - tracking->startPhase;
+    if (delay > tracking->period / 2.0) {
+        delay -= tracking->period;
+    }
+    if (delay < -(double)tracking->period / 2.0) {
+        delay += tracking->period;
+    }
+    tracking->snapshot.codeDelayChips = delay;
+    tracking->snapshot.firstSample = tracking->start;
+    tracking->snapshot.endSample = tracking->expected;
     {
-        double rawDoppler = t->carrierHz - (double)t->stream.digitalIfHz;
-        double dt = (double)t->accumulated / t->stream.sampleRateHz;
-        double tau = (double)t->config.dopplerSmoothingMs / 1000.0;
-        t->smoothedDopplerHz =
-            tau > 0 ? t->smoothedDopplerHz + dt / (tau + dt) * (rawDoppler - t->smoothedDopplerHz)
+        double rawDoppler = tracking->carrierHz - (double)tracking->stream.digitalIfHz;
+        double dt = (double)tracking->accumulated / tracking->stream.sampleRateHz;
+        double tau = (double)tracking->config.dopplerSmoothingMs / 1000.0;
+        tracking->smoothedDopplerHz =
+            tau > 0 ? tracking->smoothedDopplerHz +
+                          dt / (tau + dt) * (rawDoppler - tracking->smoothedDopplerHz)
                     : rawDoppler;
-        t->snapshot.dopplerHz = t->smoothedDopplerHz;
+        tracking->snapshot.dopplerHz = tracking->smoothedDopplerHz;
     }
-    t->snapshot.dllError = dll;
-    t->snapshot.carrierError = error;
-    t->snapshot.tapCount = t->observeIntegration ? t->config.tapCount : 3u;
-    for (k = 0; k < t->snapshot.tapCount; ++k) {
-        unsigned source = t->observeIntegration ? k : p + k - 1;
-        t->snapshot.i[k] = t->sumI[source] / (double)t->accumulated;
-        t->snapshot.q[k] = t->sumQ[source] / (double)t->accumulated;
-        t->snapshot.offset[k] = t->offsets[source];
+    tracking->snapshot.dllError = dll;
+    tracking->snapshot.carrierError = error;
+    tracking->snapshot.tapCount = tracking->observeIntegration ? tracking->config.tapCount : 3u;
+    for (tapIndex = 0; tapIndex < tracking->snapshot.tapCount; ++tapIndex) {
+        unsigned source = tracking->observeIntegration ? tapIndex : promptTap + tapIndex - 1;
+        tracking->snapshot.i[tapIndex] = tracking->sumI[source] / (double)tracking->accumulated;
+        tracking->snapshot.q[tapIndex] = tracking->sumQ[source] / (double)tracking->accumulated;
+        tracking->snapshot.offset[tapIndex] = tracking->offsets[source];
     }
-    for (k = 0; k < t->config.tapCount; ++k) {
-        t->sumI[k] = t->sumQ[k] = 0;
+    for (tapIndex = 0; tapIndex < tracking->config.tapCount; ++tapIndex) {
+        tracking->sumI[tapIndex] = tracking->sumQ[tapIndex] = 0;
     }
-    t->beidouDataI = 0;
-    t->accumulated = 0;
+    tracking->beidouDataI = 0;
+    tracking->accumulated = 0;
 }
 
 /** Stream across arbitrary window splits and invalidate rather than integrate across gaps. */
-int NgTrackingProcess(TNgTracking *t, const TNgIqView *window, TNgError *error)
+int NgTrackingProcess(TNgTracking *tracking, const TNgIqView *window, TNgError *error)
 {
     size_t position = 0;
-    if (!t || !window)
+    if (!tracking || !window) {
         return NgFail(error, "Missing tracking input");
-    if (!t->snapshot.active || !window->meta.count)
-        return NG_OK;
-    if (window->meta.epoch != t->seed.epoch || (window->meta.flags & NG_BLOCK_GAP) ||
-        (t->started && window->meta.firstSample != t->expected) ||
-        window->meta.firstSample < t->seed.firstSample) {
-        t->snapshot.active = 0;
+    }
+    if (!tracking->snapshot.active || !window->meta.count) {
         return NG_OK;
     }
-    if (!t->started) {
-        double elapsed =
-            (double)(window->meta.firstSample - t->seed.firstSample) / t->stream.sampleRateHz;
-        t->codePhase = fmod(t->seed.codePhaseChips + elapsed * t->initialCode, t->period);
-        t->expected = window->meta.firstSample;
-        t->snapshot.trackingStartSample = window->meta.firstSample;
-        t->started = 1;
+    if (window->meta.epoch != tracking->seed.epoch || (window->meta.flags & NG_BLOCK_GAP) ||
+        (tracking->started && window->meta.firstSample != tracking->expected) ||
+        window->meta.firstSample < tracking->seed.firstSample) {
+        tracking->snapshot.active = 0;
+        return NG_OK;
+    }
+    if (!tracking->started) {
+        double elapsed = (double)(window->meta.firstSample - tracking->seed.firstSample) /
+                         tracking->stream.sampleRateHz;
+        tracking->codePhase =
+            fmod(tracking->seed.codePhaseChips + elapsed * tracking->initialCode, tracking->period);
+        tracking->expected = window->meta.firstSample;
+        tracking->snapshot.trackingStartSample = window->meta.firstSample;
+        tracking->started = 1;
     }
     while (position < window->meta.count) {
         size_t count, n;
         unsigned tap;
-        if (!t->accumulated) {
-            t->observeIntegration = t->observeRequested;
-            double remaining = (double)t->period - t->codePhase;
-            t->target = (size_t)ceil(remaining * t->stream.sampleRateHz / t->snapshot.codeRateHz);
-            if (!t->target)
-                t->target = 1;
-            t->start = t->expected;
-            t->startPhase = t->codePhase;
-        }
-        count = t->target - t->accumulated;
-        if (count > NG_TRACKING_CHUNK)
-            count = NG_TRACKING_CHUNK;
-        if (count > window->meta.count - position)
-            count = window->meta.count - position;
-        if (window->format == 0 || window->format == NG_FORMAT_CI8) {
-            if (t->config.mixerBits != 0)
-                NgSearchMixPrefixCi8Arithmetic(
-                    t->prefix, window->samples + position, count, t->stream.sampleRateHz,
-                    t->carrierHz, t->carrierPhase, t->stream.spectrumInverted, t->config.mixerBits);
-            else
-                (t->config.fastCarrier ? NgSearchMixPrefixCi8Lanes : NgSearchMixPrefixCi8)(
-                    t->prefix, window->samples + position, count, t->stream.sampleRateHz,
-                    t->carrierHz, t->carrierPhase, t->config.squareCarrier,
-                    t->stream.spectrumInverted);
-        } else {
-            NgSearchCarrier(t->carrier, count, t->stream.sampleRateHz, t->carrierHz,
-                            t->carrierPhase, t->config.squareCarrier);
-            for (n = 0; n < count; ++n) {
-                t->values[n].i = (float)NgIqComponent(window, position + n, 0);
-                t->values[n].q = (float)(NgIqComponent(window, position + n, 1) *
-                                         (t->stream.spectrumInverted ? -1 : 1));
+        if (!tracking->accumulated) {
+            tracking->observeIntegration = tracking->observeRequested;
+            double remaining = (double)tracking->period - tracking->codePhase;
+            tracking->target = (size_t)ceil(remaining * tracking->stream.sampleRateHz /
+                                            tracking->snapshot.codeRateHz);
+            if (!tracking->target) {
+                tracking->target = 1;
             }
-            NgSearchMix(t->values, t->carrier, count);
-            NgSearchPrefix(t->prefix, t->values, count);
+            tracking->start = tracking->expected;
+            tracking->startPhase = tracking->codePhase;
+        }
+        count = tracking->target - tracking->accumulated;
+        if (count > NG_TRACKING_CHUNK) {
+            count = NG_TRACKING_CHUNK;
+        }
+        if (count > window->meta.count - position) {
+            count = window->meta.count - position;
+        }
+        if (window->format == 0 || window->format == NG_FORMAT_CI8) {
+            if (tracking->config.mixerBits != 0) {
+                NgSearchMixPrefixCi8Arithmetic(
+                    tracking->prefix, window->samples + position, count,
+                    tracking->stream.sampleRateHz, tracking->carrierHz, tracking->carrierPhase,
+                    tracking->stream.spectrumInverted, tracking->config.mixerBits);
+            } else {
+                (tracking->config.fastCarrier ? NgSearchMixPrefixCi8Lanes : NgSearchMixPrefixCi8)(
+                    tracking->prefix, window->samples + position, count,
+                    tracking->stream.sampleRateHz, tracking->carrierHz, tracking->carrierPhase,
+                    tracking->config.squareCarrier, tracking->stream.spectrumInverted);
+            }
+        } else {
+            NgSearchCarrier(tracking->carrier, count, tracking->stream.sampleRateHz,
+                            tracking->carrierHz, tracking->carrierPhase,
+                            tracking->config.squareCarrier);
+            for (n = 0; n < count; ++n) {
+                tracking->values[n].i = (float)NgIqComponent(window, position + n, 0);
+                tracking->values[n].q = (float)(NgIqComponent(window, position + n, 1) *
+                                                (tracking->stream.spectrumInverted ? -1 : 1));
+            }
+            NgSearchMix(tracking->values, tracking->carrier, count);
+            NgSearchPrefix(tracking->prefix, tracking->values, count);
         }
         /* Each tap and Galileo half-chip probe sums whole chip runs of the mixed samples.
          * Runs follow the exact NgTrackingReplica sample-to-chip assignment. */
-        for (tap = 0; tap < t->config.tapCount; ++tap) {
-            double i, q;
-            unsigned prompt = t->config.tapCount / 2;
-            if (!t->observeIntegration && (tap + 1 < prompt || tap > prompt + 1))
+        for (tap = 0; tap < tracking->config.tapCount; ++tap) {
+            double inPhase;
+            double quadrature;
+            unsigned prompt = tracking->config.tapCount / 2;
+            if (!tracking->observeIntegration && (tap + 1 < prompt || tap > prompt + 1)) {
                 continue;
-            NgTrackingCorrelateRuns(t->prefix, count, t->codePhase, t->snapshot.codeRateHz,
-                                    t->stream.sampleRateHz, t->chips, t->period, t->offsets[tap],
-                                    t->system != 1, &i, &q);
-            t->sumI[tap] += i;
-            t->sumQ[tap] += q;
+            }
+            NgTrackingCorrelateRuns(tracking->prefix, count, tracking->codePhase,
+                                    tracking->snapshot.codeRateHz, tracking->stream.sampleRateHz,
+                                    tracking->chips, tracking->period, tracking->offsets[tap],
+                                    tracking->system != 1, &inPhase, &quadrature);
+            tracking->sumI[tap] += inPhase;
+            tracking->sumQ[tap] += quadrature;
         }
-        if (t->system == NG_CONSTELLATION_BEIDOU) {
-            double i, q;
-            NgTrackingCorrelateRuns(t->prefix, count, t->codePhase, t->snapshot.codeRateHz,
-                                    t->stream.sampleRateHz, t->beidouData, t->period, 0, 1, &i, &q);
-            t->beidouDataI += i;
+        if (tracking->system == NG_CONSTELLATION_BEIDOU) {
+            double inPhase;
+            double quadrature;
+            NgTrackingCorrelateRuns(tracking->prefix, count, tracking->codePhase,
+                                    tracking->snapshot.codeRateHz, tracking->stream.sampleRateHz,
+                                    tracking->beidouData, tracking->period, 0, 1, &inPhase,
+                                    &quadrature);
+            tracking->beidouDataI += inPhase;
         }
-        if (t->system == 2) {
+        if (tracking->system == 2) {
             unsigned side;
             for (side = 0; side < 2; ++side) {
-                double i, q;
-                NgTrackingCorrelateRuns(t->prefix, count, t->codePhase, t->snapshot.codeRateHz,
-                                        t->stream.sampleRateHz, t->chips, t->period,
-                                        side == 0 ? -0.5 : 0.5, 1, &i, &q);
-                t->sideI[side] += i;
-                t->sideQ[side] += q;
+                double inPhase;
+                double quadrature;
+                NgTrackingCorrelateRuns(
+                    tracking->prefix, count, tracking->codePhase, tracking->snapshot.codeRateHz,
+                    tracking->stream.sampleRateHz, tracking->chips, tracking->period,
+                    side == 0 ? -0.5 : 0.5, 1, &inPhase, &quadrature);
+                tracking->sideI[side] += inPhase;
+                tracking->sideQ[side] += quadrature;
             }
         }
-        t->codePhase =
-            fmod(t->codePhase + (double)count * t->snapshot.codeRateHz / t->stream.sampleRateHz,
-                 t->period);
-        t->carrierPhase =
-            fmod(t->carrierPhase + (double)count * t->carrierHz / t->stream.sampleRateHz, 1.0);
-        t->accumulated += count;
-        t->expected += count;
+        tracking->codePhase =
+            fmod(tracking->codePhase +
+                     (double)count * tracking->snapshot.codeRateHz / tracking->stream.sampleRateHz,
+                 tracking->period);
+        tracking->carrierPhase = fmod(tracking->carrierPhase + (double)count * tracking->carrierHz /
+                                                                   tracking->stream.sampleRateHz,
+                                      1.0);
+        tracking->accumulated += count;
+        tracking->expected += count;
         position += count;
-        if (t->accumulated == t->target) {
-            if (t->discardFirst) {
-                t->discardFirst = 0;
-                t->beidouDataI = 0;
-                t->accumulated = 0;
-                memset(t->sumI, 0, sizeof(t->sumI));
-                memset(t->sumQ, 0, sizeof(t->sumQ));
-                memset(t->sideI, 0, sizeof(t->sideI));
-                memset(t->sideQ, 0, sizeof(t->sideQ));
-            } else
-                Complete(t);
-            if (!t->snapshot.active)
+        if (tracking->accumulated == tracking->target) {
+            if (tracking->discardFirst) {
+                tracking->discardFirst = 0;
+                tracking->beidouDataI = 0;
+                tracking->accumulated = 0;
+                memset(tracking->sumI, 0, sizeof(tracking->sumI));
+                memset(tracking->sumQ, 0, sizeof(tracking->sumQ));
+                memset(tracking->sideI, 0, sizeof(tracking->sideI));
+                memset(tracking->sideQ, 0, sizeof(tracking->sideQ));
+            } else {
+                Complete(tracking);
+            }
+            if (!tracking->snapshot.active) {
                 return NG_OK;
+            }
         }
-        if (!isfinite(t->carrierHz) || !isfinite(t->snapshot.codeRateHz) ||
-            t->snapshot.codeRateHz < 1000000 || t->snapshot.codeRateHz > 1050000)
+        if (!isfinite(tracking->carrierHz) || !isfinite(tracking->snapshot.codeRateHz) ||
+            tracking->snapshot.codeRateHz < 1000000 || tracking->snapshot.codeRateHz > 1050000) {
             return NgFail(error, "Tracking loop left the supported L1 code-rate range");
+        }
     }
     return NG_OK;
 }

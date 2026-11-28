@@ -3,8 +3,8 @@
 #define NGENE_TRACKING_H
 #include "ngene/acquisition.h"
 #include "ngene/navigation.h"
-#define NG_TRACKING_MAX_TAPS 33u
-#define NG_TRACKING_EGNOS_CHANNEL 65u
+#define NG_TRACKING_MAX_TAPS 33u      /**< Maximum size of the coherent tap arrays. */
+#define NG_TRACKING_EGNOS_CHANNEL 65u /**< Stable ID of the auxiliary GEO channel. */
 #define NG_TRACKING_EGNOS_SIGNAL                                                                   \
     4u /**< Presentation identifier, outside the PVT constellation enum. */
 
@@ -80,7 +80,7 @@ typedef struct {
 typedef struct TNgTracking TNgTracking;
 /** @brief Restore cached ephemeris and clock for the assigned satellite.
  * @param[in,out] tracking Tracker in the caller's exclusive access.
- * @param[in] broadcast Optional cache copied into the tracker.
+ * @param[in] broadcast Validated satellite cache copied into the tracker.
  * Fresh demodulation must establish the time anchor before PVT can use the cache.
  */
 void NgTrackingRestoreBroadcast(TNgTracking *tracking, const TNgBroadcast *broadcast);

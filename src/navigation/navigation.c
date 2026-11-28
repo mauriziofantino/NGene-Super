@@ -14,13 +14,14 @@ void NgNavigationReset(TNgNavigation *navigation)
 }
 
 /** Carrier/timing loss does not invalidate a satellite's already parsed ephemerides. */
-void NgNavigationLoseTiming(TNgNavigation *n)
+void NgNavigationLoseTiming(TNgNavigation *navigation)
 {
-    if (n->epochs || n->snapshot.symbols || n->snapshot.bitSynchronized || n->galileo.count) {
-        TNgBroadcast broadcast = n->snapshot.broadcast;
-        NgNavigationReset(n);
+    if (navigation->epochs || navigation->snapshot.symbols ||
+        navigation->snapshot.bitSynchronized || navigation->galileo.count) {
+        TNgBroadcast broadcast = navigation->snapshot.broadcast;
+        NgNavigationReset(navigation);
         broadcast.towValid = 0;
-        n->snapshot.broadcast = broadcast;
+        navigation->snapshot.broadcast = broadcast;
     }
 }
 
@@ -30,8 +31,9 @@ int NgNavigationGpsParity(uint32_t *word)
     static const uint32_t masks[6] = {0xbb1f3480, 0x5d8f9a40, 0xaec7cd00,
                                       0x5763e680, 0x6bb1f340, 0x8b7a89c0};
     unsigned k, parity = 0;
-    if (*word & UINT32_C(0x40000000))
+    if (*word & UINT32_C(0x40000000)) {
         *word ^= UINT32_C(0x3fffffc0);
+    }
     for (k = 0; k < 6; ++k) {
         uint32_t value = *word & masks[k];
         value ^= value >> 16;
@@ -45,100 +47,108 @@ int NgNavigationGpsParity(uint32_t *word)
 }
 
 /** Decode a subframe only after all ten consecutive words pass parity. */
-void NgNavigationGpsBit(TNgNavigation *n, unsigned bit, uint64_t endSample)
+void NgNavigationGpsBit(TNgNavigation *navigation, unsigned bit, uint64_t endSample)
 {
-    n->snapshot.symbols++;
-    if (n->sinceValidBits < 301)
-        n->sinceValidBits++;
-    if (n->sinceValidBits > 300)
-        n->snapshot.towValid = 0;
-    n->shift = (n->shift << 1) | (bit & 1u);
-    if (!n->collecting) {
-        if ((n->shift & 255u) == 0x8bu || (n->shift & 255u) == 0x74u) {
-            n->collecting = 1;
-            n->wordBits = 8;
-            n->wordCount = 0;
+    navigation->snapshot.symbols++;
+    if (navigation->sinceValidBits < 301) {
+        navigation->sinceValidBits++;
+    }
+    if (navigation->sinceValidBits > 300) {
+        navigation->snapshot.towValid = 0;
+    }
+    navigation->shift = (navigation->shift << 1) | (bit & 1u);
+    if (!navigation->collecting) {
+        if ((navigation->shift & 255u) == 0x8bu || (navigation->shift & 255u) == 0x74u) {
+            navigation->collecting = 1;
+            navigation->wordBits = 8;
+            navigation->wordCount = 0;
         }
         return;
     }
-    if (++n->wordBits < 30)
-        return;
-    n->wordBits = 0;
-    if (!NgNavigationGpsParity(&n->shift)) {
-        n->snapshot.parityErrors++;
-        n->snapshot.towValid = 0;
-        n->collecting = 0;
-        n->wordCount = 0;
+    if (++navigation->wordBits < 30) {
         return;
     }
-    n->words[n->wordCount++] = n->shift;
-    if (n->wordCount == 10) {
-        unsigned tow = ((n->words[1] >> 13) & 0x1ffffu) * 6u;
-        unsigned id = (n->words[1] >> 8) & 7u;
-        if (((n->words[0] >> 22) & 255u) == 0x8bu && id >= 1 && id <= 5 && tow < 604800u) {
-            n->snapshot.towValid = 1;
-            n->snapshot.towSeconds = tow;
-            n->snapshot.subframeId = id;
-            n->snapshot.validSubframes++;
-            n->snapshot.boundarySample = endSample;
-            NgBroadcastGps(&n->snapshot.broadcast, n->words, id);
-            n->sinceValidBits = 0;
+    navigation->wordBits = 0;
+    if (!NgNavigationGpsParity(&navigation->shift)) {
+        navigation->snapshot.parityErrors++;
+        navigation->snapshot.towValid = 0;
+        navigation->collecting = 0;
+        navigation->wordCount = 0;
+        return;
+    }
+    navigation->words[navigation->wordCount++] = navigation->shift;
+    if (navigation->wordCount == 10) {
+        unsigned tow = ((navigation->words[1] >> 13) & 0x1ffffu) * 6u;
+        unsigned id = (navigation->words[1] >> 8) & 7u;
+        if (((navigation->words[0] >> 22) & 255u) == 0x8bu && id >= 1 && id <= 5 && tow < 604800u) {
+            navigation->snapshot.towValid = 1;
+            navigation->snapshot.towSeconds = tow;
+            navigation->snapshot.subframeId = id;
+            navigation->snapshot.validSubframes++;
+            navigation->snapshot.boundarySample = endSample;
+            NgBroadcastGps(&navigation->snapshot.broadcast, navigation->words, id);
+            navigation->sinceValidBits = 0;
         } else {
-            n->snapshot.towValid = 0;
+            navigation->snapshot.towValid = 0;
         }
-        n->collecting = 0;
-        n->wordCount = 0;
+        navigation->collecting = 0;
+        navigation->wordCount = 0;
     }
 }
 
 /** Preserve Classic's five transition intervals and low PLL quality threshold (0.4).
  * Prompt intervals remain one millisecond; only data demodulation sums twenty epochs.
  */
-void NgNavigationGpsPromptWithChecks(TNgNavigation *n, double i, double q, int pll,
+void NgNavigationGpsPromptWithChecks(TNgNavigation *navigation, double i, double q, int pll,
                                      uint64_t endSample, unsigned transitionChecks)
 {
     if (!pll || !isfinite(i) || !isfinite(q)) {
-        NgNavigationLoseTiming(n);
+        NgNavigationLoseTiming(navigation);
         return;
     }
-    n->epochs++;
-    n->inPhasePower = 0.99 * n->inPhasePower + 0.01 * i * i;
-    n->quadPower = 0.99 * n->quadPower + 0.01 * q * q;
+    navigation->epochs++;
+    navigation->inPhasePower = 0.99 * navigation->inPhasePower + 0.01 * i * i;
+    navigation->quadPower = 0.99 * navigation->quadPower + 0.01 * q * q;
     {
-        double total = n->inPhasePower + n->quadPower;
-        n->quality = total > 0 && (n->inPhasePower - n->quadPower) / total >= 0.4;
-        if (!n->quality && !n->snapshot.bitSynchronized) {
-            n->snapshot.bitSynchronized = n->snapshot.towValid = 0;
-            n->transitions = -1;
-            n->collecting = 0;
-            n->bitMs = 0;
-            n->sum = 0;
+        double total = navigation->inPhasePower + navigation->quadPower;
+        navigation->quality =
+            total > 0 && (navigation->inPhasePower - navigation->quadPower) / total >= 0.4;
+        if (!navigation->quality && !navigation->snapshot.bitSynchronized) {
+            navigation->snapshot.bitSynchronized = navigation->snapshot.towValid = 0;
+            navigation->transitions = -1;
+            navigation->collecting = 0;
+            navigation->bitMs = 0;
+            navigation->sum = 0;
         }
     }
-    if (!n->snapshot.bitSynchronized && n->quality && i * n->previous < 0) {
-        if (n->transitions < 0 || (n->epochs - n->transition) % 20 != 0)
-            n->transitions = 0;
-        else
-            n->transitions++;
-        n->transition = n->epochs;
-        if ((unsigned)n->transitions >= transitionChecks) {
-            n->snapshot.bitSynchronized = 1;
-            n->sum = 0;
-            n->bitMs = 0;
+    if (!navigation->snapshot.bitSynchronized && navigation->quality &&
+        i * navigation->previous < 0) {
+        if (navigation->transitions < 0 ||
+            (navigation->epochs - navigation->transition) % 20 != 0) {
+            navigation->transitions = 0;
+        } else {
+            navigation->transitions++;
+        }
+        navigation->transition = navigation->epochs;
+        if ((unsigned)navigation->transitions >= transitionChecks) {
+            navigation->snapshot.bitSynchronized = 1;
+            navigation->sum = 0;
+            navigation->bitMs = 0;
         }
     }
-    n->previous = i;
-    if (n->snapshot.bitSynchronized) {
-        n->sum += i;
-        if (++n->bitMs == 20) {
-            NgNavigationGpsBit(n, n->sum > 0 ? 0u : 1u, endSample);
-            n->sum = 0;
-            n->bitMs = 0;
+    navigation->previous = i;
+    if (navigation->snapshot.bitSynchronized) {
+        navigation->sum += i;
+        if (++navigation->bitMs == 20) {
+            NgNavigationGpsBit(navigation, navigation->sum > 0 ? 0u : 1u, endSample);
+            navigation->sum = 0;
+            navigation->bitMs = 0;
         }
     }
 }
 
-void NgNavigationGpsPrompt(TNgNavigation *n, double i, double q, int pll, uint64_t endSample)
+void NgNavigationGpsPrompt(TNgNavigation *navigation, double i, double q, int pll,
+                           uint64_t endSample)
 {
-    NgNavigationGpsPromptWithChecks(n, i, q, pll, endSample, 5);
+    NgNavigationGpsPromptWithChecks(navigation, i, q, pll, endSample, 5);
 }

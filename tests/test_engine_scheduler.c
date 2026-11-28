@@ -514,12 +514,14 @@ static void TestTrackingPriority(void)
         Initialize(&fixture, NG_TEST_SERIAL, 3, workers);
         fixture.channels[1].state = NG_CHANNEL_TRACKING;
         fixture.channels[2].state = NG_CHANNEL_HOLDOVER;
-        for (channel = 0; channel < 3; ++channel)
+        for (channel = 0; channel < 3; ++channel) {
             fixture.channels[channel].ops = &ops;
+        }
         RunScheduled(&fixture);
         CHECK(fixture.result == NG_OK && fixture.hookCalls == 5);
-        for (channel = 0; channel < 3; ++channel)
+        for (channel = 0; channel < 3; ++channel) {
             CHECK(fixture.calls[channel] == 5);
+        }
         Destroy(&fixture);
     }
 }
@@ -567,8 +569,9 @@ static void TestIdleAcquisitionSkip(void)
         }
         CHECK(NgChannelDispatchCreate(channels, 4, workers, &dispatch, &error) == NG_OK);
         NgChannelDispatchSetOrder(dispatch, order);
-        for (k = 0; k < 5; ++k)
+        for (k = 0; k < 5; ++k) {
             CHECK(NgChannelDispatchProcess(dispatch, &view, &error) == NG_OK);
+        }
         NgChannelDispatchDestroy(dispatch);
         CHECK(idleCalls[0] == 0 && idleCalls[2] == 0 && idleCalls[1] == 5 && idleCalls[3] == 5);
         CHECK(channels[0].state == NG_CHANNEL_ACQUISITION &&

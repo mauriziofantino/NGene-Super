@@ -23,8 +23,9 @@ void NgTrackingCodePhases(double *phases, size_t count, double base, double code
                                                          vdupq_n_f64(sampleRate))));
     }
 #endif
-    for (; n < count; ++n)
+    for (; n < count; ++n) {
         phases[n] = base + (double)n * codeRate / sampleRate;
+    }
 }
 
 /** Generate +/-1 replicas without per-sample fmod/floor calls. */
@@ -72,8 +73,9 @@ void NgTrackingReplica(float *output, const double *phases, size_t count, const 
         }
         phase = vsubq_f64(vaddq_f64(phase, length), length);
         phase = vsubq_f64(phase, vbslq_f64(vcgeq_f64(phase, length), length, vdupq_n_f64(0)));
-        if (boc)
+        if (boc) {
             phase = vaddq_f64(phase, phase);
+        }
         uint64x2_t integer = vcvtq_u64_f64(phase);
         vst1q_u64(indices, integer);
         float signs[2] = {(float)chips[indices[0]], (float)chips[indices[1]]};
@@ -82,13 +84,15 @@ void NgTrackingReplica(float *output, const double *phases, size_t count, const 
 #endif
     for (; n < count; ++n) {
         double phase = phases[n] - offset;
-        if (phase < 0)
+        if (phase < 0) {
             phase += period;
-        else if (phase >= period)
+        } else if (phase >= period) {
             phase -= period;
+        }
         phase = (phase + period) - period;
-        if (phase >= period)
+        if (phase >= period) {
             phase -= period;
+        }
         int sign = chips[(size_t)(boc ? 2 * phase : phase)];
         output[n] = (float)sign;
     }
@@ -101,13 +105,15 @@ static size_t ReplicaIndex(size_t n, double base, double codeRate, double sample
 {
     double phase = base + (double)n * codeRate / sampleRate;
     phase -= offset;
-    if (phase < 0)
+    if (phase < 0) {
         phase += period;
-    else if (phase >= period)
+    } else if (phase >= period) {
         phase -= period;
+    }
     phase = (phase + period) - period;
-    if (phase >= period)
+    if (phase >= period) {
         phase -= period;
+    }
     *value = boc ? 2 * phase : phase;
     return (size_t)*value;
 }
@@ -133,8 +139,9 @@ void NgTrackingCorrelateRuns(const double *prefix, size_t count, double base, do
     size_t top = boc ? 2u * (size_t)period : period, start = 0, level, chip;
     double sumI = 0, sumQ = 0, limit = (double)count;
     *i = *q = 0;
-    if (!count)
+    if (!count) {
         return;
+    }
     level = ReplicaIndex(0, base, codeRate, sampleRate, offset, period, boc, &first);
     chip = level;
     /* Unwrapped position U(n) = first + n * step; level counts the integers crossed and
@@ -148,18 +155,22 @@ void NgTrackingCorrelateRuns(const double *prefix, size_t count, double base, do
             double whole;
             end = (size_t)cross; /* cross > 0: truncation, then round up */
             whole = (double)end;
-            if (whole < cross)
+            if (whole < cross) {
                 whole = (double)++end;
-            if (end < start)
+            }
+            if (end < start) {
                 end = start;
+            }
             if (whole - cross < NG_RUN_MARGIN || cross - (whole - 1.0) < NG_RUN_MARGIN) {
                 /* Too close to a sample boundary to trust: settle it per sample, exactly. */
-                while (end > start &&
-                       !SameIndex(end - 1, level, base, codeRate, sampleRate, offset, period, boc))
+                while (end > start && !SameIndex(end - 1, level, base, codeRate, sampleRate, offset,
+                                                 period, boc)) {
                     --end;
+                }
                 while (end < count &&
-                       SameIndex(end, level, base, codeRate, sampleRate, offset, period, boc))
+                       SameIndex(end, level, base, codeRate, sampleRate, offset, period, boc)) {
                     ++end;
+                }
             }
         }
         if (end > start) {
@@ -169,8 +180,9 @@ void NgTrackingCorrelateRuns(const double *prefix, size_t count, double base, do
             start = end;
         }
         ++level;
-        if (++chip == top)
+        if (++chip == top) {
             chip = 0;
+        }
     }
     *i = sumI;
     *q = sumQ;

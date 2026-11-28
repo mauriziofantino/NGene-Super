@@ -63,8 +63,9 @@ static int Never(void *context)
 static uint64_t Hash(uint64_t hash, const void *data, size_t size)
 {
     const unsigned char *p = data;
-    for (size_t k = 0; k < size; ++k)
+    for (size_t k = 0; k < size; ++k) {
         hash = (hash ^ p[k]) * UINT64_C(1099511628211);
+    }
     return hash;
 }
 
@@ -114,10 +115,12 @@ static uint64_t Fixture(TNgComplex *samples, const TNgAcquisitionCapture *captur
         double carrier =
             6.283185307179586 * ((double)capture->stream.digitalIfHz + doppler) * t + 0.71;
         double amplitude = signalAmplitude * chips[(unsigned)phase];
-        if (galileo && phase - floor(phase) >= 0.5)
+        if (galileo && phase - floor(phase) >= 0.5) {
             amplitude = -amplitude;
-        if (scenario == 2 || (scenario == 3 && t >= (galileo ? 0.096 : 0.024)))
+        }
+        if (scenario == 2 || (scenario == 3 && t >= (galileo ? 0.096 : 0.024))) {
             amplitude = 0;
+        }
         double i = (double)lround(amplitude * cos(carrier) + 28 * Noise(&seed) + 2);
         double q = (double)lround(amplitude * sin(carrier) + 28 * Noise(&seed) - 2);
         samples[k].i = (float)(inverted ? 101 * i : i);
@@ -151,8 +154,9 @@ static uint64_t ReplayFixture(const char *path, TNgComplex *samples, TNgAcquisit
     int8_t bytes[8192];
     for (size_t first = 0; first < capture->count;) {
         size_t pairs = capture->count - first;
-        if (pairs > sizeof bytes / 2)
+        if (pairs > sizeof bytes / 2) {
             pairs = sizeof bytes / 2;
+        }
         Check(fread(bytes, 2, pairs, file) == pairs, "Incomplete replay window");
         for (size_t k = 0; k < pairs; ++k) {
             samples[first + k].i = bytes[2 * k];
@@ -190,13 +194,15 @@ static void RunLane(void *context)
 {
     TLane *lane = context;
     NgAtomicSet(&lane->ready, 1);
-    while (!NgAtomicGet(lane->start))
+    while (!NgAtomicGet(lane->start)) {
         SwitchToThread();
+    }
     double start = NgMonotonicSeconds();
     lane->status = lane->ops->prepare(lane->workspace, &lane->capture, Never, NULL);
     lane->elapsed = NgMonotonicSeconds() - start;
-    if (lane->status != NG_OK)
+    if (lane->status != NG_OK) {
         return;
+    }
     ++lane->capture.origin.epoch;
     lane->longestGap = 0;
     lane->polls = 0;
@@ -204,17 +210,19 @@ static void RunLane(void *context)
     lane->lastPoll = NgMonotonicSeconds();
     lane->status = lane->ops->prepare(lane->workspace, &lane->capture, Poll, lane);
     lane->longestGap = fmax(lane->longestGap, NgMonotonicSeconds() - lane->lastPoll);
-    if (lane->status != NG_OK)
+    if (lane->status != NG_OK) {
         return;
+    }
     ++lane->capture.origin.epoch;
     lane->lastPoll = NgMonotonicSeconds();
     lane->deadline = lane->lastPoll + lane->cancelAfter;
     lane->status = lane->ops->prepare(lane->workspace, &lane->capture, Poll, lane);
     lane->cancelLag = NgMonotonicSeconds() - lane->deadline;
-    if (lane->status == NG_END)
+    if (lane->status == NG_END) {
         lane->status = lane->ops->prepare(lane->workspace, &lane->capture, Never, NULL);
-    else
+    } else {
         lane->status = NG_ERROR;
+    }
 }
 
 typedef struct {
@@ -234,12 +242,14 @@ static int Trace(void *context)
         const double *power = trace->ops->power(trace->workspace, &size);
         for (size_t k = 0; k < size; ++k) {
             Check(isfinite(power[k]) && power[k] >= 0, "Nonfinite or negative PCPS power");
-            if (trace->seen == 0)
+            if (trace->seen == 0) {
                 trace->noise += power[k];
+            }
         }
-        if (trace->mapDump)
+        if (trace->mapDump) {
             Check(fwrite(power, sizeof(*power), size, trace->mapDump) == size,
                   "Cannot write F4 coarse map");
+        }
         trace->hash = Hash(trace->hash, power, size * sizeof(*power));
     }
     ++trace->seen;
@@ -293,11 +303,13 @@ static void Verify(TLane *lane, TNgSearchFftMode mode, int scenario)
     double searchSeconds = NgMonotonicSeconds() - searchStart;
     double searchCpu = ProcessCpuSeconds() - cpuStart;
 #endif
-    if (trace.seen == lane->ops->rows)
+    if (trace.seen == lane->ops->rows) {
         (void)Trace(&trace); /* Below threshold: search returns after the last coarse row. */
+    }
     Check(trace.seen > lane->ops->rows, "Incomplete coarse maps");
-    if (trace.mapDump)
+    if (trace.mapDump) {
         Check(fclose(trace.mapDump) == 0, "Cannot close F4 coarse map");
+    }
     const TNgAcquisitionSearchSpace *space = lane->ops->space(lane->workspace);
     printf("verify,%d,%016" PRIx64 ",%a,%a,%a,%a,%a,%a,%a,%d,%u,%u\n", scenario, trace.hash,
            trace.noise, space->threshold, space->peakDopplerHz, space->peakCodePhaseChips,
@@ -376,8 +388,9 @@ int main(int argc, char **argv)
 #ifdef NGENE_PCPS_LAB
     if (scenario == 4 || scenario == 5) {
         void *workspaces[LANES];
-        for (unsigned k = 0; k < count; ++k)
+        for (unsigned k = 0; k < count; ++k) {
             workspaces[k] = lanes[k].workspace;
+        }
         printf("allocated,%zu\n", requestedBytes);
         Check(NgPcpsLab(ops, &capture, workspaces, count, mode, scenario) == NG_OK,
               "PCPS lab failed");
@@ -386,8 +399,9 @@ int main(int argc, char **argv)
         if (scenario) {
 #ifdef F4_PCPS_BATCH
         void *workspaces[LANES];
-        for (unsigned k = 0; k < count; ++k)
+        for (unsigned k = 0; k < count; ++k) {
             workspaces[k] = lanes[k].workspace;
+        }
         F4BatchConfigure(ops, workspaces, count);
 #endif
         Verify(&lanes[0], mode, scenario);
@@ -413,21 +427,25 @@ int main(int argc, char **argv)
                 NgAtomicSet(&lanes[k].ready, 0);
                 Check(NgThreadStart(&threads[k], RunLane, &lanes[k]) == 0, "Thread start failed");
             }
-            for (unsigned k = 0; k < count; ++k)
-                while (!NgAtomicGet(&lanes[k].ready))
+            for (unsigned k = 0; k < count; ++k) {
+                while (!NgAtomicGet(&lanes[k].ready)) {
                     SwitchToThread();
+                }
+            }
             NgAtomicSet(&gate, 1);
             for (unsigned k = 0; k < count; ++k) {
                 NgThreadJoin(threads[k]);
                 Check(lanes[k].status == NG_OK, "Prepare cancellation or retry failed");
-                if (trial >= WARMUPS)
+                if (trial >= WARMUPS) {
                     printf("time,%u,%u,%.9f,%.9f,%.9f\n", trial - WARMUPS, k, lanes[k].elapsed,
                            lanes[k].cancelLag, lanes[k].longestGap);
+                }
             }
         }
     }
-    for (unsigned k = 0; k < count; ++k)
+    for (unsigned k = 0; k < count; ++k) {
         ops->destroy(lanes[k].workspace);
+    }
     free(samples);
     return EXIT_SUCCESS;
 }

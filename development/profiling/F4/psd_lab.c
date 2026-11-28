@@ -33,8 +33,9 @@ static int Measure(size_t n, TNgSearchFftMode mode)
     for (unsigned frame = 0; frame < 9; ++frame) {
         const double timeout = NgMonotonicSeconds() + 2;
         do {
-            if (NgAnalysisSubmitAt(analysis, &view, 0) == NG_OK)
+            if (NgAnalysisSubmitAt(analysis, &view, 0) == NG_OK) {
                 NgSleepMs(2);
+            }
             NgAnalysisRead(analysis, &result);
         } while (result.psdSequence <= frame && NgMonotonicSeconds() < timeout);
         if (result.psdSequence != frame + 1 || result.firstSample != view.meta.firstSample ||
@@ -59,8 +60,9 @@ static int Measure(size_t n, TNgSearchFftMode mode)
 
 int main(int argc, char **argv)
 {
-    if (argc > 2 || (argc == 2 && strcmp(argv[1], "--q14") != 0))
+    if (argc > 2 || (argc == 2 && strcmp(argv[1], "--q14") != 0)) {
         return EXIT_FAILURE;
+    }
     const TNgSearchFftMode mode =
         argc == 2 ? NG_SEARCH_FFT_INTEGER_SCALED : NG_SEARCH_FFT_INTEGER_PRECISE;
     for (size_t k = 0; k < sizeof(samples) / sizeof(samples[0]); ++k) {
@@ -69,8 +71,10 @@ int main(int argc, char **argv)
         samples[k].q = (int8_t)lround(64 * sin(phase));
     }
     puts("N,frame,first_sample,checksum,peak_hz,peak_dbfs,compute_ms,latency_ms");
-    for (size_t n = NG_SPECTRUM_MIN_FFT_SIZE; n <= NG_FFT_MAX_SIZE; n *= 2)
-        if (!Measure(n, mode))
+    for (size_t n = NG_SPECTRUM_MIN_FFT_SIZE; n <= NG_FFT_MAX_SIZE; n *= 2) {
+        if (!Measure(n, mode)) {
             return EXIT_FAILURE;
+        }
+    }
     return EXIT_SUCCESS;
 }

@@ -11,6 +11,6 @@ SortIncludes: Never
 PointerAlignment: Right
 SeparateDefinitionBlocks: Always
 MaxEmptyLinesToKeep: 1
-InsertBraces: false
+InsertBraces: true
 BreakStringLiterals: false
 ReflowComments: false

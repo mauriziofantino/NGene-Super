@@ -6,26 +6,40 @@
 
 /** Real line of sight at the solution epoch; all entries participated in the solve. */
 typedef struct {
-    unsigned prn, constellation; /**< Broadcast satellite identity. */
-    double azimuth, elevation;   /**< Local north-clockwise azimuth and elevation [rad]. */
+    unsigned prn;           /**< Broadcast satellite PRN. */
+    unsigned constellation; /**< Broadcast satellite identity. */
+    double azimuth;         /**< Azimuth clockwise from north in radians. */
+    double elevation;       /**< Elevation above the local horizon in radians. */
 } TNgPvtSatelliteView;
 
 /** Copied solution; available denotes converged broadcast least squares, not integrity. */
 typedef struct {
-    int available;                      /**< Position/clock iteration converged with full rank. */
-    int velocityAvailable;              /**< Doppler velocity/drift solve has full rank. */
-    unsigned satellites, gps, galileo;  /**< Measurements admitted at the common epoch. */
-    uint64_t epoch, sample;             /**< Input continuity generation and solution sample. */
-    double towSeconds;                  /**< Nominal receiver TOW before constellation bias. */
-    double ecef[3], velocity[3];        /**< ECEF metres and metres/second. */
-    double latitude, longitude, height; /**< WGS84 radians and ellipsoidal metres. */
-    double clockGps, clockGalileo, clockDrift; /**< Clock biases [m], common drift [m/s]. */
-    double residualRms;                        /**< Post-fit code residual RMS [m]. */
-    int dopAvailable;                          /**< Geometry has full rank. */
-    double gdop, hdop, vdop;                   /**< Unweighted geometry, separate code clocks. */
-    unsigned skyCount;                         /**< Number of real solved lines of sight. */
-    TNgPvtSatelliteView sky[64];               /**< Solution-epoch satellite sky geometry. */
-    unsigned egnosPrn, egnosFrames, egnosCorrected; /**< GEO and EGNOS data used at this epoch. */
+    int available;                     /**< Position/clock iteration converged with full rank. */
+    int velocityAvailable;             /**< Doppler velocity/drift solve has full rank. */
+    unsigned satellites;               /**< Total admitted observations. */
+    unsigned gps;                      /**< Admitted GPS observations. */
+    unsigned galileo;                  /**< Admitted Galileo observations. */
+    uint64_t epoch;                    /**< Receiver continuity generation. */
+    uint64_t sample;                   /**< Receiver observation index within the stream. */
+    double towSeconds;                 /**< Nominal receiver TOW before constellation bias. */
+    double ecef[3];                    /**< Receiver ECEF position in metres. */
+    double velocity[3];                /**< Receiver ECEF velocity in metres per second. */
+    double latitude;                   /**< WGS84 geodetic latitude in radians. */
+    double longitude;                  /**< WGS84 longitude in radians. */
+    double height;                     /**< WGS84 ellipsoidal height in metres. */
+    double clockGps;                   /**< GPS code clock bias in metres. */
+    double clockGalileo;               /**< Galileo code clock bias in metres. */
+    double clockDrift;                 /**< Common receiver drift in metres per second. */
+    double residualRms;                /**< Post-fit code residual RMS [m]. */
+    int dopAvailable;                  /**< Geometry has full rank. */
+    double gdop;                       /**< Geometric dilution of precision. */
+    double hdop;                       /**< Horizontal dilution of precision. */
+    double vdop;                       /**< Vertical dilution of precision. */
+    unsigned skyCount;                 /**< Number of real solved lines of sight. */
+    TNgPvtSatelliteView sky[64];       /**< Solution-epoch satellite sky geometry. */
+    unsigned egnosPrn;                 /**< Current auxiliary GEO PRN. */
+    unsigned egnosFrames;              /**< CRC-valid frames in the current GEO assignment. */
+    unsigned egnosCorrected;           /**< GPS observations using differential corrections. */
     unsigned egnosIonosphereCorrected; /**< GPS observations using the SBAS ionosphere grid. */
     unsigned ionosphereCorrected[3];   /**< Applied delays for GPS, Galileo and BeiDou. */
     unsigned beidou;                   /**< Admitted B1C measurements. */
@@ -34,10 +48,12 @@ typedef struct {
 
 /** Raw common-epoch code and Doppler observables, before broadcast corrections. */
 typedef struct {
-    uint64_t epoch, sample;      /**< Receiver continuity/time anchor. */
-    unsigned prn, constellation; /**< Satellite identity. */
-    double nativeTransmitTow;    /**< Native code-time TOW [s]. */
-    double commonTransmitTow;    /**< Nominal GPST-equivalent code-time TOW [s]. */
+    uint64_t epoch;           /**< Receiver continuity generation. */
+    uint64_t sample;          /**< Receiver observation index within the stream. */
+    unsigned prn;             /**< Broadcast satellite PRN. */
+    unsigned constellation;   /**< Satellite identity. */
+    double nativeTransmitTow; /**< Native code-time TOW [s]. */
+    double commonTransmitTow; /**< Nominal GPST-equivalent code-time TOW [s]. */
     double pseudorange; /**< Code range from supplied receiver TOW, including clock biases [m]. */
     double dopplerHz;   /**< Measured carrier Doppler with IF removed [Hz]. */
     double rangeRate;   /**< Doppler-derived range rate, positive away [m/s]. */
@@ -50,8 +66,9 @@ typedef struct {
  * @param[in] sampleRate Native sample rate in hertz.
  * @param[in] receiverTow Nominal receiver time in GPS week seconds.
  * @param[out] observation Caller-provided result.
- * @return One when the observation is usable, zero for mismatched epochs,
- * unhealthy or stale data, or unsupported signals.
+ * @retval NG_OK The observation was written.
+ * @retval NG_END The channel lacks usable data or belongs to another epoch.
+ * @retval NG_ERROR The caller supplied invalid input.
  */
 int NgPvtObserve(const TNgTrackingSnapshot *channel, uint64_t epoch, uint64_t sample,
                  double sampleRate, double receiverTow, TNgPvtObservation *observation);
@@ -59,7 +76,7 @@ int NgPvtObserve(const TNgTrackingSnapshot *channel, uint64_t epoch, uint64_t sa
 /** @brief Propagate broadcast ephemeris at the native transmit time.
  * @param[in] broadcast Validated clock and ephemeris data.
  * @param[in] constellation GNSS signal identifier.
- * @param[in] transmitTime Satellite transmit time in native week seconds.
+ * @param[in] transmitTime Satellite transmit time in the constellation time scale, in seconds of week.
  * @param[out] position Satellite ECEF coordinates in metres.
  * @param[out] velocity Satellite ECEF velocity in metres per second.
  * @param[out] clock Satellite clock correction in seconds.

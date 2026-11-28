@@ -129,10 +129,12 @@ static int64_t AdaptiveDivisor(size_t n, size_t width, int64_t unit, unsigned *s
             int64_t values[4];
             CompactButterfly(a, a + width, j * (n / width), unit, values);
             for (size_t k = 0; k < 4; ++k) {
-                if (values[k] < low)
+                if (values[k] < low) {
                     low = values[k];
-                if (values[k] > high)
+                }
+                if (values[k] > high) {
                     high = values[k];
+                }
             }
         }
     }
@@ -168,12 +170,13 @@ static void IntegerStages(size_t n, int bits, int mode, int compact_case, unsign
         if (compact_case && mode == 2 && !adaptive_before) {
 #ifdef CI8_LAB_BUFFERED
             if (use_buffered && width >= 16) {
-                if (use_madd)
+                if (use_madd) {
                     *shift += Ci8FftCompactAdaptiveMaddAvx2(compact, stage_scratch, lab_wr, lab_wi,
                                                             n, width, (unsigned)bits);
-                else
+                } else {
                     *shift += Ci8FftCompactAdaptiveBufferedAvx2(compact, stage_scratch, lab_wr,
                                                                 lab_wi, n, width, (unsigned)bits);
+                }
                 continue;
             }
 #endif
@@ -194,10 +197,11 @@ static void IntegerStages(size_t n, int bits, int mode, int compact_case, unsign
         }
         if (compact_case) {
             int64_t divisor = 2;
-            if (mode == 2)
+            if (mode == 2) {
                 divisor = AdaptiveDivisor(n, width, unit, shift);
-            else
+            } else {
                 ++*shift;
+            }
             CompactStage(n, width, unit, divisor, clips);
             continue;
         }
@@ -208,8 +212,9 @@ static void IntegerStages(size_t n, int bits, int mode, int compact_case, unsign
         }
 #endif
         Ci8FftWideStage(fixed, lab_wr, lab_wi, n, width, (unsigned)bits);
-        if (mode == 0)
+        if (mode == 0) {
             continue;
+        }
         int64_t divisor = mode == 1 ? 2 : 1;
         for (size_t k = 0; mode == 2 && k < 2 * n; ++k) {
             int64_t value = RoundDivide(fixed[k], divisor);
@@ -218,8 +223,9 @@ static void IntegerStages(size_t n, int bits, int mode, int compact_case, unsign
                 value = RoundDivide(fixed[k], divisor);
             }
         }
-        for (int64_t d = divisor; d > 1; d /= 2)
+        for (int64_t d = divisor; d > 1; d /= 2) {
             ++*shift;
+        }
         for (size_t k = 0; k < 2 * n; ++k) {
             int64_t value = RoundDivide(fixed[k], divisor);
             *clips += value < -128 || value > 127;
@@ -235,8 +241,9 @@ static void Run(size_t n, unsigned pattern, int inverse, int bits, int mode)
     unsigned shift = 0;
     unsigned clips = 0;
     Prepare(n, inverse, unit);
-    for (size_t k = 0; k < 2 * n; ++k)
+    for (size_t k = 0; k < 2 * n; ++k) {
         fixed[k] *= input_scale;
+    }
 
     for (size_t width = 2; width <= n; width *= 2) {
         for (size_t base = 0; base < n; base += width) {
@@ -252,25 +259,31 @@ static void Run(size_t n, unsigned pattern, int inverse, int bits, int mode)
         }
     }
     const int compact_case = (use_compact && mode == 1) || (use_adaptive && mode == 2);
-    if (compact_case)
-        for (size_t k = 0; k < 2 * n; ++k)
+    if (compact_case) {
+        for (size_t k = 0; k < 2 * n; ++k) {
             compact[k] = (int8_t)fixed[k];
+        }
+    }
     const double started = Seconds();
     IntegerStages(n, bits, mode, compact_case, &shift, &clips);
     const double elapsed = Seconds() - started;
-    if (timing_adaptive)
+    if (timing_adaptive) {
         adaptive_ticks[(bits - 7) / 8][adaptive_variant] += elapsed;
-    else
+    } else {
         ticks[(bits - 7) / 8][mode] += elapsed;
+    }
     if (timing_only) {
         timing_sink = (compact_case ? compact[0] : fixed[0]) + shift + clips;
         return;
     }
-    if (compact_case)
-        for (size_t k = 0; k < 2 * n; ++k)
+    if (compact_case) {
+        for (size_t k = 0; k < 2 * n; ++k) {
             fixed[k] = compact[k];
-    if (lab_words && fwrite(fixed, sizeof *fixed, 2 * n, lab_words) != 2 * n)
+        }
+    }
+    if (lab_words && fwrite(fixed, sizeof *fixed, 2 * n, lab_words) != 2 * n) {
         exit(EXIT_FAILURE);
+    }
     double max_error = 0, sum = 0;
     for (size_t k = 0; k < 2 * n; ++k) {
         double error = (ldexp((double)fixed[k], shift) / input_scale - reference[k]) / n;
@@ -295,8 +308,8 @@ static void Matrix(int round)
                                            : (int)(random >> 24) - 128;
                 lab_input[k] = (int8_t)value;
             }
-            for (int inverse = 0; inverse <= 1; ++inverse)
-                for (int bits = 7; bits <= 15; bits += 8)
+            for (int inverse = 0; inverse <= 1; ++inverse) {
+                for (int bits = 7; bits <= 15; bits += 8) {
                     for (int slot = 0; slot < (timing_adaptive ? 2 : 3); ++slot) {
                         if (timing_adaptive) {
                             adaptive_variant = slot ^ (round & 1);
@@ -321,6 +334,8 @@ static void Matrix(int round)
                             round < 0 ? slot : (round / 2 + (round % 2 ? 3 - slot : slot)) % 3;
                         Run(n, pattern, inverse, bits, mode);
                     }
+                }
+            }
         }
     }
 }
@@ -328,15 +343,17 @@ static void Matrix(int round)
 int main(int argc, char **argv)
 {
     if ((argc == 2 && strcmp(argv[1], "--timing-buffered-threaded") == 0) ||
-        (argc == 3 && strcmp(argv[2], "compact-buffered-threaded") == 0))
+        (argc == 3 && strcmp(argv[2], "compact-buffered-threaded") == 0)) {
         return 2;
+    }
 #ifdef CI8_LAB_BUFFERED
     compare_buffered = argc == 2 && strcmp(argv[1], "--timing-buffered") == 0;
     compare_madd = argc == 2 && strcmp(argv[1], "--timing-buffered-madd") == 0;
     use_madd = argc == 3 && strcmp(argv[2], "compact-buffered-madd") == 0;
     use_buffered = use_madd || (argc == 3 && strcmp(argv[2], "compact-buffered") == 0);
-    if ((compare_buffered || compare_madd || use_buffered) && !NgDspAvx2Available())
+    if ((compare_buffered || compare_madd || use_buffered) && !NgDspAvx2Available()) {
         return 2;
+    }
     if (compare_buffered || compare_madd) {
         const char *first_variant = compare_madd ? "buffered" : "recompute";
         const char *second_variant = compare_madd ? "buffered-madd" : "buffered";
@@ -346,11 +363,13 @@ int main(int argc, char **argv)
         for (int round = 0; round < 18; ++round) {
             memset(adaptive_ticks, 0, sizeof adaptive_ticks);
             Matrix(round);
-            for (int q = 0; q < 2; ++q)
-                for (int variant = 0; variant < 2; ++variant)
+            for (int q = 0; q < 2; ++q) {
+                for (int variant = 0; variant < 2; ++variant) {
                     printf("%d,%d,%s,%.9f\n", round, 7 + 8 * q,
                            variant == 0 ? first_variant : second_variant,
                            adaptive_ticks[q][variant]);
+                }
+            }
         }
         return 0;
     }
@@ -358,8 +377,9 @@ int main(int argc, char **argv)
     compare_avx2 = argc == 2 && strcmp(argv[1], "--timing-adaptive-avx2") == 0;
     if (compare_avx2) {
 #ifdef CI8_LAB_COMPACT_AVX2
-        if (!NgDspAvx2Available())
+        if (!NgDspAvx2Available()) {
             return 2;
+        }
 #else
         return 2;
 #endif
@@ -371,12 +391,14 @@ int main(int argc, char **argv)
         for (int round = 0; round < 16; ++round) {
             memset(adaptive_ticks, 0, sizeof adaptive_ticks);
             Matrix(round);
-            for (int q = 0; q < 2; ++q)
-                for (int variant = 0; variant < 2; ++variant)
+            for (int q = 0; q < 2; ++q) {
+                for (int variant = 0; variant < 2; ++variant) {
                     printf("%d,%d,%s,%.9f\n", round, 7 + 8 * q,
                            (compare_avx2 ? (variant == 0 ? "scalar" : "avx2")
                                          : (variant == 0 ? "before" : "after")),
                            adaptive_ticks[q][variant]);
+                }
+            }
         }
         return 0;
     }
@@ -388,9 +410,11 @@ int main(int argc, char **argv)
         for (int round = 0; round < 12; ++round) {
             memset(ticks, 0, sizeof ticks);
             Matrix(round);
-            for (int q = 0; q < 2; ++q)
-                for (int mode = 0; mode < 3; ++mode)
+            for (int q = 0; q < 2; ++q) {
+                for (int mode = 0; mode < 3; ++mode) {
                     printf("%d,%d,%d,%.9f\n", round, 7 + 8 * q, mode, ticks[q][mode]);
+                }
+            }
         }
         return 0;
     }
@@ -399,19 +423,23 @@ int main(int argc, char **argv)
     const int requested_compact_avx2 = argc == 3 && strcmp(argv[2], "compact-adaptive-avx2") == 0;
 #ifdef CI8_LAB_AVX2
     use_avx2 = requested_wide_avx2;
-    if (use_avx2 && !NgDspAvx2Available())
+    if (use_avx2 && !NgDspAvx2Available()) {
         return 2;
+    }
 #else
-    if (requested_wide_avx2)
+    if (requested_wide_avx2) {
         return 2;
+    }
 #endif
 #ifdef CI8_LAB_COMPACT_AVX2
     use_compact_avx2 = requested_compact_avx2;
-    if (use_compact_avx2 && !NgDspAvx2Available())
+    if (use_compact_avx2 && !NgDspAvx2Available()) {
         return 2;
+    }
 #else
-    if (requested_compact_avx2)
+    if (requested_compact_avx2) {
         return 2;
+    }
 #endif
     use_compact = argc == 3 && strcmp(argv[2], "compact") == 0;
     adaptive_before = argc == 3 && strcmp(argv[2], "compact-adaptive-before") == 0;
@@ -421,14 +449,18 @@ int main(int argc, char **argv)
 #ifdef CI8_LAB_BUFFERED
     use_adaptive |= use_buffered;
 #endif
-    if (argc >= 2 && !(lab_words = fopen(argv[1], "wb")))
+    if (argc >= 2 && !(lab_words = fopen(argv[1], "wb"))) {
         return 1;
+    }
     puts("n,pattern,inverse,twiddle_bits,mode,shift,clips,max_error,rms_error");
     Matrix(-1);
-    for (int q = 0; q < 2; ++q)
-        for (int mode = 0; mode < 3; ++mode)
+    for (int q = 0; q < 2; ++q) {
+        for (int mode = 0; mode < 3; ++mode) {
             fprintf(stderr, "%d,%d,%.9f\n", 7 + 8 * q, mode, ticks[q][mode]);
-    if (lab_words && fclose(lab_words) != 0)
+        }
+    }
+    if (lab_words && fclose(lab_words) != 0) {
         return 1;
+    }
     return 0;
 }

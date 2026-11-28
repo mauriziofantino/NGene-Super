@@ -43,8 +43,9 @@ static int CancelDuringCoarse(void *context)
 {
     TPcpsLane *lane = context;
     double now = NgMonotonicSeconds();
-    if (lane->deadline == 0)
+    if (lane->deadline == 0) {
         lane->deadline = now + 0.000010; /* First poll is after wrong-Doppler, before row 1. */
+    }
     return now >= lane->deadline;
 }
 
@@ -55,27 +56,31 @@ static void Measure(void *context)
     TNgError error = {{0}};
     const TLabStrategy *ops = lane->ops;
     NgAtomicSet(&lane->ready, 1);
-    while (!NgAtomicGet(lane->gate))
+    while (!NgAtomicGet(lane->gate)) {
         SwitchToThread();
+    }
     for (unsigned k = 0; k < KERNEL_TRIALS; ++k) {
         double start = NgMonotonicSeconds();
-        if (ops->coarse(lane->workspace, PRN, lane->config.fftMode) != NG_OK)
+        if (ops->coarse(lane->workspace, PRN, lane->config.fftMode) != NG_OK) {
             return;
+        }
         lane->row[k] = NgMonotonicSeconds() - start;
     }
     for (unsigned k = 0; k < CANCEL_TRIALS; ++k) {
         lane->deadline = 0;
         if (ops->strategy->search(lane->workspace, &lane->capture, PRN, &lane->config,
-                                  CancelDuringCoarse, lane, &result, &error) != NG_END)
+                                  CancelDuringCoarse, lane, &result, &error) != NG_END) {
             return;
+        }
         lane->lag[k] = NgMonotonicSeconds() - lane->deadline;
     }
     ++lane->capture.origin.epoch;
     double start = NgMonotonicSeconds();
     if (ops->strategy->search(lane->workspace, &lane->capture, PRN, &lane->config, NeverCancel,
                               NULL, &result, &error) != NG_OK ||
-        !result.confirmed || result.successes != 3)
+        !result.confirmed || result.successes != 3) {
         return;
+    }
     lane->searchTime = NgMonotonicSeconds() - start;
     lane->status = NG_OK;
 }
@@ -85,31 +90,39 @@ int NgPcpsLab(const TLabStrategy *ops, const TNgAcquisitionCapture *capture,
               void *const *workspaces, unsigned count, TNgSearchFftMode mode, int scenario)
 {
 #ifdef NGENE_PCPS_PROFILE
-    if (scenario != 4 || count != 1)
+    if (scenario != 4 || count != 1) {
         return NG_ERROR;
+    }
     double prepare = 0, rows = 0;
     for (unsigned k = 0; k < KERNEL_TRIALS + 3; ++k) {
-        if (k == 3)
+        if (k == 3) {
             memset(partSeconds, 0, sizeof(partSeconds));
+        }
         double start = NgMonotonicSeconds();
-        if (ops->prepare(workspaces[0], capture, NeverCancel, NULL) != NG_OK)
+        if (ops->prepare(workspaces[0], capture, NeverCancel, NULL) != NG_OK) {
             return NG_ERROR;
-        if (k >= 3)
+        }
+        if (k >= 3) {
             prepare += NgMonotonicSeconds() - start;
+        }
         start = NgMonotonicSeconds();
-        if (ops->coarse(workspaces[0], PRN, mode) != NG_OK)
+        if (ops->coarse(workspaces[0], PRN, mode) != NG_OK) {
             return NG_ERROR;
-        if (k >= 3)
+        }
+        if (k >= 3) {
             rows += NgMonotonicSeconds() - start;
+        }
     }
     printf("profile,%.9f,%.9f", prepare / KERNEL_TRIALS, rows / KERNEL_TRIALS);
-    for (unsigned k = 0; k < PCPS_PART_COUNT; ++k)
+    for (unsigned k = 0; k < PCPS_PART_COUNT; ++k) {
         printf(",%.9f", partSeconds[k] / KERNEL_TRIALS);
+    }
     putchar('\n');
     return NG_OK;
 #else
-    if (scenario != 5)
+    if (scenario != 5) {
         return NG_ERROR;
+    }
     TPcpsLane lanes[4] = {0};
     TNgThread threads[4];
     TNgAtomicInt gate = {0};
@@ -133,9 +146,11 @@ int NgPcpsLab(const TLabStrategy *ops, const TNgAcquisitionCapture *capture,
         }
         ++started;
     }
-    for (unsigned k = 0; k < started; ++k)
-        while (!NgAtomicGet(&lanes[k].ready))
+    for (unsigned k = 0; k < started; ++k) {
+        while (!NgAtomicGet(&lanes[k].ready)) {
             SwitchToThread();
+        }
+    }
     NgAtomicSet(&gate, 1);
     for (unsigned k = 0; k < started; ++k) {
         NgThreadJoin(threads[k]);
@@ -143,10 +158,12 @@ int NgPcpsLab(const TLabStrategy *ops, const TNgAcquisitionCapture *capture,
             status = NG_ERROR;
             continue;
         }
-        for (unsigned j = 0; j < KERNEL_TRIALS; ++j)
+        for (unsigned j = 0; j < KERNEL_TRIALS; ++j) {
             printf("row,%u,%u,%.9f\n", k, j, lanes[k].row[j]);
-        for (unsigned j = 0; j < CANCEL_TRIALS; ++j)
+        }
+        for (unsigned j = 0; j < CANCEL_TRIALS; ++j) {
             printf("cancel,%u,%u,%.9f\n", k, j, lanes[k].lag[j]);
+        }
         printf("search,%u,%.9f\n", k, lanes[k].searchTime);
     }
     return status;

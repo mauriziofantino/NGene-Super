@@ -295,8 +295,9 @@ int ADDCALL hackrf_set_antenna_enable(hackrf_device *device, const uint8_t value
     CHECK(value == 1);
     CHECK(!alive);
     ++antennaRequests;
-    if (failAntenna)
+    if (failAntenna) {
         return HACKRF_ERROR_LIBUSB;
+    }
     antennaConfigured = 1;
     return HACKRF_SUCCESS;
 }

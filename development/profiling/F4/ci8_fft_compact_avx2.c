@@ -16,8 +16,9 @@ static inline Complex8 Load8(const int8_t *p)
 
 static inline __m256i RoundShift8(__m256i value, unsigned shift)
 {
-    if (!shift)
+    if (!shift) {
         return value;
+    }
     __m256i bias = _mm256_set1_epi32(1 << (shift - 1));
     __m256i magnitude = _mm256_add_epi32(_mm256_abs_epi32(value), bias);
     __m256i rounded = _mm256_srl_epi32(magnitude, _mm_cvtsi32_si128((int)shift));
@@ -72,8 +73,9 @@ static unsigned FindShift(const int8_t *values, const int64_t *wr, const int64_t
                                                 _mm256_max_epi32(top.imag, bottom.imag));
             __m256i outside = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(-256), lowPair),
                                               _mm256_cmpgt_epi32(highPair, _mm256_set1_epi32(254)));
-            if (_mm256_movemask_epi8(outside))
+            if (_mm256_movemask_epi8(outside)) {
                 return 2;
+            }
             low = _mm256_min_epi32(low, lowPair);
             high = _mm256_max_epi32(high, highPair);
         }
@@ -124,8 +126,9 @@ static inline unsigned RequiredShift(__m256i low, __m256i high)
 {
     __m256i needTwo = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(-256), low),
                                       _mm256_cmpgt_epi32(high, _mm256_set1_epi32(254)));
-    if (_mm256_movemask_epi8(needTwo))
+    if (_mm256_movemask_epi8(needTwo)) {
         return 2;
+    }
     __m256i needOne = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(-128), low),
                                       _mm256_cmpgt_epi32(high, _mm256_set1_epi32(127)));
     return _mm256_movemask_epi8(needOne) != 0;

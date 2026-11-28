@@ -109,29 +109,53 @@ void NgAcquisitionObserve(TNgAcquisition *acquisition, unsigned prn);
 void NgAcquisitionSetBudget(TNgAcquisition *acquisition, unsigned yieldMilliseconds);
 /** Merge idle groups before reception. Accepts NULL operands.
  * The pool supports up to three subscriptions and keeps the first group's budget. */
-int NgAcquisitionLink(TNgAcquisition *a, TNgAcquisition *b, TNgError *error);
+int NgAcquisitionLink(TNgAcquisition *firstRunner, TNgAcquisition *secondRunner, TNgError *error);
 /** Receiver-owned signal clock: credit the search pool with cpuBudget seconds of CPU per
  * second of processed signal (capped). Returns the budget's stage concurrency, or zero when
  * the budget is disabled and the caller keeps its own adaptive limits. */
 unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *acquisition, uint64_t epoch, uint64_t endSample,
                                     double sampleRate);
-/** Receiver-owned adaptive global concurrency and per-constellation free-slot quota. */
+/** @brief Set search concurrency and quotas on the receiver thread.
+ * @param[in,out] acquisition Runner sharing the pool, or NULL.
+ * @param[in] totalLimit Maximum outstanding searches across the pool.
+ * @param[in] quota Per-constellation admission quota.
+ * @param[in] executionLimit Maximum stages executing concurrently in the pool.
+ */
 void NgAcquisitionSetParallelism(TNgAcquisition *acquisition, unsigned totalLimit, unsigned quota,
                                  unsigned executionLimit);
-/** Validate PRNs and boolean options without allocating or opening hardware. */
+/** @brief Validate the BeiDou B1C search profile.
+ * @param[in] config Candidate acquisition settings, including PRNs 1 through 63.
+ * @param[out] error Diagnostic when validation fails.
+ * @return NG_OK on success or NG_ERROR for an invalid profile.
+ */
 int NgAcquisitionValidateBeidou(const TNgAcquisitionConfig *config, TNgError *error);
+/** @brief Validate the GPS L1 C/A search profile without creating a runner.
+ * @param[in] config Candidate acquisition settings, including PRNs 1 through 32.
+ * @param[out] error Diagnostic when validation fails.
+ * @return NG_OK on success or NG_ERROR for an invalid profile.
+ */
 int NgAcquisitionValidate(const TNgAcquisitionConfig *config, TNgError *error);
-/** Create the default Classic-derived PCPS strategy. Allocates before reception.
- * stream must contain the actual opened source metadata; supports CI8 and CI16 common streams.
- * channel receives a borrowed registration, valid until runner destruction. */
+/** @brief Create a GPS L1 C/A runner with the built-in PCPS strategy.
+ * @param[in] config Validated per-run search profile.
+ * @param[in] stream Actual common stream format, rate and IF from the opened source.
+ * @param[out] out Receiver-owned runner, released with NgAcquisitionDestroy().
+ * @param[out] channel Borrowed engine registration, valid while the runner lives.
+ * @param[out] error Diagnostic when initialization fails.
+ * @return NG_OK on success or NG_ERROR on invalid input or allocation failure.
+ */
 int NgAcquisitionCreate(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                         TNgAcquisition **out, TNgChannel *channel, TNgError *error);
-/** Register Galileo E1-B PRNs 1..32 with an independent 224-ms capture worker.
- * Same native precision/ownership/cancellation and completed-map contract as GPS.
- * Both registrations may share an engine; callers may override instance identities. */
+/** @brief Create the Galileo E1-B primary-code search runner.
+ * @copydetails NgAcquisitionCreate
+ * The runner captures 224 ms at the native stream rate. It may share the
+ * engine with the GPS registration.
+ */
 int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                                TNgAcquisition **out, TNgChannel *channel, TNgError *error);
-/** Register the primary data component of BeiDou B1C. */
+/** @brief Create the BeiDou B1C data-component search runner.
+ * @copydetails NgAcquisitionCreate
+ * The runner captures 570 ms at the native stream rate.
+ */
 int NgAcquisitionCreateBeidou(const TNgAcquisitionConfig *config, const TNgStreamInfo *stream,
                               TNgAcquisition **out, TNgChannel *channel, TNgError *error);
 /** Create a runner using caller-owned strategy/context. Same ring and cancellation contract. */
@@ -146,21 +170,40 @@ int NgAcquisitionCreateForConstellation(const TNgAcquisitionConfig *config,
                                         unsigned durationMs, const TNgAcquisitionStrategy *strategy,
                                         void *context, TNgAcquisition **out, TNgChannel *channel,
                                         TNgError *error);
-/** Copy all PRN results for the runner as one snapshot. Slot prn-1 is zero when unavailable. */
+/** @brief Copy one coherent publication of all PRN search results.
+ * @param[in] acquisition Live runner, or NULL for an empty result.
+ * @param[out] results Full PRN-indexed output array. Slot PRN minus one is
+ * zero when no result is available.
+ */
 void NgAcquisitionReadResults(TNgAcquisition *acquisition,
                               TNgAcquisitionResult results[NG_SATELLITE_MAX_PRN]);
-/** Copy worker telemetry; safe concurrently with sample callbacks and search. */
+/** @brief Copy the latest worker and acquisition counters.
+ * @param[in] acquisition Live runner, or NULL for zeroed telemetry.
+ * @param[out] snapshot Caller-owned destination. May be read while the worker runs.
+ */
 void NgAcquisitionRead(TNgAcquisition *acquisition, TNgAcquisitionSnapshot *snapshot);
-/** Copy the last completed map for this PRN; zero output if unavailable. */
+/** @brief Copy the latest completed search map for one PRN.
+ * @param[in] acquisition Live runner, or NULL for an unavailable map.
+ * @param[in] prn Satellite PRN in the runner's constellation.
+ * @param[out] space Caller-owned buffer, zeroed if a map is unavailable.
+ */
 void NgAcquisitionReadSearchSpace(TNgAcquisition *acquisition, unsigned prn,
                                   TNgAcquisitionSearchSpace *space);
-/** Cancel/join worker and free owned memory after the engine has stopped using channel.
- * Accepts NULL. Results remain acquisition observations; no fake TRACKING transition. */
+/** @brief Cancel outstanding searches, join workers and release the runner.
+ * @param[in] acquisition Caller-owned runner, or NULL. Remove its borrowed
+ * channel registration from use before destruction.
+ */
 void NgAcquisitionDestroy(TNgAcquisition *acquisition);
-/** Set scheduling exclusions and admission on the owning receiver thread.
- * mask bit PRN-1 excludes a satellite already assigned to tracking. Pausing admits
- * no new capture/search; an in-flight single-satellite decision may finish unchanged. */
+/** @brief Set scheduling exclusions for legacy PRNs 1 through 32.
+ * @param[in,out] acquisition Runner owned by the calling receiver.
+ * @param[in] mask Bit PRN minus one excludes an already assigned satellite.
+ * @param[in] paused Nonzero to stop new admissions while allowing in-flight work to finish.
+ */
 void NgAcquisitionSetAdmission(TNgAcquisition *acquisition, uint32_t mask, int paused);
-/** Full-width exclusion mask for a signal with PRNs above 32. */
+/** @brief Set scheduling exclusions for a signal with PRNs above 32.
+ * @param[in,out] acquisition Runner owned by the calling receiver.
+ * @param[in] mask Bit PRN minus one excludes an already assigned satellite.
+ * @param[in] paused Nonzero to stop new admissions while allowing in-flight work to finish.
+ */
 void NgAcquisitionSetAdmissionMask(TNgAcquisition *acquisition, uint64_t mask, int paused);
 #endif

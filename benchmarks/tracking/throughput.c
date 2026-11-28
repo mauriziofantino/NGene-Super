@@ -41,12 +41,14 @@ int main(int argc, char **argv)
     config.squareCarrier = argc > 6 ? atoi(argv[6]) : 0;
     config.xorCorrelation = argc > 7 ? atoi(argv[7]) : 0;
     if (!count || count > 32 || !windows || stream.sampleRateHz < 2048000 ||
-        NgTrackingValidate(&config, &error) != NG_OK)
+        NgTrackingValidate(&config, &error) != NG_OK) {
         return 1;
+    }
     view.meta.count = stream.sampleRateHz / 1000;
     samples = calloc(view.meta.count, sizeof(*samples));
-    if (!samples)
+    if (!samples) {
         return 1;
+    }
     for (n = 0; n < view.meta.count; ++n) {
         samples[n].i = (int8_t)((n * 31u) % 127u);
         samples[n].q = (int8_t)(-((int)(n * 17u % 127u)));
@@ -60,19 +62,22 @@ int main(int argc, char **argv)
         seed.codePhaseChips = 173.25;
         if (NgTrackingCreate(&config, &stream, channel % 2 + 1, &channels[channel], &error) !=
                 NG_OK ||
-            NgTrackingSeed(channels[channel], &seed, &error) != NG_OK)
+            NgTrackingSeed(channels[channel], &seed, &error) != NG_OK) {
             return 1;
-        if (argc > 8)
+        }
+        if (argc > 8) {
             NgTrackingObserve(channels[channel],
                               atoi(argv[8]) == 2 ? channel == 0 : atoi(argv[8]) != 0);
+        }
     }
     for (channel = 0; channel < count; ++channel) {
         jobs[channel].ops = &ops;
         jobs[channel].context = channels[channel];
         jobs[channel].state = NG_CHANNEL_TRACKING;
     }
-    if (NgChannelDispatchCreate(jobs, count, workers, &dispatch, &error) != NG_OK)
+    if (NgChannelDispatchCreate(jobs, count, workers, &dispatch, &error) != NG_OK) {
         return 1;
+    }
     begin = NgMonotonicSeconds();
     for (window = 0; window < windows; ++window) {
         view.meta.firstSample = (uint64_t)window * view.meta.count;
@@ -86,8 +91,9 @@ int main(int argc, char **argv)
         TNgTrackingSnapshot snapshot;
         unsigned tap;
         NgTrackingRead(channels[channel], &snapshot);
-        for (tap = 0; tap < config.tapCount; ++tap)
+        for (tap = 0; tap < config.tapCount; ++tap) {
             checksum += snapshot.i[tap] + snapshot.q[tap];
+        }
         NgTrackingDestroy(channels[channel]);
     }
     NgChannelDispatchDestroy(dispatch);

@@ -53,8 +53,9 @@ void NgThreadSchedulingPriority(int priority)
                                         0);
 #elif defined(__linux__)
     /* NPTL keeps the nice value per thread; who = 0 names the calling thread. */
-    if (priority < 0)
+    if (priority < 0) {
         (void)setpriority(PRIO_PROCESS, 0, 10);
+    }
 #else
     (void)priority;
 #endif
@@ -65,15 +66,17 @@ double NgThreadCpuSeconds(void)
 {
 #ifdef _WIN32
     FILETIME creation, exited, kernel, user;
-    if (!GetThreadTimes(GetCurrentThread(), &creation, &exited, &kernel, &user))
+    if (!GetThreadTimes(GetCurrentThread(), &creation, &exited, &kernel, &user)) {
         return 0;
+    }
     return ((double)(((uint64_t)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime) +
             (double)(((uint64_t)user.dwHighDateTime << 32) | user.dwLowDateTime)) *
            1e-7;
 #else
     struct timespec now;
-    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) != 0)
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) != 0) {
         return 0;
+    }
     return (double)now.tv_sec + (double)now.tv_nsec * 1e-9;
 #endif
 }

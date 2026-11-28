@@ -196,14 +196,15 @@ static int ParseBool(const char *text, int *value)
 
 static int ParseSearchFft(const char *text, TNgSearchFftMode *mode)
 {
-    if (strcmp(text, "float") == 0)
+    if (strcmp(text, "float") == 0) {
         *mode = NG_SEARCH_FFT_FLOAT;
-    else if (strcmp(text, "integer_precise") == 0)
+    } else if (strcmp(text, "integer_precise") == 0) {
         *mode = NG_SEARCH_FFT_INTEGER_PRECISE;
-    else if (strcmp(text, "integer_scaled") == 0)
+    } else if (strcmp(text, "integer_scaled") == 0) {
         *mode = NG_SEARCH_FFT_INTEGER_SCALED;
-    else
+    } else {
         return NG_ERROR;
+    }
     return NG_OK;
 }
 
@@ -295,19 +296,22 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
                 TNgLoopSettings *settings = &c->tracking.loops[signal][loop];
                 snprintf(option, sizeof(option), "%s_%s_bandwidth_hz", loopSignals[signal],
                          loopNames[loop]);
-                if (strcmp(key + 9, option) == 0)
+                if (strcmp(key + 9, option) == 0) {
                     return ParseReal(value, &settings->bandwidthHz);
+                }
                 snprintf(option, sizeof(option), "%s_%s_gain", loopSignals[signal],
                          loopNames[loop]);
-                if (strcmp(key + 9, option) == 0)
+                if (strcmp(key + 9, option) == 0) {
                     return ParseReal(value, &settings->gain);
+                }
             }
         }
     }
     if (strcmp(key, "tracking.galileo_spacing_slots") == 0) {
         double slots;
-        if (ParseReal(value, &slots) != NG_OK)
+        if (ParseReal(value, &slots) != NG_OK) {
             return NG_ERROR;
+        }
         c->tracking.galileoSpacingChips = slots * 0.5;
         return NG_OK;
     }
@@ -331,8 +335,9 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     BOOL_KEY("dsp.gps_xor_correlation", acquisition.xorCorrelation)
     if (strcmp(key, "acquisition.cpu_budget") == 0) {
         /* One shared search pool serves both signals: one budget for both. */
-        if (ParseReal(value, &c->acquisition.cpuBudget) != NG_OK)
+        if (ParseReal(value, &c->acquisition.cpuBudget) != NG_OK) {
             return NG_ERROR;
+        }
         c->galileoAcquisition.cpuBudget = c->acquisition.cpuBudget;
         return NG_OK;
     }
@@ -351,12 +356,15 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     BOOL_KEY("galileo_acquisition.xor_correlation", galileoAcquisition.xorCorrelation)
     BOOL_KEY("dsp.galileo_square_carrier", galileoAcquisition.squareCarrier)
     BOOL_KEY("dsp.galileo_xor_correlation", galileoAcquisition.xorCorrelation)
-    if (strcmp(key, "dsp.gps_fft") == 0)
+    if (strcmp(key, "dsp.gps_fft") == 0) {
         return ParseSearchFft(value, &c->acquisition.fftMode);
-    if (strcmp(key, "dsp.galileo_fft") == 0)
+    }
+    if (strcmp(key, "dsp.galileo_fft") == 0) {
         return ParseSearchFft(value, &c->galileoAcquisition.fftMode);
-    if (strcmp(key, "dsp.spectrum_fft") == 0)
+    }
+    if (strcmp(key, "dsp.spectrum_fft") == 0) {
         return ParseSearchFft(value, &c->analysis.fftMode);
+    }
     if (strcmp(key, "frontend.type") == 0) {
         if (strcmp(value, "hackrf") == 0) {
             c->frontend = NG_FRONTEND_HACKRF;
@@ -385,17 +393,19 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("frontend.sample_rate_hz", sampleRateHz)
     U64_KEY("frontend.center_frequency_hz", centerFrequencyHz)
     U64_KEY("frontend.signal_frequency_hz", signalFrequencyHz)
-    if (strcmp(key, "conditioning.dc_shift") == 0)
+    if (strcmp(key, "conditioning.dc_shift") == 0) {
         return NG_OK;
+    }
     if (strcmp(key, "frontend.stream_format") == 0) {
-        if (strcmp(value, "auto") == 0)
+        if (strcmp(value, "auto") == 0) {
             c->streamFormat = 0;
-        else if (strcmp(value, "CI8") == 0)
+        } else if (strcmp(value, "CI8") == 0) {
             c->streamFormat = NG_FORMAT_CI8;
-        else if (strcmp(value, "CI16") == 0)
+        } else if (strcmp(value, "CI16") == 0) {
             c->streamFormat = NG_FORMAT_CI16;
-        else
+        } else {
             return NG_ERROR;
+        }
         return NG_OK;
     }
     UINT_KEY("hackrf.bandwidth_hz", bandwidthHz)
@@ -449,8 +459,9 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
         }
         return NG_OK;
     }
-    if (strcmp(key, "conditioning.module") == 0)
+    if (strcmp(key, "conditioning.module") == 0) {
         return NG_OK; /* Retired; ignored on import. */
+    }
     SIZE_KEY("buffer.window_samples", windowSamples)
     SIZE_KEY("buffer.ingress_blocks", ingressBlocks)
     SIZE_KEY("buffer.ring_blocks", ringBlocks)
@@ -679,23 +690,29 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (config == NULL) {
         return NgFail(error, "Missing config");
     }
-    if (config->replaySpectrumInverted != 0 && config->replaySpectrumInverted != 1)
+    if (config->replaySpectrumInverted != 0 && config->replaySpectrumInverted != 1) {
         return NgFail(error, "Invalid replay spectrum convention");
+    }
     if (NgAnalysisValidate(&config->analysis, error) != NG_OK) {
         return NG_ERROR;
     }
-    if (NgAcquisitionValidateBeidou(&config->beidouAcquisition, error) != NG_OK)
+    if (NgAcquisitionValidateBeidou(&config->beidouAcquisition, error) != NG_OK) {
         return NG_ERROR;
-    if (NgAcquisitionValidate(&config->galileoAcquisition, error) != NG_OK)
+    }
+    if (NgAcquisitionValidate(&config->galileoAcquisition, error) != NG_OK) {
         return NG_ERROR;
-    if (NgTrackingValidate(&config->tracking, error) != NG_OK)
+    }
+    if (NgTrackingValidate(&config->tracking, error) != NG_OK) {
         return NG_ERROR;
-    if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK)
+    }
+    if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK) {
         return NG_ERROR;
+    }
     if (config->dcRemoval != 0 ||
         (config->streamFormat != 0 && config->streamFormat != NG_FORMAT_CI8 &&
-         config->streamFormat != NG_FORMAT_CI16))
+         config->streamFormat != NG_FORMAT_CI16)) {
         return NgFail(error, "DC removal is retired or common stream format is invalid");
+    }
     if ((config->dcRemoval != 0 && config->dcRemoval != 1) || config->dcShift < 4 ||
         config->dcShift > 24) {
         return NgFail(error, "DC estimator shift must be 4..24");
@@ -703,8 +720,9 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
     if (config->frontend == NG_FRONTEND_SIGE &&
         (config->sampleRateHz != NG_SIGE_RATE_HZ ||
          config->centerFrequencyHz != NG_SIGE_CENTER_HZ ||
-         config->signalFrequencyHz != NG_SIGE_SIGNAL_HZ || config->bandwidthHz != 0))
+         config->signalFrequencyHz != NG_SIGE_SIGNAL_HZ || config->bandwidthHz != 0)) {
         return NgFail(error, "SiGe native IQ uses immutable rate, RF and IF parameters");
+    }
     if (config->signalFrequencyHz > NG_HACKRF_MAX_FREQUENCY_HZ ||
         (config->signalFrequencyHz != 0 &&
          fabs((double)config->signalFrequencyHz - (double)config->centerFrequencyHz) >=
@@ -763,8 +781,9 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
         bytes = ((uint64_t)config->windowSamples * nativeBytes + 63u) * config->ingressBlocks;
         bytes += ((uint64_t)config->windowSamples * commonBytes + 63u) *
                  (config->ingressBlocks + config->ringBlocks + config->recordingQueueBlocks + 2u);
-        if (config->frontend == NG_FRONTEND_SIGE)
+        if (config->frontend == NG_FRONTEND_SIGE) {
             bytes += 128u * 8192u;
+        }
     }
     if (bytes > UINT64_C(536870912)) {
         return NgFail(error, "Buffer plan exceeds the documented 512 MiB guard");

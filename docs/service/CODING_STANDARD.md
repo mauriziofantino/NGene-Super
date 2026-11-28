@@ -13,11 +13,13 @@ Reference: ESA BSSC(2000)1 Issue 1, supplied by the user. Rule 38 requires proje
 
 `ng_ring_destroy` and `struct ng_recorder` are no longer NGene symbols. The migration also covers variables, members, parameters, and assembly-boundary symbols; no aliases are added. [IDENTIFIER_RENAMES.csv](IDENTIFIER_RENAMES.csv) and [API_RENAMES.csv](API_RENAMES.csv) support updates to external consumers. Modules using NGene headers must be recompiled.
 
+Use descriptive names for variables, parameters, members and loop indices in project-owned C. For example, use `acquisition`, `workerIndex` and `sampleIndex` in place of `a`, `i` and `k`. The name should make the role clear at the point of use. Adopt established domain abbreviations where they are precise, such as `prn` and `dopplerHz`. Syntax checks such as clang-tidy verify case and prefixes. Review must also verify meaning.
+
 Required exceptions: `main`, system/dependency library names and ABIs, their mocks, and macros required by the operating system. `third_party/` is not renamed. INI/JSON keys, API paths, and CMake options retain their configuration contract; they are not C identifiers.
 
 ## Documentation and layout
 
-Every NGene function prototype and definition has an adjacent Doxygen comment. Headers formally document parameters, units, outcomes/errors, ownership, buffer lifetimes, and threading constraints. Definitions describe the operation and its use without duplicating parameter tags already attached to the declaration: Doxygen combines the two descriptions. Parameter names match between prototypes and definitions. Public and private structure members document their meaning, units, and relevant synchronization.
+Every NGene function prototype and definition must have an adjacent Doxygen comment. Headers formally document parameters, units, outcomes/errors, ownership, buffer lifetimes, and threading constraints. Definitions describe the operation and its use without duplicating parameter tags already attached to the declaration: Doxygen combines the two descriptions. Parameter names match between prototypes and definitions. Public and private structure members document their meaning, units, and relevant synchronization.
 
 Four spaces, at most 100 columns, braces on blocks, and separate variable declarations. `.clang-format` is the reference. Headers contain declarations; implementations belong in source files. Shared constants with explicit units live in `include/ngene/limits.h`. Technical comments are in English; no author names are added to NGene files. External copyright notices and licenses are preserved.
 
@@ -26,10 +28,34 @@ cmake -S . -B build-docs -DNGENE_WITH_DOCUMENTATION=ON
 cmake --build build-docs --target ngene_docs
 ```
 
-HTML was generated with Doxygen 1.18.0, treating warnings as errors: no warnings. Doxygen remains an optional development tool.
+Doxygen remains an optional development tool. The documentation target treats warnings as errors. The November 28 audit found outstanding gaps, so the full documentation target and the ESA review remain open.
 
 ## Checks and scope
 
-An AST check of project-owned C sources found zero convention violations for types/tags, functions, members, variables, and parameters. The ARM64 build also checks the NEON branch. `.clang-tidy` was run with clang-tidy 22.1.8 on all project-owned production and test C sources, including HackRF: exit status zero, no violations. Mocks explicitly preserve the `hackrf_*`/`libusb_*` ABI names. The `naming` CI job also configures HackRF dependencies before analysis; the remote pipeline was not run in that environment.
+A historical AST check of the then-current C sources found zero convention violations for types/tags, functions, members, variables, and parameters. The ARM64 build also checks the NEON branch. `.clang-tidy` was run with clang-tidy 22.1.8 on all project-owned production and test C sources, including HackRF: exit status zero, no violations. Mocks explicitly preserve the `hackrf_*`/`libusb_*` ABI names. The `naming` CI job also configures HackRF dependencies before analysis; the remote pipeline was not run in that environment.
 
 Consistent naming does not certify compliance with every ESA rule. A formal matrix of applicable rules, SIMD/OS deviations, and semantic checks remains a separate task. However, no type/struct naming migration is deferred to a later increment.
+
+The current review covers project-owned C and headers in the runnable targets,
+tests and labs. Apply the repository formatter to that scope. Preserve vendor
+sources and imported NeQuick numerics and record their findings separately.
+Check readability by reviewing each variable name in context. Passing the
+formatter alone establishes the applied layout rules, while naming, Doxygen
+coverage and semantic ESA requirements need separate checks.
+
+### Review snapshot, 28 November 2026
+
+- The local formatter scope is 177 tracked C sources and headers. It includes
+  tests and benchmarks and excludes vendored sources and imported NeQuick.
+- The readability pass covers the acquisition worker pool, tracking loop
+  updates, the SBAS decoder and correction bank, and the PVT solver. The
+  remaining project-owned identifiers still need contextual review.
+- The Doxygen 1.18.0 audit over include, src and apps went from 1,704 diagnostic
+  lines to 1,499, including 303 from imported NeQuick. The count includes
+  continuation lines and therefore differs from the number of distinct issues.
+  Keep the normal documentation target strict. An inventory can use a local
+  copy of the generated Doxyfile with WARN_AS_ERROR set to FAIL_ON_WARNINGS
+  to collect all diagnostics in one run.
+- Repository cleanup removed a tracked Python bytecode cache and two obsolete
+  DSP handoff notes. Preserve captures, test fixtures and historical validation
+  evidence used by the project.

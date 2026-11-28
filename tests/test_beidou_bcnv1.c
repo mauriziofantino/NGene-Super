@@ -262,8 +262,9 @@ int main(void)
         start[0] = (int8_t)-start[0];
         start[30] = (int8_t)-start[30];
         const unsigned flips[] = {72, 72 + 36, 72 + 2, 72 + 2 + 36};
-        for (unsigned k = 0; k < sizeof(flips) / sizeof(*flips); ++k)
+        for (unsigned k = 0; k < sizeof(flips) / sizeof(*flips); ++k) {
             start[flips[k]] = start[flips[k]] < 0 ? 8 : -8;
+        }
         CHECK(NgBcnv1Decode(start, 33, &frame) == NG_OK);
         CheckPayload(&frame, inverted);
         CHECK(frame.correctedBits[0] == 2 && frame.correctedBits[1] == 2 &&

@@ -62,10 +62,12 @@ int main(int argc, char **argv)
 {
     FILE *result = NULL;
     const int plansOnly = argc == 2 && strcmp(argv[1], "--plans") == 0;
-    if (argc > 2)
+    if (argc > 2) {
         return EXIT_FAILURE;
-    if (argc == 2 && !plansOnly && !(result = fopen(argv[1], "wb")))
+    }
+    if (argc == 2 && !plansOnly && !(result = fopen(argv[1], "wb"))) {
         return EXIT_FAILURE;
+    }
     for (size_t n = NG_FFT_MIN_SIZE; n <= MAX_SIZE; n *= 2) {
         TNgError error = {{0}};
         TNgSearchFft *plan = NULL;
@@ -93,17 +95,20 @@ int main(int argc, char **argv)
                 for (unsigned vector = 0; vector < VECTOR_COUNT; ++vector) {
                     MakeVector(n, vector);
                     Execute(plan, inverse);
-                    if (fwrite(output, sizeof(*output), 2 * n, result) != 2 * n)
+                    if (fwrite(output, sizeof(*output), 2 * n, result) != 2 * n) {
                         return EXIT_FAILURE;
+                    }
                 }
             } else {
                 const size_t trials = n < 1024 ? 512 : 524288 / n;
                 MakeVector(n, VECTOR_COUNT - 1);
-                for (unsigned k = 0; k < 5; ++k)
+                for (unsigned k = 0; k < 5; ++k) {
                     Execute(plan, inverse);
+                }
                 double start = NgMonotonicSeconds();
-                for (size_t k = 0; k < trials; ++k)
+                for (size_t k = 0; k < trials; ++k) {
                     Execute(plan, inverse);
+                }
                 printf("%zu,%d,%zu,%.9g\n", n, inverse, trials,
                        (NgMonotonicSeconds() - start) / (double)trials);
             }

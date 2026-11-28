@@ -63,8 +63,9 @@ static int InitFixture(TPcpsFixture *b, size_t n, const int8_t *chips)
     b->power = calloc(n, sizeof(*b->power));
     if (!b->samples || !b->baseband || !b->carrier || !b->spectrum || !b->work ||
         !b->integerBaseband || !b->code || !b->reference || !b->power ||
-        NgSearchFftCreate(n, &b->plan, NULL) != NG_OK)
+        NgSearchFftCreate(n, &b->plan, NULL) != NG_OK) {
         return Fail("fixture allocation failed");
+    }
 
     for (size_t k = 0; k < n; ++k) {
         size_t halfChip = k * 8184 / n;
@@ -103,8 +104,9 @@ static int InitFixture(TPcpsFixture *b, size_t n, const int8_t *chips)
 
 static void FreeFixture(TPcpsFixture *b)
 {
-    for (unsigned m = 0; m < 3; ++m)
+    for (unsigned m = 0; m < 3; ++m) {
         NgAcquisitionGalileoFree(b->workspaces[m]);
+    }
     NgSearchFftDestroy(b->plan);
     free(b->samples);
     free(b->baseband);
@@ -119,8 +121,9 @@ static void FreeFixture(TPcpsFixture *b)
 
 static int PrepareCode(TPcpsFixture *b, TNgSearchFftMode mode)
 {
-    if (mode != NG_SEARCH_FFT_FLOAT)
+    if (mode != NG_SEARCH_FFT_FLOAT) {
         return NgSearchIntegerCode(b->plan, b->code, mode, NULL);
+    }
     for (size_t k = 0; k < b->n; ++k) {
         b->spectrum[k].i = b->code[k];
         b->spectrum[k].q = 0;
@@ -136,8 +139,9 @@ static int Pcps(TPcpsFixture *b, TNgSearchFftMode mode)
     for (size_t period = 0; period < PERIODS; ++period) {
         if (mode != NG_SEARCH_FFT_FLOAT) {
             if (NgSearchIntegerPcps(b->plan, b->integerBaseband + 2 * n * period, b->carrier,
-                                    b->inputScale, mode, b->power, NULL) != NG_OK)
+                                    b->inputScale, mode, b->power, NULL) != NG_OK) {
                 return NG_ERROR;
+            }
             continue;
         }
         memcpy(b->work, b->baseband + n * period, n * sizeof(*b->work));
@@ -195,28 +199,34 @@ static int VerifyMaps(TPcpsFixture *b, double frequency)
     const double limits[] = {0.0001, 0.05, 0.002};
     size_t expectedPeak = 0;
     double referenceNorm = 0, referenceSum = 0;
-    if (Reference(b, frequency))
+    if (Reference(b, frequency)) {
         return 1;
+    }
     for (size_t k = 0; k < b->n; ++k) {
-        if (b->reference[k] > b->reference[expectedPeak])
+        if (b->reference[k] > b->reference[expectedPeak]) {
             expectedPeak = k;
+        }
         referenceSum += b->reference[k];
         referenceNorm += b->reference[k] * b->reference[k];
     }
-    if (frequency == dopplerHz && expectedPeak != 247 * b->n / 8192)
+    if (frequency == dopplerHz && expectedPeak != 247 * b->n / 8192) {
         return Fail("oracle peak differs from injected lag");
+    }
     NgSearchCarrier(b->carrier, b->n, (double)b->n * 250.0, frequency, 0, 0);
     for (size_t m = 0; m < sizeof(modes) / sizeof(modes[0]); ++m) {
         size_t peak = 0;
         double errorNorm = 0, maxError = 0, sum = 0;
-        if (PrepareCode(b, modes[m]) != NG_OK || Pcps(b, modes[m]) != NG_OK)
+        if (PrepareCode(b, modes[m]) != NG_OK || Pcps(b, modes[m]) != NG_OK) {
             return Fail("PCPS computation failed");
+        }
         for (size_t k = 0; k < b->n; ++k) {
             double error = b->power[k] - b->reference[k];
-            if (!isfinite(b->power[k]) || b->power[k] < 0)
+            if (!isfinite(b->power[k]) || b->power[k] < 0) {
                 return Fail("invalid map power");
-            if (b->power[k] > b->power[peak])
+            }
+            if (b->power[k] > b->power[peak]) {
                 peak = k;
+            }
             sum += b->power[k];
             errorNorm += error * error;
             maxError = fmax(maxError, fabs(error));
@@ -232,8 +242,9 @@ static int VerifyMaps(TPcpsFixture *b, double frequency)
         /* Experimental tolerance misses are evidence. Still fail the test for
            a broken reference path, gross scaling errors or a lost signal peak. */
         if ((modes[m] == NG_SEARCH_FFT_FLOAT && !withinTolerance) || relativeL2 > 0.5 ||
-            maxErrorOverPeak > 0.5 || (frequency == dopplerHz && peak != expectedPeak))
+            maxErrorOverPeak > 0.5 || (frequency == dopplerHz && peak != expectedPeak)) {
             return Fail("map failed the reference contract");
+        }
     }
     return 0;
 }
@@ -265,10 +276,12 @@ static int Measure(TPcpsFixture *b)
     capture.stream.format = NG_FORMAT_CI8;
     NgAcquisitionDefaults(&config);
     config.firstPrn = config.lastPrn = PRN;
-    for (unsigned m = 0; m < 3; ++m)
+    for (unsigned m = 0; m < 3; ++m) {
         if (NgAcquisitionGalileoWorkspace(&capture.stream, (unsigned)b->n, modes[m],
-                                          &b->workspaces[m], &error) != NG_OK)
+                                          &b->workspaces[m], &error) != NG_OK) {
             return Fail(error.message);
+        }
+    }
     NgSearchCarrier(b->carrier, b->n, (double)b->n * 250.0, dopplerHz, 0, 0);
 
     for (unsigned trial = 0; trial < WARMUPS + REPEATS; ++trial) {
@@ -279,12 +292,14 @@ static int Measure(TPcpsFixture *b)
             void *workspace = b->workspaces[m];
             unsigned checks = CAPTURE_PERIODS + 1;
             double start = NgMonotonicSeconds();
-            if (PrepareCode(b, modes[m]) != NG_OK)
+            if (PrepareCode(b, modes[m]) != NG_OK) {
                 return Fail("code preparation failed");
+            }
             double codeTime = NgMonotonicSeconds() - start;
             start = NgMonotonicSeconds();
-            if (Pcps(b, modes[m]) != NG_OK)
+            if (Pcps(b, modes[m]) != NG_OK) {
                 return Fail("timed PCPS failed");
+            }
             double pcpsTime = NgMonotonicSeconds() - start;
 
             config.fftMode = modes[m];
@@ -293,15 +308,17 @@ static int Measure(TPcpsFixture *b)
             int rc = ngGalileoAcquisitionStrategy.search(workspace, &capture, PRN, &config,
                                                          CancelAtCoarse, &checks, &result, &error);
             double cold = NgMonotonicSeconds() - start;
-            if (rc != NG_END || checks != 0)
+            if (rc != NG_END || checks != 0) {
                 return Fail("cold search did not stop at the first Doppler row");
+            }
             checks = 1;
             start = NgMonotonicSeconds();
             rc = ngGalileoAcquisitionStrategy.search(workspace, &capture, PRN, &config,
                                                      CancelAtCoarse, &checks, &result, &error);
             double warm = NgMonotonicSeconds() - start;
-            if (rc != NG_END || checks != 0)
+            if (rc != NG_END || checks != 0) {
                 return Fail("warm search did not stop at the first Doppler row");
+            }
 
             capture.origin.epoch++;
             start = NgMonotonicSeconds();
@@ -311,12 +328,14 @@ static int Measure(TPcpsFixture *b)
             double expectedPhase = 4092 * (1 - 247.0 / 8192);
             if (rc != NG_OK || result.prn != PRN || !result.confirmed || result.successes != 3 ||
                 fabs(result.dopplerHz - dopplerHz) > 25 ||
-                fabs(result.codePhaseChips - expectedPhase) > 0.6)
+                fabs(result.codePhaseChips - expectedPhase) > 0.6) {
                 return Fail("full strategy did not reproduce the injected satellite");
-            if (trial >= WARMUPS)
+            }
+            if (trial >= WARMUPS) {
                 printf("time,%zu,%u,%u,%s,%.9f,%.9f,%.9f,%.9f,%.9f,%.3f,%.6f,%u\n", b->n,
                        trial - WARMUPS + 1, position + 1, modeNames[m], codeTime, pcpsTime, cold,
                        warm, full, result.dopplerHz, result.codePhaseChips, result.successes);
+            }
         }
     }
     return 0;
@@ -326,12 +345,14 @@ int BenchmarkIntegerPcps(int measure)
 {
     int8_t chips[4092];
     FILE *file = fopen(NGENE_TEST_SOURCE_DIR "/tests/data/galileo-e1b-prn7.bin", "rb");
-    if (!file)
+    if (!file) {
         return Fail("cannot open PRN 7 fixture");
+    }
     size_t length = fread(chips, 1, sizeof(chips), file);
     fclose(file);
-    if (length != sizeof(chips))
+    if (length != sizeof(chips)) {
         return Fail("incomplete PRN 7 fixture");
+    }
 
     puts("fixture,n,prn,seed,capture_pairs,ci8_fnv1a,integer_input_scale");
     puts("map,n,mode,frequency_hz,reference_lag,lag,reference_peak,power_peak,"
@@ -343,12 +364,15 @@ int BenchmarkIntegerPcps(int measure)
     TPcpsFixture fixtures[sizeof(sizes) / sizeof(sizes[0])] = {0};
     size_t count = measure ? sizeof(sizes) / sizeof(sizes[0]) : 1;
     int rc = 0;
-    for (size_t k = 0; k < count && !rc; ++k)
+    for (size_t k = 0; k < count && !rc; ++k) {
         rc = InitFixture(&fixtures[k], sizes[k], chips) || VerifyMaps(&fixtures[k], dopplerHz) ||
              VerifyMaps(&fixtures[k], 22000);
-    for (size_t k = 0; k < count && measure && !rc; ++k)
+    }
+    for (size_t k = 0; k < count && measure && !rc; ++k) {
         rc = Measure(&fixtures[k]);
-    for (size_t k = 0; k < count; ++k)
+    }
+    for (size_t k = 0; k < count; ++k) {
         FreeFixture(&fixtures[k]);
+    }
     return rc;
 }
