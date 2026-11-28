@@ -1,6 +1,24 @@
 /** @file pvt.c @brief Classic broadcast orbit, Earth rotation and iterative code/Doppler LS.
  * Adapted from pvt/pvt.c, leastSquares.c and pvtUtility.c, Mario Nicola, 2014.
  * Small C Householder QR replaces the Eigen boundary, retaining double arithmetic.
+ *
+ *
+ * @details At one receiver sample, align validated transmit timestamps to a
+ * common week-based scale and propagate each satellite in its native time
+ * scale. Rotate satellite coordinates for the signal flight time. For
+ * pseudorange \f$\rho_k\f$, satellite clock correction \f$\delta t_k\f$,
+ * receiver code bias \f$b_{g(k)}\f$, troposphere \f$T_k\f$, ionosphere
+ * \f$I_k\f$ and optional additive SBAS code correction \f$S_k\f$, the
+ * linearized code residual is formed from
+ * \f[
+ * r_k=\rho_k+S_k+c\,\delta t_k
+ *      -\lVert \mathbf x-\mathbf x_k\rVert-b_{g(k)}-T_k-I_k .
+ * \f]
+ * Use an independent code bias for each admitted constellation. Iterative
+ * column-pivoted Householder QR estimates receiver position and biases.
+ * A separate Doppler system estimates velocity and common clock drift.
+ * Availability requires convergence and adequate rank. The resulting
+ * residual and dilution metrics describe the solution geometry and fit.
  */
 #include "ngene/pvt.h"
 #include "navigation/ionosphere.h"

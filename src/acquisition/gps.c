@@ -1,6 +1,24 @@
 /** @file gps.c @brief Classic-derived GPS coarse, Doppler/code refinement and 3-of-4 search.
  * Numerical adaptation: native complex samples, floating PCPS, no legacy FFT gain constants.
- * FalseAlarm's integer-shape gamma survival law and GPS Pfa=1e-9 are retained. */
+ * FalseAlarm's integer-shape gamma survival law and GPS Pfa=1e-9 are retained.
+ *
+ * @details For each Doppler hypothesis mix the native samples by the negative
+ * carrier phase. Correlate each of eight 1-ms periods circularly against the
+ * C/A replica on the PCPS grid. With mixed block \f$x_m\f$ and replica \f$c\f$,
+ * the coarse map is
+ * \f[
+ * P_f[\ell]=\sum_{m=0}^{7}\left|
+ * \operatorname{IFFT}\!\left(\operatorname{FFT}(x_m)
+ *                  \overline{\operatorname{FFT}(c)}\right)[\ell]\right|^2 .
+ * \f]
+ * The detector estimates noise at a wrong Doppler and normalizes the sum by
+ * eight to obtain the mean single-period power. For independent complex
+ * Gaussian noise, \f$P_f/\mu\f$ has a unit-scale gamma law of shape eight,
+ * where \f$\mu\f$ is that mean. The configured Pfa is the per-cell tail.
+ * Refine Doppler, then code phase on the native sample grid. Confirmation
+ * tests three of four independent windows and preserves the capture-origin
+ * code phase and sample index required by tracking.
+ */
 #include "acquisition/workspace.h"
 #include "dsp/egnos_code.h"
 #include "dsp/search_plan.h"

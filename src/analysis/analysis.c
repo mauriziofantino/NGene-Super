@@ -1,4 +1,17 @@
-/** @file analysis.c @brief Selected contiguous bursts, integer FFT/power/histogram worker. */
+/** @file analysis.c @brief Selected contiguous bursts, integer FFT/power/histogram worker.
+ *
+ * @details The receiver copies selected native bursts into a bounded
+ * worker queue. Each spectral burst is divided into overlapping
+ * windowed segments. Form the FFT power spectrum of each segment and
+ * average in linear power before logarithmic conversion. A spectrum in
+ * dBFS per hertz also accounts for bin width. Histogram counts use
+ * independent burst cadence and native ADC amplitudes.
+ *
+ * The producer owns input slots only until publication. The worker
+ * owns the published burst until it releases the slot. Subscriber
+ * interest and receiver load can suppress diagnostic work, leaving
+ * sample continuity and navigation processing to the receiver.
+ */
 #include "ngene/analysis.h"
 #include "ngene/dsp/fft.h"
 #include "ngene/dsp/sample_ops.h"

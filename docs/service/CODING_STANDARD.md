@@ -23,6 +23,25 @@ Every NGene function prototype and definition must have an adjacent Doxygen comm
 
 Four spaces, at most 100 columns, braces on blocks, and separate variable declarations. `.clang-format` is the reference. Headers contain declarations; implementations belong in source files. Shared constants with explicit units live in `include/ngene/limits.h`. Technical comments are in English; no author names are added to NGene files. External copyright notices and licenses are preserved.
 
+Describe each algorithm where readers can find its implementation. Explain the inputs,
+units, mathematical model, state transitions, timing, and conditions that determine the
+result. Use Doxygen `\f$ ... \f$` for inline TeX and `\f[ ... \f]` for displayed
+equations. Define the symbols and conventions used in each formula. Keep inline
+explanations for decisions and invariants whose rationale is absent from the code.
+
+Run the layout check when adding or editing C sources and headers. The target discovers
+project sources at configuration time and reports formatting changes without writing files.
+
+```sh
+cmake -S . -B build-style -DNGENE_WITH_C_STYLE_CHECK=ON
+cmake --build build-style --target ngene_check_c_style
+```
+
+Run clang-tidy with the compilation database for the platform being reviewed. For
+incremental review, restrict the report to changed lines using clang-tidy's line filter.
+The repository configuration checks identifier case and prefixes and rejects single-letter
+variables, parameters and loop indices. Review names for meaning in context as well.
+
 ```sh
 cmake -S . -B build-docs -DNGENE_WITH_DOCUMENTATION=ON
 cmake --build build-docs --target ngene_docs
@@ -48,14 +67,23 @@ coverage and semantic ESA requirements need separate checks.
 - The local formatter scope is 177 tracked C sources and headers. It includes
   tests and benchmarks and excludes vendored sources and imported NeQuick.
 - The readability pass covers the acquisition worker pool, tracking loop
-  updates, the SBAS decoder and correction bank, and the PVT solver. The
-  remaining project-owned identifiers still need contextual review.
+  updates, SBAS decoding and corrections, PVT, the GPS/Galileo broadcast
+  parser, the BeiDou frame decoder and the ADC gain analysis. The remaining
+  project-owned identifiers still need contextual review.
 - The Doxygen 1.18.0 audit over include, src and apps went from 1,704 diagnostic
-  lines to 1,499, including 303 from imported NeQuick. The count includes
+  lines to 1,042, including 303 from imported NeQuick. The count includes
   continuation lines and therefore differs from the number of distinct issues.
   Keep the normal documentation target strict. An inventory can use a local
   copy of the generated Doxyfile with WARN_AS_ERROR set to FAIL_ON_WARNINGS
   to collect all diagnostics in one run.
+- The algorithm documentation covers coarse acquisition, tracking discriminators,
+  PVT, SBAS, BeiDou navigation data and native ADC statistics. The HTML reference
+  renders TeX equations through MathJax.
+- The Windows clang-tidy audit covered 86 configured C translation units.
+  It found 949 distinct short-name diagnostics and 37 case or prefix diagnostics.
+  The F3 profiling translation unit also lacked its generated profile header in
+  this configuration. Checks for platform-specific branches use their native
+  compilation database.
 - Repository cleanup removed a tracked Python bytecode cache and two obsolete
   DSP handoff notes. Preserve captures, test fixtures and historical validation
   evidence used by the project.

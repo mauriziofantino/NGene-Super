@@ -568,6 +568,22 @@ if(NGENE_TRACKING_BENCHMARK)
     target_include_directories(ngene_tracking_throughput PRIVATE src)
     target_link_libraries(ngene_tracking_throughput PRIVATE ngene_tracking ngene_platform)
 endif()
+option(NGENE_WITH_C_STYLE_CHECK "Enable the project C layout check" OFF)
+if(NGENE_WITH_C_STYLE_CHECK)
+    find_program(NGENE_CLANG_FORMAT NAMES clang-format REQUIRED)
+    file(GLOB_RECURSE ngene_c_style_files CONFIGURE_DEPENDS
+        apps/*.c apps/*.h
+        benchmarks/*.c benchmarks/*.h
+        include/*.c include/*.h
+        development/profiling/*.c development/profiling/*.h
+        src/*.c src/*.h
+        tests/*.c tests/*.h)
+    list(FILTER ngene_c_style_files EXCLUDE REGEX "/src/navigation/nequick/")
+    add_custom_target(ngene_check_c_style
+        COMMAND "${NGENE_CLANG_FORMAT}" --dry-run --Werror ${ngene_c_style_files}
+        VERBATIM)
+endif()
+
 option(NGENE_WITH_DOCUMENTATION "Build Doxygen reference (optional development tool)" OFF)
 if(NGENE_WITH_DOCUMENTATION)
     find_package(Doxygen REQUIRED)
@@ -577,5 +593,6 @@ if(NGENE_WITH_DOCUMENTATION)
     set(DOXYGEN_WARN_AS_ERROR YES)
     set(DOXYGEN_WARN_NO_PARAMDOC YES)
     set(DOXYGEN_GENERATE_LATEX NO)
+    set(DOXYGEN_USE_MATHJAX YES)
     doxygen_add_docs(ngene_docs include src apps COMMENT "Generate NGene API and implementation reference")
 endif()

@@ -1,6 +1,20 @@
 /** @file galileo.c @brief Classic-derived Galileo E1-B coarse, Doppler/code refinement and 3-of-4 search.
  * Numerical adaptation: native complex samples, floating PCPS, no legacy FFT gain constants.
- * FalseAlarm's integer-shape gamma survival law and Galileo E1-B Pfa=1e-9 are retained. */
+ * FalseAlarm's integer-shape gamma survival law and Galileo E1-B Pfa=1e-9 are retained.
+ *
+ * @details The same search machinery handles E1-B and B1C data with
+ * different primary periods and replicas. For each Doppler hypothesis
+ * resample each native period to the selected FFT grid, correlate against
+ * the signal replica using FFT convolution, then sum the squared
+ * correlation magnitudes across eight periods. Keeping the squared
+ * magnitudes separate makes the accumulation insensitive to sign changes
+ * between periods. E1-B uses 4-ms periods and B1C uses 10-ms periods.
+ *
+ * Use the wrong-Doppler population to scale the per-cell detection threshold.
+ * Refine the Doppler and native-sample code phase before independent
+ * confirmation. Keep snapshots expressed relative to the capture origin
+ * when returning the refined result to tracking.
+ */
 #include "acquisition/workspace.h"
 #include "dsp/search_plan.h"
 #include "acquisition/grid.h"

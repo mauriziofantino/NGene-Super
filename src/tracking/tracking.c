@@ -1,6 +1,31 @@
 /** @file tracking.c @brief Classic discriminators/second-order loops with private multi-tap DSP.
  * Algorithm basis: NGene Classic tracking/trackingDiscriminatorsLoops.c,
  * Mario Nicola, 2014. Adapted to native complex samples and shared window epochs.
+ *
+ * @details The tracker propagates carrier and code NCOs on the native
+ * sample timeline and forms complex early, prompt and late sums over
+ * the current primary-code period. The normalized power discriminator is
+ * \f[
+ * \epsilon_{\mathrm{DLL}}=K_d
+ * \frac{|E|^2-|L|^2}{|E|^2+|L|^2},
+ * \f]
+ * with zero output for zero total power. GPS, Galileo and EGNOS use the
+ * legacy second-order recurrence. For bandwidth \f$B\f$, effective gain
+ * \f$g\f$ and update interval \f$T\f$, this implementation evaluates
+ * \f[
+ * \omega_n=B/0.53,\qquad \tau_1=g/\omega_n^2,\qquad
+ * \tau_2=\sqrt{2}/\omega_n,\qquad
+ * u_k=u_{k-1}+\frac{\tau_2}{\tau_1}(e_k-e_{k-1})
+ *                 +\frac{T}{\tau_1}e_k .
+ * \f]
+ * The PLL uses gain scaled by the update interval in milliseconds.
+ * BeiDou B1C retains its separate 10-ms loop law.
+ *
+ * A confirmed acquisition supplies the code phase and Doppler at its
+ * capture origin. FLL pull-in precedes the PLL decision. Once GPS bit
+ * timing is stable, its optional longer PLL/DLL update combines aligned
+ * prompt groups within one LNAV bit. The native 1-ms prompt and bit timing
+ * continue to feed navigation. Loss of continuity invalidates the assignment.
  */
 #include "tracking/egnos.h"
 #include "dsp/egnos_code.h"

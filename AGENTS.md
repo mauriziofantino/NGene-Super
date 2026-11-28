@@ -36,6 +36,11 @@ checking the current status and code.
   [ARCHITECTURE.md](docs/service/ARCHITECTURE.md). Keep vendor-specific behavior in
   frontend adapters and preserve shared-stream, ownership, timing, and precision
   contracts.
+- For new and edited C code, use descriptive ESA-style names for variables, fields,
+  parameters, and loop indices. Run the C layout check documented in the coding
+  standard. Write English Doxygen contracts and describe algorithms at the appropriate
+  scope, including equations with units when useful. Document assumptions, invariants,
+  and decision rules needed to understand the implementation.
 - Verify each code or build-system change on Windows, Linux, and macOS.
   Use the native CI jobs in [the build workflow](.github/workflows/build.yml)
   for the exact revision under review. Record each platform's result and mark

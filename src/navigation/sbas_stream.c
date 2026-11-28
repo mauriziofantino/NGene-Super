@@ -1,4 +1,19 @@
-/** @file sbas_stream.c @brief Continuous SBAS K=7, rate 1/2 Viterbi and frame recovery. */
+/** @file sbas_stream.c @brief Continuous SBAS K=7, rate 1/2 Viterbi and frame recovery.
+ *
+ * @details Adjacent 1-ms prompts form candidate 2-ms symbols. Keep both
+ * symbol phases and both convolutional pair alignments because a new
+ * tracking assignment provides neither. Each lane runs a 64-state
+ * soft-decision Viterbi decoder with a bounded survivor history. For
+ * received pair \f$(r_0,r_1)\f$ and predicted antipodal signs
+ * \f$(s_0,s_1)\f$, a branch adds \f$r_0s_0+r_1s_1\f$ to its predecessor
+ * metric. The winning metric is subtracted from all states after each
+ * step to keep the range bounded without changing the decision.
+ *
+ * Recover frame candidates from the traceback bit stream, accept normal
+ * and inverted preambles, and pass only chronological CRC-valid frames
+ * into the GEO correction bank. Reset all lanes and the bank on a
+ * sample discontinuity or GEO reassignment.
+ */
 #include "navigation/sbas_stream.h"
 #include <math.h>
 #include <string.h>

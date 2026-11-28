@@ -46,16 +46,18 @@ typedef struct {
 #define NG_ACQUISITION_MAX_DOPPLER_BINS 116u
 #define NG_ACQUISITION_MAX_PARALLEL 32u
 
+/** Display data copied from one completed acquisition; consumers own their copy. */
 typedef struct {
-    int valid;
-    TNgAcquisitionResult result;
-    unsigned dopplerBins;     /**< Actual grid rows: GPS 16, Galileo 116. */
-    unsigned codePeriodChips; /**< Primary-code period: GPS 1023, Galileo 4092. */
-    unsigned fftSize;
-    double threshold;
-    double peakDopplerHz;
-    double peakCodePhaseChips;
-    float power[NG_ACQUISITION_MAX_DOPPLER_BINS][NG_ACQUISITION_CODE_BINS];
+    int valid;                   /**< Nonzero when the remaining fields describe a result. */
+    TNgAcquisitionResult result; /**< Origin and parameters of the acquisition shown. */
+    unsigned dopplerBins;        /**< Actual grid rows: GPS 16, Galileo 116. */
+    unsigned codePeriodChips;    /**< Primary-code period: GPS 1023, Galileo 4092. */
+    unsigned fftSize;            /**< Number of FFT points on the original code grid. */
+    double threshold;            /**< Detection threshold on the original power scale. */
+    double peakDopplerHz;        /**< Doppler at the coarse grid maximum, in hertz. */
+    double peakCodePhaseChips;   /**< Code phase at the coarse grid maximum, in chips. */
+    float power[NG_ACQUISITION_MAX_DOPPLER_BINS]
+               [NG_ACQUISITION_CODE_BINS]; /**< Power / threshold. */
 } TNgAcquisitionSearchSpace;
 
 /** Copied bounded worker telemetry. Results belong to the most recent tested capture per PRN. */

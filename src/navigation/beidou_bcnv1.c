@@ -1,4 +1,17 @@
-/** @file beidou_bcnv1.c @brief Soft B-CNAV1 frame decoding and synchronization. */
+/** @file beidou_bcnv1.c @brief Soft B-CNAV1 frame decoding and synchronization.
+ *
+ * @details Identify a candidate frame by testing the BCH-protected SF1
+ * header against the expected PRN and symbol alignment. Decode SF2 and
+ * SF3 with their sparse GF(64) parity-check matrices after reversing
+ * the wire interleaving. Each row connects four symbols, so a syndrome
+ * sweep applies four field products and XOR additions per row.
+ *
+ * The iterative decoder uses soft symbol costs and a bounded sweep
+ * count. Parity satisfaction is an internal decoder result. Publish
+ * navigation data only after the frame fields and CRC-24Q pass their
+ * acceptance checks. Maintain independent alignment and freshness in
+ * each tracking channel.
+ */
 #include "ngene/beidou_bcnv1.h"
 #include "ngene/channel.h"
 #include <limits.h>
@@ -31,15 +44,15 @@ static const TNgBcnv1Code sf2Code = {sf2Columns, sf2Coefficients, 100};
 static const TNgBcnv1Code sf3Code = {sf3Columns, sf3Coefficients, 44};
 
 /** Generate the BCH recurrence in transmission order from the systematic bits. */
-static uint64_t Bch(unsigned value, unsigned bits, unsigned count, unsigned poly)
+static uint64_t Bch(unsigned value, unsigned bits, unsigned count, unsigned generatorPolynomial)
 {
     uint64_t word = value;
     const unsigned top = 1u << (bits - 1);
-    for (unsigned n = bits; n < count; ++n) {
+    for (unsigned symbolIndex = bits; symbolIndex < count; ++symbolIndex) {
         unsigned feedback = 0;
-        for (unsigned k = 0; k < bits; ++k) {
-            if (poly & (top >> k)) {
-                feedback ^= (unsigned)(word >> k) & 1u;
+        for (unsigned tapIndex = 0; tapIndex < bits; ++tapIndex) {
+            if (generatorPolynomial & (top >> tapIndex)) {
+                feedback ^= (unsigned)(word >> tapIndex) & 1u;
             }
         }
         word = (word << 1) | feedback;
@@ -48,10 +61,10 @@ static uint64_t Bch(unsigned value, unsigned bits, unsigned count, unsigned poly
 }
 
 /** Exact Hamming distance on up to 51 received code symbols. */
-static unsigned Distance(uint64_t x, uint64_t y)
+static unsigned Distance(uint64_t receivedWord, uint64_t referenceWord)
 {
     unsigned distance = 0;
-    for (uint64_t bits = x ^ y; bits; bits &= bits - 1) {
+    for (uint64_t bits = receivedWord ^ referenceWord; bits; bits &= bits - 1) {
         ++distance;
     }
     return distance;
@@ -60,47 +73,49 @@ static unsigned Distance(uint64_t x, uint64_t y)
 /** Check the expected PRN and find the nearest unambiguous SOH in either polarity. */
 static int Header(const int8_t *symbols, uint64_t prnWord, TNgBcnv1Header *header)
 {
-    uint64_t prn = 0, hour = 0;
-    for (unsigned n = 0; n < 21; ++n) {
-        prn = (prn << 1) | (unsigned)(symbols[n] < 0);
+    uint64_t receivedPrnWord = 0, receivedSohWord = 0;
+    for (unsigned symbolIndex = 0; symbolIndex < 21; ++symbolIndex) {
+        receivedPrnWord = (receivedPrnWord << 1) | (unsigned)(symbols[symbolIndex] < 0);
     }
-    const unsigned d = Distance(prn, prnWord);
-    if (d > 3 && d < 18) {
+    const unsigned prnDistance = Distance(receivedPrnWord, prnWord);
+    if (prnDistance > 3 && prnDistance < 18) {
         return 0;
     }
-    const int inverted = d >= 18;
-    for (unsigned n = 21; n < NG_BCNV1_HEADER_SYMBOLS; ++n) {
-        hour = (hour << 1) | (unsigned)((symbols[n] < 0) != inverted);
+    const int inverted = prnDistance >= 18;
+    for (unsigned symbolIndex = 21; symbolIndex < NG_BCNV1_HEADER_SYMBOLS; ++symbolIndex) {
+        receivedSohWord =
+            (receivedSohWord << 1) | (unsigned)((symbols[symbolIndex] < 0) != inverted);
     }
-    unsigned best = 12, soh = 256;
+    unsigned bestSohDistance = 12, soh = 256;
     for (unsigned value = 0; value < 256; ++value) {
-        const unsigned distance = Distance(hour, Bch(value, 8, 51, 0x9f));
-        if (distance < best) {
-            best = distance;
+        const unsigned distance = Distance(receivedSohWord, Bch(value, 8, 51, 0x9f));
+        if (distance < bestSohDistance) {
+            bestSohDistance = distance;
             soh = value;
-        } else if (distance == best) {
+        } else if (distance == bestSohDistance) {
             soh = 256;
         }
     }
     if (soh >= 200) {
         return 0;
     }
-    *header = (TNgBcnv1Header){soh, best + (inverted ? 21 - d : d), inverted};
+    *header = (TNgBcnv1Header){soh, bestSohDistance + (inverted ? 21 - prnDistance : prnDistance),
+                               inverted};
     return 1;
 }
 
 /** Multiply polynomial-basis GF(64) symbols modulo 1+x+x^6. */
-static unsigned Product(unsigned a, unsigned b)
+static unsigned Product(unsigned multiplicand, unsigned multiplier)
 {
-    unsigned out = 0;
-    while (b) {
-        if (b & 1u) {
-            out ^= a;
+    unsigned product = 0;
+    while (multiplier) {
+        if (multiplier & 1u) {
+            product ^= multiplicand;
         }
-        a = (a << 1) ^ (a & 32u ? 0x43u : 0u);
-        b >>= 1;
+        multiplicand = (multiplicand << 1) ^ (multiplicand & 32u ? 0x43u : 0u);
+        multiplier >>= 1;
     }
-    return out;
+    return product;
 }
 
 /** Check all parity equations before a codeword can reach the CRC gate. */
@@ -108,8 +123,8 @@ static int Syndrome(const TNgBcnv1Code *code, const uint8_t *word)
 {
     for (unsigned row = 0; row < code->rows; ++row) {
         unsigned sum = 0;
-        for (unsigned e = 0; e < 4; ++e) {
-            sum ^= Product(code->coeff[row][e], word[code->column[row][e]]);
+        for (unsigned edgeIndex = 0; edgeIndex < 4; ++edgeIndex) {
+            sum ^= Product(code->coeff[row][edgeIndex], word[code->column[row][edgeIndex]]);
         }
         if (sum) {
             return 0;
@@ -119,17 +134,17 @@ static int Syndrome(const TNgBcnv1Code *code, const uint8_t *word)
 }
 
 /** Compute the min-plus XOR convolution of two full symbol-metric vectors. */
-static void Convolve(int *out, const int *a, const int *b)
+static void Convolve(int *outputMetrics, const int *leftMetrics, const int *rightMetrics)
 {
-    for (unsigned x = 0; x < NG_BCNV1_GF; ++x) {
-        int best = INT_MAX;
-        for (unsigned y = 0; y < NG_BCNV1_GF; ++y) {
-            const int cost = a[y] + b[x ^ y];
-            if (cost < best) {
-                best = cost;
+    for (unsigned outputSymbol = 0; outputSymbol < NG_BCNV1_GF; ++outputSymbol) {
+        int minimumCost = INT_MAX;
+        for (unsigned leftSymbol = 0; leftSymbol < NG_BCNV1_GF; ++leftSymbol) {
+            const int cost = leftMetrics[leftSymbol] + rightMetrics[outputSymbol ^ leftSymbol];
+            if (cost < minimumCost) {
+                minimumCost = cost;
             }
         }
-        out[x] = best;
+        outputMetrics[outputSymbol] = minimumCost;
     }
 }
 
@@ -137,31 +152,32 @@ static void Convolve(int *out, const int *a, const int *b)
 static void UpdateRow(TNgBcnv1Ldpc *work, const TNgBcnv1Code *code, unsigned row)
 {
     int input[4][NG_BCNV1_GF], pairs[2][NG_BCNV1_GF], output[NG_BCNV1_GF];
-    for (unsigned e = 0; e < 4; ++e) {
-        const unsigned column = code->column[row][e], coeff = code->coeff[row][e];
-        for (unsigned s = 0; s < NG_BCNV1_GF; ++s) {
-            input[e][work->gf[coeff][s]] = work->belief[column][s] - work->edge[row][e][s];
+    for (unsigned edgeIndex = 0; edgeIndex < 4; ++edgeIndex) {
+        const unsigned column = code->column[row][edgeIndex], coeff = code->coeff[row][edgeIndex];
+        for (unsigned fieldSymbol = 0; fieldSymbol < NG_BCNV1_GF; ++fieldSymbol) {
+            input[edgeIndex][work->gf[coeff][fieldSymbol]] =
+                work->belief[column][fieldSymbol] - work->edge[row][edgeIndex][fieldSymbol];
         }
     }
     Convolve(pairs[0], input[0], input[1]);
     Convolve(pairs[1], input[2], input[3]);
-    for (unsigned e = 0; e < 4; ++e) {
-        const unsigned column = code->column[row][e], coeff = code->coeff[row][e];
+    for (unsigned edgeIndex = 0; edgeIndex < 4; ++edgeIndex) {
+        const unsigned column = code->column[row][edgeIndex], coeff = code->coeff[row][edgeIndex];
         int minimum = INT_MAX;
-        Convolve(output, pairs[1u - e / 2u], input[e ^ 1u]);
-        for (unsigned s = 0; s < NG_BCNV1_GF; ++s) {
-            if (output[s] < minimum) {
-                minimum = output[s];
+        Convolve(output, pairs[1u - edgeIndex / 2u], input[edgeIndex ^ 1u]);
+        for (unsigned fieldSymbol = 0; fieldSymbol < NG_BCNV1_GF; ++fieldSymbol) {
+            if (output[fieldSymbol] < minimum) {
+                minimum = output[fieldSymbol];
             }
         }
-        for (unsigned s = 0; s < NG_BCNV1_GF; ++s) {
-            const unsigned field = work->gf[coeff][s];
+        for (unsigned fieldSymbol = 0; fieldSymbol < NG_BCNV1_GF; ++fieldSymbol) {
+            const unsigned field = work->gf[coeff][fieldSymbol];
             int message = (output[field] - minimum) * 3 / 4;
             if (message > 4096) {
                 message = 4096;
             }
-            work->edge[row][e][s] = message;
-            work->belief[column][s] = input[e][field] + message;
+            work->edge[row][edgeIndex][fieldSymbol] = message;
+            work->belief[column][fieldSymbol] = input[edgeIndex][field] + message;
         }
     }
 }
@@ -172,14 +188,14 @@ static int Ldpc(const TNgBcnv1Code *code, const int16_t *llr, uint8_t *bytes, un
     uint8_t hard[NG_BCNV1_MAX_SYMBOLS], word[NG_BCNV1_MAX_SYMBOLS];
     const unsigned symbols = 2 * code->rows;
     int haveEvidence = 0;
-    for (unsigned n = 0; n < symbols; ++n) {
+    for (unsigned symbolIndex = 0; symbolIndex < symbols; ++symbolIndex) {
         unsigned bits = 0;
-        for (unsigned b = 0; b < 6; ++b) {
-            const int sample = llr[6 * n + b];
+        for (unsigned bitIndex = 0; bitIndex < 6; ++bitIndex) {
+            const int sample = llr[6 * symbolIndex + bitIndex];
             haveEvidence |= sample != 0;
             bits = (bits << 1) | (unsigned)(sample < 0);
         }
-        word[n] = hard[n] = (uint8_t)bits;
+        word[symbolIndex] = hard[symbolIndex] = (uint8_t)bits;
     }
     if (!haveEvidence) {
         return NG_END;
@@ -189,16 +205,17 @@ static int Ldpc(const TNgBcnv1Code *code, const int16_t *llr, uint8_t *bytes, un
         if (!work) {
             return NG_ERROR;
         }
-        for (unsigned a = 0; a < NG_BCNV1_GF; ++a) {
-            for (unsigned b = 0; b < NG_BCNV1_GF; ++b) {
-                work->gf[a][b] = (uint8_t)Product(a, b);
+        for (unsigned leftFactor = 0; leftFactor < NG_BCNV1_GF; ++leftFactor) {
+            for (unsigned rightFactor = 0; rightFactor < NG_BCNV1_GF; ++rightFactor) {
+                work->gf[leftFactor][rightFactor] = (uint8_t)Product(leftFactor, rightFactor);
             }
         }
-        for (unsigned n = 0; n < symbols; ++n) {
-            for (unsigned s = 0; s < NG_BCNV1_GF; ++s) {
-                for (unsigned b = 0; b < 6; ++b) {
-                    if ((s ^ hard[n]) & (32u >> b)) {
-                        work->belief[n][s] += abs(llr[6 * n + b]);
+        for (unsigned symbolIndex = 0; symbolIndex < symbols; ++symbolIndex) {
+            for (unsigned candidateSymbol = 0; candidateSymbol < NG_BCNV1_GF; ++candidateSymbol) {
+                for (unsigned bitIndex = 0; bitIndex < 6; ++bitIndex) {
+                    if ((candidateSymbol ^ hard[symbolIndex]) & (32u >> bitIndex)) {
+                        work->belief[symbolIndex][candidateSymbol] +=
+                            abs(llr[6 * symbolIndex + bitIndex]);
                     }
                 }
             }
@@ -208,14 +225,16 @@ static int Ldpc(const TNgBcnv1Code *code, const int16_t *llr, uint8_t *bytes, un
             for (unsigned row = 0; row < code->rows; ++row) {
                 UpdateRow(work, code, row);
             }
-            for (unsigned n = 0; n < symbols; ++n) {
-                unsigned best = 0;
-                for (unsigned s = 1; s < NG_BCNV1_GF; ++s) {
-                    if (work->belief[n][s] < work->belief[n][best]) {
-                        best = s;
+            for (unsigned symbolIndex = 0; symbolIndex < symbols; ++symbolIndex) {
+                unsigned bestSymbol = 0;
+                for (unsigned candidateSymbol = 1; candidateSymbol < NG_BCNV1_GF;
+                     ++candidateSymbol) {
+                    if (work->belief[symbolIndex][candidateSymbol] <
+                        work->belief[symbolIndex][bestSymbol]) {
+                        bestSymbol = candidateSymbol;
                     }
                 }
-                word[n] = (uint8_t)best;
+                word[symbolIndex] = (uint8_t)bestSymbol;
             }
             valid = Syndrome(code, word);
         }
@@ -225,12 +244,13 @@ static int Ldpc(const TNgBcnv1Code *code, const int16_t *llr, uint8_t *bytes, un
         }
     }
     *changed = 0;
-    for (unsigned n = 0; n < symbols; ++n) {
-        *changed += Distance(hard[n], word[n]);
+    for (unsigned symbolIndex = 0; symbolIndex < symbols; ++symbolIndex) {
+        *changed += Distance(hard[symbolIndex], word[symbolIndex]);
     }
-    for (unsigned n = 0; n < code->rows; n += 4) {
-        const unsigned packed = ((unsigned)word[n] << 18) | ((unsigned)word[n + 1] << 12) |
-                                ((unsigned)word[n + 2] << 6) | word[n + 3];
+    for (unsigned symbolIndex = 0; symbolIndex < code->rows; symbolIndex += 4) {
+        const unsigned packed = ((unsigned)word[symbolIndex] << 18) |
+                                ((unsigned)word[symbolIndex + 1] << 12) |
+                                ((unsigned)word[symbolIndex + 2] << 6) | word[symbolIndex + 3];
         *bytes++ = (uint8_t)(packed >> 16);
         *bytes++ = (uint8_t)(packed >> 8);
         *bytes++ = (uint8_t)packed;
@@ -242,9 +262,9 @@ static int Ldpc(const TNgBcnv1Code *code, const int16_t *llr, uint8_t *bytes, un
 static int Crc(const uint8_t *bytes, size_t count)
 {
     uint32_t remainder = 0;
-    for (size_t n = 0; n < count; ++n) {
-        remainder ^= (uint32_t)bytes[n] << 16;
-        for (unsigned b = 0; b < 8; ++b) {
+    for (size_t byteIndex = 0; byteIndex < count; ++byteIndex) {
+        remainder ^= (uint32_t)bytes[byteIndex] << 16;
+        for (unsigned bitIndex = 0; bitIndex < 8; ++bitIndex) {
             remainder <<= 1;
             if (remainder & UINT32_C(0x1000000)) {
                 remainder ^= UINT32_C(0x1864cfb);
@@ -258,8 +278,8 @@ static int Crc(const uint8_t *bytes, size_t count)
 static unsigned Field(const uint8_t *bytes, unsigned start, unsigned width)
 {
     unsigned value = 0;
-    for (unsigned b = start; b < start + width; ++b) {
-        value = (value << 1) | (unsigned)((bytes[b / 8] >> (7u - b % 8)) & 1);
+    for (unsigned bitIndex = start; bitIndex < start + width; ++bitIndex) {
+        value = (value << 1) | (unsigned)((bytes[bitIndex / 8] >> (7u - bitIndex % 8)) & 1);
     }
     return value;
 }
@@ -318,6 +338,7 @@ static int Payload(const int8_t *symbols, unsigned prn, TNgBcnv1Header header, T
     return NG_OK;
 }
 
+/** Validate the BCH header before decoding the interleaved soft payload. */
 int NgBcnv1Decode(const int8_t symbols[NG_BCNV1_FRAME_SYMBOLS], unsigned prn, TNgBcnv1Frame *frame)
 {
     TNgBcnv1Header header;
@@ -330,6 +351,7 @@ int NgBcnv1Decode(const int8_t symbols[NG_BCNV1_FRAME_SYMBOLS], unsigned prn, TN
     return Payload(symbols, prn, header, frame);
 }
 
+/** Confirm frame phase using two successive headers before accepting a payload. */
 int NgBcnv1Find(const int8_t *symbols, size_t count, unsigned prn, size_t *offset,
                 TNgBcnv1Frame *frame)
 {
@@ -341,14 +363,15 @@ int NgBcnv1Find(const int8_t *symbols, size_t count, unsigned prn, size_t *offse
         return NG_END;
     }
     const uint64_t prnWord = Bch(prn, 6, 21, 0x17);
-    for (size_t n = 0; n <= count - needed; ++n) {
-        TNgBcnv1Header first, second;
-        if (Header(symbols + n, prnWord, &first) &&
-            Header(symbols + n + NG_BCNV1_FRAME_SYMBOLS, prnWord, &second) &&
-            first.inverted == second.inverted && (first.soh + 1) % 200 == second.soh) {
-            int result = Payload(symbols + n, prn, first, frame);
+    for (size_t frameOffset = 0; frameOffset <= count - needed; ++frameOffset) {
+        TNgBcnv1Header firstHeader, nextHeader;
+        if (Header(symbols + frameOffset, prnWord, &firstHeader) &&
+            Header(symbols + frameOffset + NG_BCNV1_FRAME_SYMBOLS, prnWord, &nextHeader) &&
+            firstHeader.inverted == nextHeader.inverted &&
+            (firstHeader.soh + 1) % 200 == nextHeader.soh) {
+            int result = Payload(symbols + frameOffset, prn, firstHeader, frame);
             if (result == NG_OK) {
-                *offset = n;
+                *offset = frameOffset;
             }
             if (result != NG_END) {
                 return result;

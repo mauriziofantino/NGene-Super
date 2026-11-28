@@ -1,4 +1,23 @@
-/** @file sbas.c @brief EGNOS L1 mask, fast/range and long-term orbit/clock messages. */
+/** @file sbas.c @brief EGNOS L1 mask, fast/range and long-term orbit/clock messages.
+ *
+ * @details MT1 defines the ordinal-to-PRN mapping for MT2 through MT5,
+ * MT24 and MT25. Match IODP before modifying entries, and match GPS IODE
+ * against the broadcast ephemeris at read time. Advance dynamic orbit
+ * corrections and clock from their reference time to transmit time.
+ * MT0 invalidates the bank temporarily. Store reception ages on the
+ * receiver sample timeline, separate from the satellite time of day.
+ *
+ * The ionospheric path matches MT26 delays to the MT18 issue and projects
+ * the line of sight onto a shell 350 km above Earth. Interpolate the
+ * eligible vertices of the enclosing rectangle or triangle. Convert
+ * vertical delay \f$I_v\f$ to a slant delay at elevation \f$E\f$ using
+ * \f[
+ * I_s=I_v\left[1-\left(\frac{R_E}{R_E+350\,\mathrm{km}}\cos E\right)^2
+ *        \right]^{-1/2}.
+ * \f]
+ * Missing, expired or explicitly vetoed vertices may make the delay
+ * unavailable. The caller can then use the configured broadcast model.
+ */
 #include "ngene/sbas.h"
 #include <math.h>
 #include <string.h>

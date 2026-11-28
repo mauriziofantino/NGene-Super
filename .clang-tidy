@@ -1,8 +1,14 @@
 ---
-Checks: '-*,readability-identifier-naming'
-WarningsAsErrors: 'readability-identifier-naming'
-HeaderFilterRegex: '.*/(include/ngene|src)/.*'
+Checks: '-*,readability-identifier-naming,readability-identifier-length'
+WarningsAsErrors: 'readability-identifier-naming,readability-identifier-length'
+HeaderFilterRegex: '.*[\\/](include[\\/]ngene|src|tests|benchmarks|development[\\/]profiling)[\\/].*'
+ExcludeHeaderFilterRegex: '.*[\\/]src[\\/]navigation[\\/]nequick[\\/].*'
 CheckOptions:
+  readability-identifier-length.MinimumVariableNameLength: '2'
+  readability-identifier-length.MinimumParameterNameLength: '2'
+  readability-identifier-length.MinimumLoopCounterNameLength: '2'
+  readability-identifier-length.IgnoredParameterNames: '^$'
+  readability-identifier-length.IgnoredLoopCounterNames: '^$'
   readability-identifier-naming.TypedefCase: CamelCase
   readability-identifier-naming.TypedefPrefix: TNg
   readability-identifier-naming.StructCase: CamelCase
