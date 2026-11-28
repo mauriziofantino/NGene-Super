@@ -184,6 +184,10 @@ function parseIni(text) {
     }
   }
   delete parsed['beidou_acquisition.enabled'];
+  if (Object.hasOwn(parsed, 'tracking.egnos')) {
+    parsed['receiver.egnos'] ??= parsed['tracking.egnos'];
+    delete parsed['tracking.egnos'];
+  }
   return parsed;
 }
 function toIni(object) {
@@ -1190,7 +1194,8 @@ function addPlotFullscreen() {
       button.setAttribute('aria-pressed', String(active));
       button.title = button.getAttribute('aria-label').replace(/^(?:Exit fullscreen|Fullscreen)/, active ? 'Exit fullscreen' : 'Fullscreen');
       button.setAttribute('aria-label', button.title);
-      button.textContent = active ? '?' : '?';
+      const scatter = button.parentElement.querySelector('[data-tracking-scatter]');
+      if (scatter) scatter.setAttribute('viewBox', active ? '185 0 270 260' : '0 0 640 260');
     }
   };
   document.addEventListener('fullscreenchange', update);
@@ -1210,6 +1215,17 @@ function addPlotFullscreen() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'plot-fullscreen-toggle';
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.setAttribute('aria-hidden', 'true');
+    for (const [state, shape] of [['enter','M9 4H4V9 M15 4H20V9 M4 15V20H9 M20 15V20H15'],
+                                  ['exit','M4 9H9V4 M20 9H15V4 M9 20V15H4 M15 20V15H20']]) {
+      const path = document.createElementNS(icon.namespaceURI, 'path');
+      path.setAttribute('d', shape);
+      path.setAttribute('class', 'fullscreen-' + state);
+      icon.append(path);
+    }
+    button.append(icon);
     button.setAttribute('aria-label', 'Fullscreen ' + (plot.getAttribute('aria-label') ||
       (plot.matches('[data-pvt-map]') ? 'position map' : 'sky plot')));
     button.addEventListener('click', async () => {

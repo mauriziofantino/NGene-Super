@@ -535,14 +535,15 @@
       "rules": []
     },
     {
-      "id": "pvt-egnos",
+      "id": "receiver-egnos",
       "groups": [
         {
-          "title": "SBAS",
-          "topic": "tracking",
+          "title": "SBAS constellation",
+          "topic": "receiver",
+          "note": "Enable the EGNOS L1 GEO channel. It appears in Channels as auxiliary channel 65.",
           "fields": [
             {
-              "key": "tracking.egnos",
+              "key": "receiver.egnos",
               "label": "EGNOS L1",
               "type": "select",
               "default": "false",

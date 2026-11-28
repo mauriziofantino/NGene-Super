@@ -358,9 +358,9 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       channelRows=Array.from({length:total},(_,k)=>({channel_id:k+1,reservation:k<gps?1:k<gps+gal?2:k<gps+gal+bds?3:0,state:0,constellation:0,prn:0,active:false,taps:[]}));
     }
     if (!beidouPreview && connected && display?.state === 'stopped') {
-      if (profile['tracking.egnos'] === 'true' && !channelRows.some(t => t.constellation === 4)) {
+      if (profile['receiver.egnos'] === 'true' && !channelRows.some(t => t.constellation === 4)) {
         channelRows = [...channelRows, {channel_id:65,reservation:0,constellation:4,state:0,prn:0,active:false,taps:[]}];
-      } else if (profile['tracking.egnos'] !== 'true') {
+      } else if (profile['receiver.egnos'] !== 'true') {
         channelRows = channelRows.filter(t => t.constellation !== 4);
       }
     }

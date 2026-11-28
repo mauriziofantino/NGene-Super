@@ -4,7 +4,6 @@ const surfaceTilt=38,surfaceHeight=0.78;
 const stops=[[0,12,85],[0,34,145],[0,76,215],[0,141,245],[38,207,255],[197,247,255]];
 export const reliefPalette=Array.from({length:256},(_,n)=>{const x=n/255*5,i=Math.min(4,Math.floor(x)),f=x-i;return stops[i].map((v,k)=>Math.round(v+(stops[i+1][k]-v)*f));});
 const levelOf=(v,lo,hi)=>Number.isFinite(v)?Math.max(0,Math.min(1,(v-lo)/(hi-lo))):0;
-const edgeHeight=age=>age<=0||age>=1?0:Math.sin(Math.PI*age);
 /** Retain unfinished movement when another observation arrives. */
 export function createWaterfallScroll(duration=180){
  let pending=0,started=0,pausedAt=null;
@@ -28,15 +27,15 @@ export function buildWaterfallMesh(history,columns,capacity,lo,hi){
   positions.set([2*k/(columns-1)-1,h,age],3*i);levels[i]=level;
   const l=sample(j,Math.max(0,k-1)),r=sample(j,Math.min(columns-1,k+1));
   const near=Math.max(0,j-1),far=Math.min(gridRows-1,j+1);
-  const hn=(sample(near,k)-0.5)*surfaceHeight*edgeHeight(near*step);
-  const hf=(sample(far,k)-0.5)*surfaceHeight*edgeHeight(far*step);
-  normals.set([-(r-l)*surfaceHeight*edgeHeight(age)*(columns-1)/4,1,(hf-hn)*(capacity-1)/4],3*i);
+  const hn=(sample(near,k)-0.5)*surfaceHeight;
+  const hf=(sample(far,k)-0.5)*surfaceHeight;
+  normals.set([-(r-l)*surfaceHeight*(columns-1)/4,1,(hf-hn)*(capacity-1)/4],3*i);
  }
  // Hold the oldest known edge across unfilled history, without adding observations.
  // The extra rear boundary stays fixed while actual rows scroll out of view.
  if(gridRows){
   for(let k=0;k<columns;k++){
-   const i=gridRows*columns+k;positions.set([2*k/(columns-1)-1,0,2],3*i);
+   const i=gridRows*columns+k;positions.set([2*k/(columns-1)-1,(sample(gridRows-1,k)-0.5)*surfaceHeight,2],3*i);
    normals.set([0,1,0],3*i);levels[i]=sample(gridRows-1,k);
   }
  }
@@ -48,7 +47,7 @@ export function buildWaterfallMesh(history,columns,capacity,lo,hi){
 }
 export function projectSurfacePoint(frequency,level,age,mesh){
  age=Math.max(0,Math.min(1,age));
- const h=(level-0.5)*surfaceHeight*edgeHeight(age),z=1-2*age,m=mesh.matrix;
+ const h=(level-0.5)*surfaceHeight,z=1-2*age,m=mesh.matrix;
  return {x:z,y:m[1]*frequency+m[5]*h,depth:m[2]*frequency+m[6]*h};
 }
 export function createWaterfallSurface(canvas){
@@ -56,7 +55,7 @@ export function createWaterfallSurface(canvas){
  if(!gl||!gl.getExtension('OES_element_index_uint'))throw Error('3D waterfall requires WebGL.');
  const compile=(type,source)=>{const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;};
  const program=gl.createProgram();
- gl.attachShader(program,compile(gl.VERTEX_SHADER,'attribute vec3 position;attribute vec3 normal;attribute float level;uniform mat4 projection;uniform float rowOffset;uniform float ageStep;varying vec3 vNormal;varying float vLevel;void main(){float age=position.z>1.5?1.0:max(0.0,position.z-rowOffset*ageStep);float edge=age<=0.0||age>=1.0?0.0:sin(3.14159265359*age);gl_Position=projection*vec4(position.x,position.y*edge,1.0-2.0*age,1.0);vNormal=normal;vLevel=level;}'));
+ gl.attachShader(program,compile(gl.VERTEX_SHADER,'attribute vec3 position;attribute vec3 normal;attribute float level;uniform mat4 projection;uniform float rowOffset;uniform float ageStep;varying vec3 vNormal;varying float vLevel;void main(){float age=position.z>1.5?1.0:max(0.0,position.z-rowOffset*ageStep);gl_Position=projection*vec4(position.x,position.y,1.0-2.0*age,1.0);vNormal=normal;vLevel=level;}'));
  gl.attachShader(program,compile(gl.FRAGMENT_SHADER,'precision mediump float;uniform sampler2D palette;uniform float trace;varying vec3 vNormal;varying float vLevel;void main(){vec3 n=normalize(vNormal);float diffuse=max(0.0,dot(n,normalize(vec3(-0.2,0.85,0.5))));vec3 colour=texture2D(palette,vec2(clamp(vLevel,0.0,1.0),0.5)).rgb;gl_FragColor=trace>0.5?vec4(mix(colour*0.22,vec3(0.01,0.04,0.16),0.5),0.62):vec4(colour*(0.36+0.7*diffuse),1.0);}'));
  gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));gl.useProgram(program);
  const attributes={};for(const [name,size] of [['position',3],['normal',3],['level',1]])attributes[name]={location:gl.getAttribLocation(program,name),buffer:gl.createBuffer(),size};

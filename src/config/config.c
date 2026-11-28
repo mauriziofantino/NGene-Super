@@ -254,7 +254,7 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("tracking.galileo_channels", tracking.galileoChannels)
     UINT_KEY("tracking.workers", tracking.workers)
     UINT_KEY("tracking.doppler_smoothing_ms", tracking.dopplerSmoothingMs)
-    if (strcmp(key, "tracking.egnos") == 0) {
+    if (strcmp(key, "receiver.egnos") == 0 || strcmp(key, "tracking.egnos") == 0) {
         return ParseBool(value, &c->tracking.egnosEnabled);
     }
     if (strcmp(key, "tracking.broadcast_ionosphere") == 0) {
@@ -868,6 +868,7 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     fprintf(output,"channels=%u\ngps_reserved=%u\ngalileo_reserved=%u\nbeidou_reserved=%u\nauto_priority=%u\n",
             config->tracking.channelCount,config->tracking.gpsChannels,
             config->tracking.galileoChannels,config->tracking.beidouChannels,config->tracking.autoPriority);
+    fprintf(output, "egnos=%s\n", config->tracking.egnosEnabled ? "true" : "false");
     fprintf(output,"\n[tracking]\nworkers=%u\ntap_count=%u\nspacing_chips=%.17g\n"
                    "galileo_spacing_slots=%.17g\ndoppler_smoothing_ms=%u\n",config->tracking.workers,
             config->tracking.tapCount,config->tracking.spacingChips,
@@ -884,7 +885,6 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             config->tracking.fllDecisionUpdates, config->tracking.fllDecisionIntervalMs,
             config->tracking.fllTransitionHz);
     fprintf(output, "beidou_spacing_chips=%.17g\n", config->tracking.beidouSpacingChips);
-    fprintf(output, "egnos=%s\n", config->tracking.egnosEnabled ? "true" : "false");
     fprintf(output, "broadcast_ionosphere=%s\n",
             config->tracking.broadcastIonosphere ? "true" : "false");
     fprintf(output,"\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\ncpu_budget=%.17g\n",

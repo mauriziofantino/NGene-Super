@@ -148,7 +148,7 @@ The broadcast PVT uses GPS Klobuchar, Galileo E1 NeQuick G and BeiDou B1C
 BDGIM when the required coefficients are available. The receiver profile
 can disable these corrections and the PVT view reports their per-system
 counts. The optional EGNOS L1 receiver can search GEO PRNs 121 and 136.
-Enable it under Tracking in the receiver profile. GPS PVT uses fresh fast
+Enable it under Receiver & signals in the receiver profile. GPS PVT uses fresh fast
 range and long-term orbit/clock corrections with matching broadcast IODE.
 The PVT view reports the GEO, accepted frames and corrected GPS observations.
 Windows x64 replay of the 27 November RTL-SDR recording accepted frames

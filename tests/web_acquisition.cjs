@@ -101,6 +101,17 @@ async function until(fn, label) {
     const scatter = await page.locator('[data-tracking-scatter]').boundingBox();
     const signed = await page.locator('[data-tracking-prompt]').boundingBox();
     assert(Math.abs(scatter.y + scatter.height - signed.y - signed.height) < 1, 'Prompt plots share the lower edge');
+    for (const key of ['scatter','prompt']) {
+      const chart = page.locator('[data-tracking-'+key+']');
+      const fullscreen = chart.locator('..').locator('.plot-fullscreen-toggle');
+      assert.equal(await fullscreen.locator('svg path').count(), 2);
+      await fullscreen.click();
+      await until(async()=>await fullscreen.getAttribute('aria-pressed')==='true', key+' fullscreen');
+      assert((await chart.boundingBox()).height > 0.7 * await page.evaluate(()=>innerHeight), key+' chart height');
+      if (key === 'scatter') assert.equal(await chart.getAttribute('viewBox'), '185 0 270 260');
+      await fullscreen.click();
+      await until(async()=>await fullscreen.getAttribute('aria-pressed')==='false', key+' fullscreen exit');
+    }
     const taps=testTracking?9:3;
     await until(async ()=>await page.locator('[data-tracking-shape] circle').count()===taps,'measured tap points');
     assert.equal(await page.locator('[data-tracking-shape] polyline').count(),1,'Measured tap curve');

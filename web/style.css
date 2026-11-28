@@ -370,7 +370,7 @@ td a{color:#80dce4}
 @media(max-width:980px){.search-space-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.caf-controls{margin:14px 13px 9px}.caf-views{margin:0 13px 8px;gap:12px}.caf-plot-wrap{height:260px}.caf-details,.caf-cursor{margin-left:13px;margin-right:13px}.caf-cursor{margin-bottom:14px}.search-space-grid{margin:14px 13px 7px;gap:10px}.search-space-panel{padding:11px 8px 8px}.search-space-panel h3{font-size:10px}.search-space-panel p{font-size:8px}.search-space-summary{margin:4px 13px 14px;font-size:9px}}
 
-#waterfall3DWrap{height:500px}@media(max-width:600px){#waterfall3DWrap{height:420px}}
+#waterfall3DWrap{height:clamp(500px,72dvh,1100px)}@media(max-width:600px){#waterfall3DWrap{height:420px}}
 
 /* Status changes must not alter satellite row height or the scroll anchor. */
 [data-acquisition-results] td{white-space:nowrap}
@@ -398,4 +398,8 @@ td a{color:#80dce4}
 .plot-fullscreen:is(:fullscreen,.plot-expanded) [data-pvt-sky] > svg { width:100%; height:100%; max-height:none; }
 #waterfall3DWrap:is(:fullscreen,.plot-expanded) { height:100dvh; }
 .workspace-grid:has([data-tracking-scatter]) { align-items:stretch; }
-.workspace-grid:has([data-tracking-scatter]) .tracking-panel { display:grid; grid-template-rows:auto 1fr auto; }
+.workspace-grid:has([data-tracking-scatter]) .tracking-panel:not(:fullscreen):not(.plot-expanded) { display:grid; grid-template-rows:auto 1fr auto; }
+
+.plot-fullscreen-toggle svg { display:block; width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; }
+.plot-fullscreen-toggle[aria-pressed="false"] .fullscreen-exit, .plot-fullscreen-toggle[aria-pressed="true"] .fullscreen-enter { display:none; }
+.plot-fullscreen:is(:fullscreen,.plot-expanded) > svg { height:0; align-self:stretch; }

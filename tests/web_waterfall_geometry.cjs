@@ -25,6 +25,11 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
  }
  assert.equal(near.x,1);assert.equal(far.x,-1);
  assert.equal(near.y,far.y,'Time must not change the displayed frequency');
+ for(const age of [0,.25,.5,.75,1]){
+  const p=projectSurfacePoint(0,.8,age,mesh);
+  assert.equal(p.y,projectSurfacePoint(0,.8,.5,mesh).y,'Equal PSD stays at equal height for the whole history');
+  assert.equal(p.depth,projectSurfacePoint(0,.8,.5,mesh).depth);
+ }
  assert.equal(low.x,high.x,'Power must not move the sample in time');
  assert.equal(JSON.stringify(history),before,'Mesh preparation must not modify observations');
  const short=buildWaterfallMesh(history.slice(0,16),1024,128,-100,-40);
