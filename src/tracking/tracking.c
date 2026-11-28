@@ -87,6 +87,7 @@ struct TNgTracking {
     double oldI, oldQ;                                             /**< Previous prompt for FLL. */
     double meanFrequency, oldMean;                                 /**< FLL transition smoothing. */
     double sumI[NG_TRACKING_MAX_TAPS], sumQ[NG_TRACKING_MAX_TAPS]; /**< Coherent sums. */
+    double cn0PromptI, cn0PromptQ; /**< Full-precision prompt sums for reduced-precision mixers. */
     int8_t beidouData[2 * NG_BEIDOU_B1C_LENGTH];
     double beidouDataI;
     int8_t chips[2 * NG_BEIDOU_B1C_LENGTH];                           /**< Primary code. */
@@ -269,6 +270,7 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     tracking->transmitTimeValid = 0;
     tracking->started = 0;
     tracking->accumulated = 0;
+    tracking->cn0PromptI = tracking->cn0PromptQ = 0;
     tracking->discardFirst = 1;
     tracking->carrierNco = tracking->codeNco = 0;
     tracking->oldCarrierError = tracking->oldDllError = 0;
@@ -353,8 +355,7 @@ static void EstimateCn0(TNgTracking *tracking, double promptInPhase, double prom
     }
     ++tracking->cn0Samples;
     double squareSignal = 2 * tracking->m2 * tracking->m2 - tracking->m4;
-    if (tracking->cn0Samples >= 100 && squareSignal > 0 && duration > 0 &&
-        !tracking->config.squareCarrier) {
+    if (tracking->cn0Samples >= 100 && squareSignal > 0 && duration > 0) {
         double signal = sqrt(squareSignal), noise = tracking->m2 - signal;
         if (noise > 0 && signal > 0) {
             double estimate = 10 * log10(signal / noise / duration);
@@ -571,9 +572,13 @@ static void Complete(TNgTracking *tracking)
         }
         tracking->oldMean = tracking->meanFrequency;
     }
-    EstimateCn0(tracking, promptInPhase / (double)tracking->accumulated,
-                promptQuadrature / (double)tracking->accumulated,
-                (double)tracking->accumulated / tracking->stream.sampleRateHz);
+    const int referencePrompt = tracking->config.squareCarrier || tracking->config.mixerBits;
+    EstimateCn0(
+        tracking,
+        (referencePrompt ? tracking->cn0PromptI : promptInPhase) / (double)tracking->accumulated,
+        (referencePrompt ? tracking->cn0PromptQ : promptQuadrature) / (double)tracking->accumulated,
+        (double)tracking->accumulated / tracking->stream.sampleRateHz);
+    tracking->cn0PromptI = tracking->cn0PromptQ = 0;
     if (tracking->system == 2) {
         QualifyGalileoPeak(tracking, promptInPhase, promptQuadrature);
     } else {
@@ -695,6 +700,30 @@ static void Complete(TNgTracking *tracking)
     tracking->accumulated = 0;
 }
 
+/** Mix one chunk with the sinusoidal reference or the selected unquantized carrier. */
+static void MixTrackingChunk(TNgTracking *tracking, const TNgIqView *window, size_t position,
+                             size_t count, int squareCarrier)
+{
+    if (window->format == 0 || window->format == NG_FORMAT_CI8) {
+        (tracking->config.fastCarrier ? NgSearchMixPrefixCi8Lanes : NgSearchMixPrefixCi8)(
+            tracking->prefix, window->samples + position, count, tracking->stream.sampleRateHz,
+            tracking->carrierHz, tracking->carrierPhase, squareCarrier,
+            tracking->stream.spectrumInverted);
+    } else {
+        NgSearchCarrier(tracking->carrier, count, tracking->stream.sampleRateHz,
+                        tracking->carrierHz, tracking->carrierPhase, squareCarrier);
+        for (size_t sampleIndex = 0; sampleIndex < count; ++sampleIndex) {
+            tracking->values[sampleIndex].i =
+                (float)NgIqComponent(window, position + sampleIndex, 0);
+            tracking->values[sampleIndex].q =
+                (float)(NgIqComponent(window, position + sampleIndex, 1) *
+                        (tracking->stream.spectrumInverted ? -1 : 1));
+        }
+        NgSearchMix(tracking->values, tracking->carrier, count);
+        NgSearchPrefix(tracking->prefix, tracking->values, count);
+    }
+}
+
 /** Stream across arbitrary window splits and invalidate rather than integrate across gaps. */
 int NgTrackingProcess(TNgTracking *tracking, const TNgIqView *window, TNgError *error)
 {
@@ -721,7 +750,7 @@ int NgTrackingProcess(TNgTracking *tracking, const TNgIqView *window, TNgError *
         tracking->started = 1;
     }
     while (position < window->meta.count) {
-        size_t count, n;
+        size_t count;
         unsigned tap;
         if (!tracking->accumulated) {
             tracking->observeIntegration = tracking->observeRequested;
@@ -741,29 +770,14 @@ int NgTrackingProcess(TNgTracking *tracking, const TNgIqView *window, TNgError *
         if (count > window->meta.count - position) {
             count = window->meta.count - position;
         }
-        if (window->format == 0 || window->format == NG_FORMAT_CI8) {
-            if (tracking->config.mixerBits != 0) {
-                NgSearchMixPrefixCi8Arithmetic(
-                    tracking->prefix, window->samples + position, count,
-                    tracking->stream.sampleRateHz, tracking->carrierHz, tracking->carrierPhase,
-                    tracking->stream.spectrumInverted, tracking->config.mixerBits);
-            } else {
-                (tracking->config.fastCarrier ? NgSearchMixPrefixCi8Lanes : NgSearchMixPrefixCi8)(
-                    tracking->prefix, window->samples + position, count,
-                    tracking->stream.sampleRateHz, tracking->carrierHz, tracking->carrierPhase,
-                    tracking->config.squareCarrier, tracking->stream.spectrumInverted);
-            }
+        if (tracking->config.mixerBits != 0 &&
+            (window->format == 0 || window->format == NG_FORMAT_CI8)) {
+            NgSearchMixPrefixCi8Arithmetic(
+                tracking->prefix, window->samples + position, count, tracking->stream.sampleRateHz,
+                tracking->carrierHz, tracking->carrierPhase, tracking->stream.spectrumInverted,
+                tracking->config.mixerBits);
         } else {
-            NgSearchCarrier(tracking->carrier, count, tracking->stream.sampleRateHz,
-                            tracking->carrierHz, tracking->carrierPhase,
-                            tracking->config.squareCarrier);
-            for (n = 0; n < count; ++n) {
-                tracking->values[n].i = (float)NgIqComponent(window, position + n, 0);
-                tracking->values[n].q = (float)(NgIqComponent(window, position + n, 1) *
-                                                (tracking->stream.spectrumInverted ? -1 : 1));
-            }
-            NgSearchMix(tracking->values, tracking->carrier, count);
-            NgSearchPrefix(tracking->prefix, tracking->values, count);
+            MixTrackingChunk(tracking, window, position, count, tracking->config.squareCarrier);
         }
         /* Each tap and Galileo half-chip probe sums whole chip runs of the mixed samples.
          * Runs follow the exact NgTrackingReplica sample-to-chip assignment. */
@@ -802,6 +816,19 @@ int NgTrackingProcess(TNgTracking *tracking, const TNgIqView *window, TNgError *
                 tracking->sideI[side] += inPhase;
                 tracking->sideQ[side] += quadrature;
             }
+        }
+        /* Reuse the scratch after all loop taps have consumed the selected mixer output. */
+        if ((tracking->config.squareCarrier || tracking->config.mixerBits) &&
+            !tracking->discardFirst) {
+            double referenceI, referenceQ;
+            MixTrackingChunk(tracking, window, position, count, 0);
+            NgTrackingCorrelateRuns(tracking->prefix, count, tracking->codePhase,
+                                    tracking->snapshot.codeRateHz, tracking->stream.sampleRateHz,
+                                    tracking->chips, tracking->period,
+                                    tracking->offsets[tracking->config.tapCount / 2],
+                                    tracking->system != 1, &referenceI, &referenceQ);
+            tracking->cn0PromptI += referenceI;
+            tracking->cn0PromptQ += referenceQ;
         }
         tracking->codePhase =
             fmod(tracking->codePhase +

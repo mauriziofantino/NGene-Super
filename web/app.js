@@ -898,7 +898,9 @@ function animateWaterfallScroll(){
 function drawHistogram(id,data,color){
   if(!(diagnosticMask()&2))return;
   const s=surface(id);if(!s)return;const {ctx,w,h,left,right,top,bottom}=s;const percent=$('histScale').value==='percent',count=analysisSnapshot?.histogram_count||1;
-  const values=(data||[]).map(v=>percent?100*v/count:v),max=Number($('histMax').value)>0?Number($('histMax').value):Math.max(1,...values);
+  const values=(data||[]).map(v=>percent?100*v/count:v);
+  const peak=Math.max(0,...(analysisSnapshot?.histogram_i||[]),...(analysisSnapshot?.histogram_q||[]),...(data||[]));
+  const max=Number($('histMax').value)>0?Number($('histMax').value):Math.max(1,Math.ceil(1.15*peak)*(percent?100/count:1));
   ctx.fillStyle='#8fa6ba';ctx.fillText(percent?'%':'count',4,11);
   for(let j=0;j<=2;j++){const y=top+j*(bottom-top)/2;ctx.strokeStyle='#233446';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText((max*(1-j/2)).toFixed(percent?1:0),4,y+4);}
   const dw=(right-left)/(values.length||1);ctx.fillStyle=color;
@@ -916,7 +918,11 @@ function drawHistogram(id,data,color){
   const mean=analysisSnapshot?.[id==='histogramI'?'stats_i':'stats_q']?.mean;
   if(Number.isFinite(mean)){
     ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(amplitudeX(mean),top);ctx.lineTo(amplitudeX(mean),bottom);ctx.stroke();
-    ctx.textAlign='right';ctx.fillStyle=color;ctx.fillText(`Mean ${mean.toFixed(4)} · ${(span/(values.length||1)).toFixed(0)} counts/bin`,right,11);
+    const countsPerBin=Number((span/(values.length||1)).toFixed(2));
+    ctx.textAlign='right';ctx.fillStyle=color;ctx.fillText(`Mean ${mean.toFixed(4)} · ${countsPerBin} counts/bin`,right,11);
+  }
+  if(values.some(v=>v>max)){
+    ctx.textAlign='left';ctx.fillStyle='#f1ba72';ctx.fillText('Above Y maximum',left+6,top+14);
   }
   ctx.restore();
 }

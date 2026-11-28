@@ -147,6 +147,7 @@ static void FixedDcHistograms(void)
                                                        : 128;
             int step = limit / 128;
             int offset = limit / 4;
+            int paddedLimit = limit == 128 ? 256 : limit + offset;
             NgAnalysisDefaults(&config);
             config.spectrumEnabled = 0;
             config.histogramPairs = 4096;
@@ -166,7 +167,9 @@ static void FixedDcHistograms(void)
             CHECK(snapshot.removedDcI == offset && snapshot.removedDcQ == -offset);
             CHECK(snapshot.dcEstimatePairs == 4096);
             CHECK(snapshot.statsI.mean == 0 && snapshot.statsQ.mean == 0);
-            CHECK(snapshot.histogramI[127] == 2048 && snapshot.histogramI[129] == 2048);
+            CHECK(snapshot.histogramMin == -paddedLimit);
+            CHECK(snapshot.histogramMax == paddedLimit - 1);
+            CHECK(snapshot.histogramI[127] == 2048 && snapshot.histogramI[128] == 2048);
             CHECK(snapshot.histogramQ[128] == 4096);
             CHECK(!memcmp(retained, raw, sizeof(raw)));
 
@@ -184,7 +187,10 @@ static void FixedDcHistograms(void)
             WaitResult(analysis, 2);
             CHECK(snapshot.removedDcI == offset && snapshot.removedDcQ == -offset);
             CHECK(snapshot.statsI.mean == 3 * step && snapshot.statsQ.mean == -2 * step);
-            CHECK(snapshot.histogramI[131] == 4096 && snapshot.histogramQ[126] == 4096);
+            CHECK(snapshot.histogramMin == -paddedLimit);
+            CHECK(snapshot.histogramMax == paddedLimit - 1);
+            CHECK(snapshot.histogramI[limit == 128 ? 129 : 130] == 4096);
+            CHECK(snapshot.histogramQ[limit == 128 ? 127 : 126] == 4096);
             config.spectrumEnabled = 1;
             config.window = NG_WINDOW_RECT;
             config.averages = 1;
@@ -210,11 +216,30 @@ static void FixedDcHistograms(void)
             WaitResult(analysis, 1);
             CHECK(snapshot.removedDcI == limit / 2 - 1 && snapshot.removedDcQ == -limit / 2);
             CHECK(snapshot.statsI.mean == 0.25 && snapshot.statsQ.mean == -0.25);
-            CHECK(snapshot.histogramMin == -2 * limit && snapshot.histogramMax == 2 * limit - 1);
-            CHECK(snapshot.histogramI[32] == 1024 && snapshot.histogramI[160] == 3072);
-            CHECK(snapshot.histogramQ[223] == 1024 && snapshot.histogramQ[96] == 3072);
+            paddedLimit = limit == 128 ? 256 : 3 * limit / 2;
+            CHECK(snapshot.histogramMin == -paddedLimit);
+            CHECK(snapshot.histogramMax == paddedLimit - 1);
+            CHECK(snapshot.histogramI[limit == 128 ? 32 : 0] == 1024);
+            CHECK(snapshot.histogramI[limit == 128 ? 160 : 170] == 3072);
+            CHECK(snapshot.histogramQ[limit == 128 ? 223 : 255] == 1024);
+            CHECK(snapshot.histogramQ[limit == 128 ? 96 : 85] == 3072);
             CHECK(snapshot.clippedI == 4096 && snapshot.clippedQ == 4096);
             CHECK(fabs(snapshot.peakDbfs - 10 * log10(2 * pow(0.5 - 0.25 / limit, 2))) < 0.03);
+
+            /* A quiet burst after the rails must keep the same axis and bin width. */
+            config.spectrumEnabled = 0;
+            CHECK(NgAnalysisConfigure(analysis, &config, &error) == NG_OK);
+            for (k = 0; k < view.meta.count; ++k) {
+                NgIqStore(raw, format, k, 0, limit / 2 - 1);
+                NgIqStore(raw, format, k, 1, -limit / 2);
+            }
+            view.meta.firstSample += view.meta.count;
+            Submit(analysis, &view, pre);
+            WaitResult(analysis, 2);
+            CHECK(snapshot.histogramMin == -paddedLimit);
+            CHECK(snapshot.histogramMax == paddedLimit - 1);
+            CHECK(snapshot.histogramI[128] == 4096 && snapshot.histogramQ[128] == 4096);
+            CHECK(snapshot.clippedI == 0 && snapshot.clippedQ == 0);
             NgAnalysisDestroy(analysis);
         }
     }
@@ -328,7 +353,8 @@ int main(void)
     CHECK(snapshot.statsQ.mean == 0 && snapshot.statsQ.std == 0 && snapshot.statsQ.rms == 0);
     CHECK(snapshot.statsI.rms == 1 && snapshot.dcMagnitude == 0);
     CHECK(snapshot.removedDcI == 21 && snapshot.removedDcQ == 12);
-    CHECK(snapshot.histogramI[127] == 2048 && snapshot.histogramI[129] == 2048);
+    CHECK(snapshot.histogramMin == -256 && snapshot.histogramMax == 255);
+    CHECK(snapshot.histogramI[127] == 2048 && snapshot.histogramI[128] == 2048);
     CHECK(fabs(snapshot.peakDbfs - 20 * log10(4.0 / 128)) < 0.01 && snapshot.peakHz == -32768);
     {
         TNgAnalysisSnapshot retained = snapshot;

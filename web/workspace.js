@@ -434,6 +434,10 @@ function channelStages(channel, status) {
   };
 }
 
+function cn0Value(tracking) {
+  return tracking.cn0_valid&&Number.isFinite(tracking.cn0_db_hz)?tracking.cn0_db_hz:null;
+}
+
 function updateTracking(channels, run, status) {
   const picker=document.querySelector('[data-tracking-channel]'); if(!picker)return;
   if(trackingRun!==run){trackingHistory.clear();trackingRanges.clear();trackingRun=run;}
@@ -480,21 +484,22 @@ function updateTracking(channels, run, status) {
     const first=row.insertCell(),link=document.createElement('a');
     link.href=`#tracking/${t.channel_id}`;link.textContent=`CH ${t.channel_id}`;first.append(link);
     const stages=channelStages(t,status);
+    const cn0=cn0Value(t);
     for(const value of [system,t.prn||'—',stages.acquisition,stages.tracking,
-      t.active?(t.pll?'PLL / DLL':'FLL / DLL'):'—',t.cn0_valid?t.cn0_db_hz.toFixed(1):'—',
+      t.active?(t.pll?'PLL / DLL':'FLL / DLL'):'—',cn0?.toFixed(1)??'—',
       t.active?Number(t.doppler_hz).toFixed(1):'—',reserved,stages.decoding,
       t.tow_valid?String(t.tow_seconds):'—',stages.pvt])row.insertCell().textContent=value;
     row.cells[4].classList.toggle('tracking-active', running && stages.tracking === 'Tracking');
     row.onclick=event=>{if(!event.target.closest('a'))open(t.channel_id);};
-  }
-  for(const row of body.rows) {
-    const t=channels.find(t=>String(t.channel_id)===row.dataset.channelId), cell=row.cells[6];
-    const value=cell.textContent;cell.replaceChildren();
-    const meter=document.createElement('meter'),number=document.createElement('span');
-    meter.min=0;meter.max=60;meter.low=25;meter.high=35;meter.optimum=45;
-    meter.value=t.cn0_valid?Math.max(0,Math.min(60,t.cn0_db_hz)):0;
-    meter.setAttribute('aria-label',t.cn0_valid?'C/N0 '+value+' dB-Hz':'C/N0 unavailable');
-    number.textContent=value;cell.className='channel-cn0';cell.append(meter,number);
+    const cell=row.cells[6],value=cell.textContent;
+    const bar=document.createElement('span'),fill=document.createElement('span');
+    const number=document.createElement('span');
+    bar.className='channel-cn0-bar';bar.setAttribute('aria-hidden','true');
+    fill.style.width=`${100*Math.max(0,Math.min(60,cn0??0))/60}%`;
+    bar.append(fill);
+    number.className='channel-cn0-value';number.textContent=value;
+    number.title=cn0===null?'C/N0 unavailable':`${value} dB-Hz`;
+    cell.className='channel-cn0';cell.replaceChildren(bar,number);
   }
   wrap.append(grid);table.append(wrap);
   picker.onchange=()=>open(picker.value);
@@ -551,7 +556,8 @@ function renderTracking(t,history,status) {
   if(!t || !t.active || !Number(t.integrations)) {
     detail.textContent=t?`${t.active?'Waiting for first coherent integration':stages.acquisition==='Confirmed'?'Waiting for tracking assignment':t.state===1?'Acquisition in progress':'Waiting for an eligible search'} | C/N0 unavailable`:'No configured channels.';return;
   }
-  detail.textContent=`${status?.state!=='running'?'Receiver stopped; last observation | ':''}${t.pll?'PLL':'FLL pull-in'} / DLL | Doppler ${t.doppler_hz.toFixed(2)} Hz | code ${t.code_rate_hz.toFixed(3)} chip/s | C/N0 ${t.cn0_valid?`${t.cn0_db_hz.toFixed(1)} dB-Hz`:'unavailable'} | ${(t.constellation===2||t.constellation===3)?(t.main_peak_verified?'BOC main peak verified':'BOC peak not yet consistent with the acquisition handoff'):t.constellation===4?`EGNOS L1 C/A ? ${t.valid_subframes} valid frames`:'GPS C/A'} | epoch ${t.epoch}, samples ${t.first_sample}-${t.end_sample}`;
+  const cn0=cn0Value(t);
+  detail.textContent=`${status?.state!=='running'?'Receiver stopped; last observation | ':''}${t.pll?'PLL':'FLL pull-in'} / DLL | Doppler ${t.doppler_hz.toFixed(2)} Hz | code ${t.code_rate_hz.toFixed(3)} chip/s | C/N0 ${cn0===null?'unavailable':`${cn0.toFixed(1)} dB-Hz`} | ${(t.constellation===2||t.constellation===3)?(t.main_peak_verified?'BOC main peak verified':'BOC peak not yet consistent with the acquisition handoff'):t.constellation===4?`EGNOS L1 C/A ? ${t.valid_subframes} valid frames`:'GPS C/A'} | epoch ${t.epoch}, samples ${t.first_sample}-${t.end_sample}`;
   const component='magnitude';
   const key=`${trackingRun}:${t.channel_id}`;
   const manual=trackingRanges.get(key);

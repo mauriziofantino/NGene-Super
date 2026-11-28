@@ -439,7 +439,14 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         int64_t sums[2] = {0, 0};
         uint64_t squares[2] = {0, 0};
         unsigned rawClipping[2] = {0, 0};
-        int histogramLimit = adcLimit;
+        const int offsetMagnitudeI = abs(removedDc[0]);
+        const int offsetMagnitudeQ = abs(removedDc[1]);
+        const unsigned adcLimitWithDc =
+            adcLimit + (offsetMagnitudeI > offsetMagnitudeQ ? offsetMagnitudeI : offsetMagnitudeQ);
+        /* Pad the fixed ADC range so each bin contains the same number of integer levels. */
+        const unsigned halfBins = c->histogramBins / 2;
+        const unsigned levelsPerBin = (adcLimitWithDc + halfBins - 1) / halfBins;
+        const int histogramLimit = (int)(levelsPerBin * halfBins);
         TNgComponentStats *stats[2] = {&s->statsI, &s->statsQ};
         s->histogramBins = c->histogramBins;
         s->histogramCount = (uint32_t)c->histogramPairs;
@@ -464,23 +471,16 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                 }
                 stats[j]->zeros += v == 0;
                 rawClipping[j] += (unsigned)(raw == -adcLimit || raw == adcLimit - 1);
-                if (v < -adcLimit || v >= adcLimit) {
-                    histogramLimit = 2 * adcLimit;
-                }
             }
         }
-        /* Widen the displayed axis only when subtracting the mean exceeds the
-         * original ADC range. Never clip centered samples into an end bin. */
         s->histogramMin = -histogramLimit;
         s->histogramMax = histogramLimit - 1;
         for (k = 0; k < c->histogramPairs; ++k) {
             if (k % 1024 == 0 && BurstCurrent(a, b) == 0) {
                 return 0;
             }
-            ++s->histogramI[(unsigned)(a->centered[2 * k] + histogramLimit) * c->histogramBins /
-                            (unsigned)(2 * histogramLimit)];
-            ++s->histogramQ[(unsigned)(a->centered[2 * k + 1] + histogramLimit) * c->histogramBins /
-                            (unsigned)(2 * histogramLimit)];
+            ++s->histogramI[(unsigned)(a->centered[2 * k] + histogramLimit) / levelsPerBin];
+            ++s->histogramQ[(unsigned)(a->centered[2 * k + 1] + histogramLimit) / levelsPerBin];
         }
         for (j = 0; j < 2; ++j) {
             double power = (double)squares[j] / (double)c->histogramPairs;

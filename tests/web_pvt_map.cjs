@@ -80,8 +80,11 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   });
   assert.deepEqual(await stages(channelRows.nth(1)),['Confirmed','Tracking','Decoded','—'],
     'A fix from before a gap cannot supply PVT membership');
-  assert.equal(await page.locator('.channel-cn0 meter').count(),2);
-  assert.equal(await page.locator('.channel-cn0 meter').nth(1).getAttribute('value'),'42.5');
+  const cn0Bars=page.locator('.channel-cn0-bar > span');
+  assert.equal(await cn0Bars.count(),2);
+  assert.equal(await page.locator('.channel-cn0-value').nth(1).textContent(),'42.5');
+  assert.equal(await cn0Bars.first().evaluate(el=>el.getBoundingClientRect().width),0);
+  assert(await cn0Bars.nth(1).evaluate(el=>el.getBoundingClientRect().width>50));
   assert.equal(await page.locator('.workspace-nav-dot').count(),0,'No ambiguous module status lights');
   const positions=await page.locator('.channel-list tbody tr').first().locator('td').evaluateAll(cells=>cells.map(c=>c.getBoundingClientRect().x));
   await page.evaluate(()=>{window.geometrySnapshot.status.tracking[0].constellation=1;window.geometryWorkspace.update(window.geometrySnapshot);});

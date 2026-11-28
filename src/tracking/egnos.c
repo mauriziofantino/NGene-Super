@@ -58,6 +58,10 @@ int NgEgnosCreate(const TNgStreamInfo *stream, const TNgTrackingConfig *config, 
     search.lastPrn = 2;
     search.cpuBudget = 0.25;
     NgTrackingDefaults(&track);
+    track.squareCarrier = config->squareCarrier;
+    track.fastCarrier = config->fastCarrier;
+    track.mixerBits = config->mixerBits;
+    track.xorCorrelation = config->xorCorrelation;
     track.spacingChips = config->egnosSpacingChips;
     track.cn0CutoffDbHz = config->cn0CutoffDbHz;
     track.tapCount = config->tapCount;

@@ -184,7 +184,7 @@ static double Gaussian(uint32_t *random)
 }
 
 /** Verify the native-complex moment C/N0 against a known independent noise level. */
-static void Cn0Reference(void)
+static void Cn0Reference(int squareCarrier, unsigned mixerBits)
 {
     TNgTrackingConfig config;
     TNgStreamInfo stream = {0};
@@ -198,7 +198,11 @@ static void Cn0Reference(void)
     uint32_t random = 913;
     unsigned ms, n;
     stream.sampleRateHz = 2048000;
+    stream.format = NG_FORMAT_CI8;
+    stream.digitalIfHz = 128000;
     NgTrackingDefaults(&config);
+    config.squareCarrier = squareCarrier;
+    config.mixerBits = mixerBits;
     CHECK(NgTrackingCreate(&config, &stream, 1, &tracking, &error) == NG_OK);
     CHECK(NgGpsCaGenerate(1, chips, &error) == NG_OK);
     seed.confirmed = 1;
@@ -210,9 +214,10 @@ static void Cn0Reference(void)
     for (ms = 1; ms <= 30000; ++ms) {
         for (n = 0; n < 2048; ++n) {
             double phase = fmod(0.25 + (double)n * 1023000 / 2048000, 1023);
-            samples[n].i = (int8_t)lround((double)chips[(size_t)phase] * ((ms / 20) % 2 ? -1 : 1) +
-                                          8 * Gaussian(&random));
-            samples[n].q = (int8_t)lround(8 * Gaussian(&random));
+            double carrier = 6.2831853071795864769 * (double)(n % 16) / 16.0;
+            double signal = (double)chips[(size_t)phase] * ((ms / 20) % 2 ? -1 : 1);
+            samples[n].i = (int8_t)lround(signal * cos(carrier) + 8 * Gaussian(&random));
+            samples[n].q = (int8_t)lround(signal * sin(carrier) + 8 * Gaussian(&random));
         }
         view.meta.firstSample = (uint64_t)ms * 2048;
         CHECK(NgTrackingProcess(tracking, &view, &error) == NG_OK);
@@ -482,7 +487,9 @@ int main(void)
     NgTrackingDefaults(&config);
     config.tapCount = 4;
     CHECK(NgTrackingValidate(&config, &error) == NG_ERROR);
-    Cn0Reference();
+    Cn0Reference(0, 0);
+    Cn0Reference(1, 0);
+    Cn0Reference(0, 8);
     ReplicaParity();
     MixPrefixParity();
     QuantizedMixContract();

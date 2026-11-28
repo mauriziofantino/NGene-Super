@@ -189,9 +189,10 @@
                 },
                 {
                   "value": "true",
-                  "label": "Fast square (experimental)"
+                  "label": "Square carrier"
                 }
-              ]
+              ],
+              "hint": "C/N0 uses a sinusoidal reference prompt with square or quantized tracking mixers."
             },
             {
               "key": "dsp.tracking_xor_correlation",

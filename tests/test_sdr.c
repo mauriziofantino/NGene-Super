@@ -352,7 +352,7 @@ static void TestDiagnostics(TNgSampleFormat format)
     CHECK(snapshot.statsI.mean == 0 && snapshot.statsI.rms == 0 && snapshot.statsQ.zeros == 1024);
     CHECK(snapshot.removedDcI == value && snapshot.removedDcQ == 0);
     CHECK(NgIqComponent(&view, 0, 0) == value); /* Native input is never rewritten. */
-    CHECK(snapshot.histogramMin == (format == NG_FORMAT_SC16_Q11 ? -2048 : -128));
+    CHECK(snapshot.histogramMin == (format == NG_FORMAT_SC16_Q11 ? -3328 : -256));
     CHECK(snapshot.peakDbfs < -150); /* A constant input is DC, not an RF tone. */
     NgAnalysisDestroy(analysis);
 }

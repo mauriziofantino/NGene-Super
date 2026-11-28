@@ -239,7 +239,7 @@ User-confirmed order: shared conditioning **before** the central ring. Selectabl
 
 ## 0.4 update
 
-The former raw I/Q preview was removed from telemetry. The receiver does not wait on GUI locks: diagnostic taps and progress use try-lock; the recorder has a separate lifetime lock shared only with the manager. PSD and histogram have independent workspaces and cadences; the GNSS ring remains unique. PSD ownership and end-to-end checks are described in [ITERATION_04.md](ITERATION_04.md). The optional DC conditioner preserves state between blocks. The digital IF reference belongs to the stream and is available to channels: no mixer is added to the common flow.
+The former raw I/Q preview was removed from telemetry. The receiver does not wait on GUI locks: diagnostic taps and progress use try-lock; the recorder has a separate lifetime lock shared only with the manager. PSD and histogram have independent workspaces and cadences; the GNSS ring remains unique. PSD ownership and end-to-end checks are described in [ITERATION_04.md](ITERATION_04.md). The histogram uses one symmetric axis for I and Q, extending the native ADC range by the larger magnitude of the two fixed DC offsets and padding it so every bin covers the same number of integer ADC levels. A burst hitting a rail leaves the bin boundaries in place. The two plots share an automatic vertical scale with headroom above the largest bin. The optional DC conditioner preserves state between blocks. The digital IF reference belongs to the stream and is available to channels: no mixer is added to the common flow.
 
 ## Historical independent sources in 0.6 (removed from the current service)
 

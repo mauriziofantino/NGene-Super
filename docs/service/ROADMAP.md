@@ -30,8 +30,9 @@ The engine is the sole logical consumer of the GNSS ring: all channels receive t
 ## Proposed increments
 
 The [frontend stream decision record](FRONTEND_STREAM_DECISIONS.md) records completed
-Windows SiGe USB checks and current stream/display contracts. The [DSP options study](DSP_OPTIONS_PLAN.md)
-defines the next kernel work; its approximate arithmetic candidates remain experiments.
+Windows SiGe USB checks and current stream/display contracts. The [arithmetic review plan](PIANO_ARITMETICHE.md)
+defines the next kernel work for the receiver and RF monitor. The [DSP options study](DSP_OPTIONS_PLAN.md)
+records earlier evidence for the comparison.
 GPS/Galileo DLL/FLL/PLL, multi-correlator tracking, bounded slot allocation and a shared tracking pool are integrated with the limits in [TRACKING.md](TRACKING.md). GPS LNAV, Galileo I/NAV, consistent ephemeris caches, common-epoch code/Doppler and unweighted broadcast PVT are integrated. Full Classic supervision, weighted/adaptive PNT, ionosphere/smoothing and integrity qualification remain pending. The increments
 below retain their platform and RF validation requirements even where adapter or replay
 support exists.

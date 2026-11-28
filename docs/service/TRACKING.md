@@ -119,8 +119,13 @@ taps, changing tap count at fixed spacing does not change DLL geometry.
 Carrier and product choices are independent, frozen while running, persisted in
 INI and editable in browser Tracking settings. Precise sinusoidal rotation and
 SIMD products are defaults. Fast sign XOR is exact for the +/-1 replica and
-preserves amplitude. Fast square carrier is explicitly approximate, with harmonic
-images; it is experimental and has no demonstrated RF sensitivity/lock accuracy.
+preserves amplitude. The square carrier introduces harmonic images. Its RF
+sensitivity and lock accuracy require separate qualification.
+For square and quantized mixers, C/N0 uses a sinusoidal prompt computed from the
+same input samples, code phase, and carrier NCO. The loop and navigation prompts
+use the selected mixer. The reference adds one mix and one prompt correlation
+per chunk, reusing the tracker workspace. EGNOS inherits the tracking mixer
+selection and uses the same C/N0 estimator.
 There is no automatic downgrade in response to CPU load.
 
 The Channels view shows clickable slot status and selects a GPS/Galileo channel and shows measured tap points
@@ -237,6 +242,25 @@ The standalone search diagnostics workspace has been removed. Channel detail ret
 GPS coherent epochs now feed a private navigation module directly within the tracking job. Five verified sign-transition intervals at multiples of 20 ms establish bit timing, retaining Classic sample configuration and the low PLL quality criterion. Twenty native double prompt sums yield each data bit; loop integration remains 1 ms. Classic parity masks, D30 polarity correction and ten-word subframe validation yield HOW TOW telemetry. This is a partial navigation port: ephemeris decoding, Galileo I/NAV, observables and PVT are not yet integrated. Channel Navigation (TOW) text denotes message validation, not navigation eligibility for a position solution. TOW expires after a missing subframe; gaps/reassignment clear all fragments. SIMD tracking kernels remain unchanged.
 
 Deterministic tests exercise prompt-to-bit timing, both polarities, parity corruption, loss of PLL qualification and stale TOW. HackRF live: GPS12 yielded four valid subframes in 30 seconds, last ID4, HOW578544 s. No position or accuracy validation follows from these counts.
+
+### Windows HackRF stability check, 28 November 2026
+
+With the same antenna, 32 dB LNA, 34 dB VGA, 16.3676 Msps and a 1575.42 MHz
+centre, pre-conditioning CI8 recordings showed repeated power bursts approximately
+102 ms apart. At 15 MHz bandwidth, the strongest non-DC components during the
+selected bursts were between roughly −5 and −6 MHz in baseband. Reducing the
+hardware bandwidth to 5 MHz reduced the 95th percentile of histogram I standard
+deviation from 16.9 to 5.9 counts over the first 132 seconds of the corresponding
+live runs with the fixed-axis build. Both runs reported zero stream gaps.
+
+At 15 MHz, a baseline run lost GPS TOW on five tracking channels together with
+new LNAV parity errors. The subsequent Galileo/BeiDou solution jumped 1.92 km
+between successive fixes as its geometry fell to five observations for five
+unknowns. In the fixed-axis build the largest consecutive step over the first
+132 seconds was 362 m at 15 MHz and 50 m at 5 MHz. These are live stop/start
+trials on one setup, with different received samples. The result measures
+continuity in that setup. Absolute accuracy, the source of the interference,
+and native Linux/macOS comparison remain open.
 
 ## Current increment, 16 November 2026
 
