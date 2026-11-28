@@ -441,8 +441,10 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
         unsigned rawClipping[2] = {0, 0};
         const int offsetMagnitudeI = abs(removedDc[0]);
         const int offsetMagnitudeQ = abs(removedDc[1]);
+        /* The ADC limit is positive and each offset magnitude is nonnegative. */
         const unsigned adcLimitWithDc =
-            adcLimit + (offsetMagnitudeI > offsetMagnitudeQ ? offsetMagnitudeI : offsetMagnitudeQ);
+            (unsigned)(adcLimit +
+                       (offsetMagnitudeI > offsetMagnitudeQ ? offsetMagnitudeI : offsetMagnitudeQ));
         /* Pad the fixed ADC range so each bin contains the same number of integer levels. */
         const unsigned halfBins = c->histogramBins / 2;
         const unsigned levelsPerBin = (adcLimitWithDc + halfBins - 1) / halfBins;
