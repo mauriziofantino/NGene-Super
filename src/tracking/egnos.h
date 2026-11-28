@@ -14,6 +14,7 @@ int NgEgnosProcess(TNgEgnos *egnos, const TNgIqView *view, int searchAllowed, TN
 void NgEgnosDestroy(TNgEgnos *egnos);
 /** Borrow the receiver-thread correction bank for use during the solver call. */
 const TNgSbasCorrections *NgEgnosCorrections(const TNgEgnos *egnos);
+void NgEgnosRead(const TNgEgnos *egnos, TNgTrackingSnapshot *snapshot);
 /** Return current GEO PRN, or zero while searching. */
 unsigned NgEgnosPrn(const TNgEgnos *egnos);
 

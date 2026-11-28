@@ -225,7 +225,10 @@ reported by the user separately and is not reclassified as a tracking RF result.
 
 ## Channel configuration update, 14 November 2026
 
-The receiver uses one total pool. For fixed six GPS and four Galileo slots set receiver.channels=10, gps_reserved=6 and galileo_reserved=4. For twelve automatic slots set channels=12 and both reservations to zero. receiver.auto_priority is 0 for completion order, 1 for GPS preference and 2 for Galileo preference among competing confirmed results for shared slots; existing assignments are retained. Galileo spacing is now presented and saved as tracking.galileo_spacing_slots, one slot equal to half a chip. Legacy chip values remain accepted on import; internal phase and SIMD arithmetic retain chip units.
+The receiver uses one total pool. For fixed six GPS and four Galileo slots set receiver.channels=10, gps_reserved=6 and galileo_reserved=4. For twelve automatic slots set channels=12 and both reservations to zero. receiver.auto_priority is 0 for completion order, 1 for GPS preference and 2 for Galileo preference among competing confirmed results for shared slots; existing assignments are retained. Galileo spacing is now presented and saved as tracking.galileo_spacing_slots, one slot equal to half a chip. Legacy chip values remain accepted on import; internal phase and SIMD arithmetic retain chip units. BeiDou uses the same
+spacing as Galileo by default. Set tracking.beidou_spacing_chips to a positive
+value in Tracking to override it. An enabled EGNOS receiver appears as
+auxiliary channel 65 independently of GNSS slot reservations.
 
 The standalone search diagnostics workspace has been removed. Channel detail retains correlator plots with Galileo delay in slots. Selection-dependent search computation and immutable acquisition maps remain pending. Live HackRF evidence reproduces unqualified Galileo PLL states with lost BOC peak consistency; this update does not establish an RF tracking fix. See WORKPLAN_CHANNELS_GALILEO_2026-11-14.md for the continuing work and evidence.
 

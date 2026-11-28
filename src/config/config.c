@@ -64,7 +64,6 @@ void NgConfigDefaults(TNgConfig *config)
     NgAcquisitionDefaults(&config->galileoAcquisition);
     config->galileoAcquisition.enabled = 1;
     NgAcquisitionDefaults(&config->beidouAcquisition);
-    config->beidouAcquisition.enabled = 0;
     config->beidouAcquisition.lastPrn = NG_SATELLITE_MAX_PRN;
     config->rtlAutoGain = 1;
     config->rtlIfGainDb = -1;
@@ -272,6 +271,7 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("receiver.beidou_reserved", tracking.beidouChannels)
     UINT_KEY("receiver.auto_priority", tracking.autoPriority)
     REAL_KEY("tracking.galileo_spacing_chips", tracking.galileoSpacingChips)
+    REAL_KEY("tracking.beidou_spacing_chips", tracking.beidouSpacingChips)
     if (strcmp(key, "tracking.galileo_spacing_slots") == 0) {
         double slots;
         if (ParseReal(value, &slots) != NG_OK)
@@ -304,7 +304,10 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
         c->galileoAcquisition.cpuBudget = c->acquisition.cpuBudget;
         return NG_OK;
     }
-    BOOL_KEY("beidou_acquisition.enabled", beidouAcquisition.enabled)
+    if (strcmp(key, "beidou_acquisition.enabled") == 0) {
+        int legacy;
+        return ParseBool(value, &legacy);
+    }
     UINT_KEY("beidou_acquisition.first_prn", beidouAcquisition.firstPrn)
     UINT_KEY("beidou_acquisition.last_prn", beidouAcquisition.lastPrn)
     REAL_KEY("galileo_acquisition.pfa", galileoAcquisition.falseAlarmProbability)
@@ -849,14 +852,14 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
                    "galileo_spacing_slots=%.17g\ndoppler_smoothing_ms=%u\n",config->tracking.workers,
             config->tracking.tapCount,config->tracking.spacingChips,
             2.0 * config->tracking.galileoSpacingChips,config->tracking.dopplerSmoothingMs);
+    fprintf(output, "beidou_spacing_chips=%.17g\n", config->tracking.beidouSpacingChips);
     fprintf(output, "egnos=%s\n", config->tracking.egnosEnabled ? "true" : "false");
     fprintf(output, "broadcast_ionosphere=%s\n",
             config->tracking.broadcastIonosphere ? "true" : "false");
     fprintf(output,"\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\ncpu_budget=%.17g\n",
             config->acquisition.firstPrn,config->acquisition.lastPrn,config->acquisition.falseAlarmProbability,
             config->acquisition.cpuBudget);
-    fprintf(output, "\n[beidou_acquisition]\nenabled=%s\nfirst_prn=%u\nlast_prn=%u\n",
-            config->beidouAcquisition.enabled ? "true" : "false",
+    fprintf(output, "\n[beidou_acquisition]\nfirst_prn=%u\nlast_prn=%u\n",
             config->beidouAcquisition.firstPrn, config->beidouAcquisition.lastPrn);
     fprintf(output,"\n[galileo_acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\nfft_size=%u\n",
             config->galileoAcquisition.firstPrn,config->galileoAcquisition.lastPrn,

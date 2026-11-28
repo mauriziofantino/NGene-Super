@@ -426,6 +426,7 @@ static void Progress(void *context, const TNgReceiverStats *stats)
         NgAcquisitionReadResults(c->beidouAcquisition, c->status.beidouResults);
         NgTrackingBankReadAll(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               c->status.tracking);
+        NgTrackingBankReadEgnos(c->trackingBanks[0], &c->status.tracking[NG_TRACKING_EGNOS_CHANNEL - 1]);
         NgTrackingBankReadPvt(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               &c->status.pvt);
         {
@@ -458,6 +459,7 @@ static void ReceiverWorker(void *context)
     TNgControl *c = context;
     c->runConfig.acquisition.enabled = 1;
     c->runConfig.galileoAcquisition.enabled = 1;
+    c->runConfig.beidouAcquisition.enabled = 1;
     c->runConfig.tracking.enabled = 1;
     TNgFrontend source;
     TNgChannel acquisitionChannels[NG_CONSTELLATION_COUNT];
@@ -518,8 +520,7 @@ static void ReceiverWorker(void *context)
         if (c->workerResult == NG_OK)
             c->workerResult =
                 NgTrackingBankLink(c->trackingBanks[0], c->trackingBanks[1], &c->workerError);
-        if (c->workerResult == NG_OK && !c->runConfig.recordOnly &&
-            c->runConfig.beidouAcquisition.enabled) {
+        if (c->workerResult == NG_OK && !c->runConfig.recordOnly) {
             c->workerResult = NgAcquisitionCreateBeidou(
                 &c->runConfig.beidouAcquisition, &source.info, &c->beidouAcquisition,
                 &acquisitionChannels[acquisitionCount], &c->workerError);
@@ -543,6 +544,7 @@ static void ReceiverWorker(void *context)
         NgAcquisitionReadResults(c->beidouAcquisition, c->status.beidouResults);
         NgTrackingBankReadAll(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               c->status.tracking);
+        NgTrackingBankReadEgnos(c->trackingBanks[0], &c->status.tracking[NG_TRACKING_EGNOS_CHANNEL - 1]);
         NgTrackingBankReadPvt(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               &c->status.pvt);
         ArchiveSearchSpaces(c);
@@ -965,7 +967,7 @@ void NgControlReadLifecycle(TNgControl *control, TNgControlLifecycle *status)
 void NgControlObserveChannel(TNgControl *control, unsigned channelId)
 {
     NgMutexLock(&control->mutex);
-    control->observedChannel = channelId <= 64 ? channelId : 0;
+    control->observedChannel = channelId <= NG_TRACKING_EGNOS_CHANNEL ? channelId : 0;
     control->observedUntil = NgMonotonicSeconds() + 2;
     NgMutexUnlock(&control->mutex);
 }

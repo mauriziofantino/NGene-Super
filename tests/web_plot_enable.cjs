@@ -36,7 +36,7 @@ async function until(predicate, message, timeout = 5000) {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ngene-plot-enable-')));
   const profile = path.join(root, 'profile');
   const input = path.join(root, 'tone.cs8');
-  const iq = Buffer.alloc(400000);
+  const iq = Buffer.alloc(9600000);
   for (let n = 0; n < iq.length / 2; n++) {
     iq.writeInt8(Math.round(32 * Math.cos(2 * Math.PI * n / 10)), 2 * n);
     iq.writeInt8(Math.round(32 * Math.sin(2 * Math.PI * n / 10)), 2 * n + 1);
@@ -74,7 +74,7 @@ run_seconds=0
 idle_timeout_ms=3000
 [frontend]
 type=file
-sample_rate_hz=100000
+sample_rate_hz=2400000
 center_frequency_hz=1575420000
 signal_frequency_hz=1575420000
 [replay]
@@ -309,9 +309,11 @@ histogram_update_hz=30
     await toggle('showWaterfall', false);
     await page.locator('#showConfiguration').click();
     await page.locator('[data-settings="analysis"]').click();
+    await page.locator('#analysis_fft_mode').selectOption('float');
     await page.locator('#analysis_spectrum_enabled').selectOption('false');
     await page.locator('#applyAnalysis').click();
     await until(() => page.locator('#analysisNotice').textContent().then(text => text.startsWith('Applied')), 'Diagnostics form applied disable');
+    assert.equal((await get('analysis/config')).analysis.fft_mode, 'float');
     await page.locator('#showObservation').click();
     await visibility(false, false);
     await page.locator('#showConfiguration').click();

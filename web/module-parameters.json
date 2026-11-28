@@ -7,18 +7,8 @@
         {
           "title": "Channel allocation",
           "topic": "receiver",
-          "note": "Choose total channels and reservations. Fixed 6 GPS + 4 Galileo: total 10, GPS 6, Galileo 4. Automatic pool: total 12, both reservations 0. Preference applies when confirmed results compete for shared capacity.",
+          "note": "Reserve slots per constellation or leave them shared. Preference resolves competition for shared slots.",
           "fields": [
-            {
-              "key": "beidou_acquisition.enabled",
-              "label": "BeiDou B1C",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {"value": "false", "label": "Disabled"},
-                {"value": "true", "label": "Enabled · B1C"}
-              ]
-            },
             {
               "key": "receiver.channels",
               "label": "Total receiver channels",
@@ -73,7 +63,10 @@
                   "value": "2",
                   "label": "Prefer Galileo"
                 },
-                {"value": "3", "label": "Prefer BeiDou"}
+                {
+                  "value": "3",
+                  "label": "Prefer BeiDou"
+                }
               ]
             }
           ]
@@ -103,7 +96,7 @@
         {
           "title": "Tracking correlators",
           "topic": "tracking",
-          "note": "GPS 1 ms / Galileo E1-B BOC(1,1) 4 ms. Extra taps observe the shape; DLL uses the adjacent E/L pair. Square carrier is approximate and introduces harmonic images.",
+          "note": "GPS and EGNOS integrate over 1 ms, Galileo E1-B over 4 ms and BeiDou B1C over 10 ms. The DLL uses the adjacent early and late taps.",
           "fields": [
             {
               "key": "tracking.workers",
@@ -135,13 +128,103 @@
             },
             {
               "key": "tracking.galileo_spacing_slots",
-              "label": "Galileo adjacent tap spacing (slots, ? chip)",
+              "label": "Galileo adjacent tap spacing (half-chip slots)",
               "type": "number",
               "default": 0.4,
               "min": 0.002,
               "max": 0.666666666,
               "exclusiveMax": true,
               "step": 0.01
+            },
+            {
+              "key": "tracking.beidou_spacing_chips",
+              "label": "BeiDou B1C adjacent tap spacing (chips)",
+              "type": "number",
+              "default": 0,
+              "min": 0,
+              "max": 0.3333333333333333,
+              "exclusiveMax": true,
+              "hint": "Zero uses the Galileo spacing. Enter a positive spacing to configure BeiDou independently."
+            }
+          ]
+        },
+        {
+          "title": "Tracking carrier and correlation",
+          "topic": "tracking",
+          "fields": [
+            {
+              "key": "dsp.tracking_fast_carrier",
+              "label": "Four-lane carrier recurrence (CI8)",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Disabled"
+                },
+                {
+                  "value": "true",
+                  "label": "Enabled (double arithmetic)"
+                }
+              ],
+              "hint": "Only affects CI8 tracking. This is not an integer carrier implementation."
+            },
+            {
+              "key": "dsp.tracking_square_carrier",
+              "label": "Carrier rotation",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Precise sinusoidal"
+                },
+                {
+                  "value": "true",
+                  "label": "Fast square (experimental)"
+                }
+              ]
+            },
+            {
+              "key": "dsp.tracking_xor_correlation",
+              "label": "Correlation product",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Precise SIMD products"
+                },
+                {
+                  "value": "true",
+                  "label": "Fast exact sign XOR"
+                }
+              ]
+            },
+            {
+              "key": "dsp.tracking_mixer_bits",
+              "label": "Tracking mixer result width",
+              "type": "select",
+              "default": "0",
+              "options": [
+                {
+                  "value": "0",
+                  "label": "Precise floating point"
+                },
+                {
+                  "value": "16",
+                  "label": "8-bit ? 8-bit, signed 16-bit products"
+                },
+                {
+                  "value": "8",
+                  "label": "8-bit ? 8-bit, rounded 8-bit output"
+                },
+                {
+                  "value": "4",
+                  "label": "Input shifted to 4-bit, signed 8-bit products"
+                }
+              ],
+              "hint": "Byte modes require a CI8 common stream. Quantized carrier may reduce PVT accuracy."
             }
           ]
         }
@@ -183,8 +266,14 @@
               "type": "select",
               "default": "true",
               "options": [
-                {"value": "true", "label": "Enabled"},
-                {"value": "false", "label": "Disabled"}
+                {
+                  "value": "true",
+                  "label": "Enabled"
+                },
+                {
+                  "value": "false",
+                  "label": "Disabled"
+                }
               ]
             }
           ]
@@ -205,8 +294,14 @@
               "type": "select",
               "default": "false",
               "options": [
-                {"value": "false", "label": "Disabled"},
-                {"value": "true", "label": "Receive from GEO"}
+                {
+                  "value": "false",
+                  "label": "Disabled"
+                },
+                {
+                  "value": "true",
+                  "label": "Receive from GEO"
+                }
               ]
             }
           ]
@@ -259,6 +354,60 @@
               "integer": true,
               "min": 1,
               "max": 32
+            },
+            {
+              "key": "dsp.gps_square_carrier",
+              "label": "Local carrier",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "Sinusoidal"
+                },
+                {
+                  "value": "true",
+                  "label": "Squared sin/cos"
+                }
+              ]
+            },
+            {
+              "key": "dsp.gps_xor_correlation",
+              "label": "Code correlation",
+              "type": "select",
+              "default": "false",
+              "options": [
+                {
+                  "value": "false",
+                  "label": "SIMD products"
+                },
+                {
+                  "value": "true",
+                  "label": "SIMD sign XOR"
+                }
+              ],
+              "hint": "XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."
+            },
+            {
+              "key": "dsp.gps_fft",
+              "label": "GPS coarse FFT arithmetic",
+              "type": "select",
+              "default": "float",
+              "options": [
+                {
+                  "value": "float",
+                  "label": "Float SIMD"
+                },
+                {
+                  "value": "integer_precise",
+                  "label": "Integer precise (unscaled int32)"
+                },
+                {
+                  "value": "integer_scaled",
+                  "label": "Integer Q14 (stage rescaled SIMD)"
+                }
+              ],
+              "hint": "FFT scale is restored before power and threshold calculations."
             }
           ]
         }
@@ -282,7 +431,7 @@
         {
           "title": "Galileo acquisition",
           "topic": "acquisition",
-          "note": "Galileo E1-B: coarse 87 Hz, eight 4-ms periods, Doppler/code refinement, confirmation 3 of 4. BOC(1,1) replica; tracking is not integrated.",
+          "note": "Galileo E1-B uses a BOC(1,1) replica, Doppler and code refinement, and 3-of-4 confirmation.",
           "fields": [
             {
               "key": "galileo_acquisition.first_prn",
@@ -336,112 +485,6 @@
               "integer": true,
               "min": 1,
               "max": 32
-            }
-          ]
-        }
-      ],
-      "rules": [
-        {
-          "kind": "lessEqual",
-          "keys": [
-            "galileo_acquisition.first_prn",
-            "galileo_acquisition.last_prn"
-          ],
-          "left": "galileo_acquisition.first_prn",
-          "right": "galileo_acquisition.last_prn",
-          "message": "First Galileo PRN must not exceed last Galileo PRN."
-        }
-      ]
-    },
-    {
-      "id": "dsp-arithmetic",
-      "groups": [
-        {
-          "title": "DSP Arithmetic",
-          "topic": "dsp",
-          "note": "Arithmetic choices for acquisition and tracking. Integer FFT modes restore float-domain scaling before search decisions.",
-          "fields": [
-            {
-              "key": "dsp.tracking_fast_carrier",
-              "label": "Four-lane carrier recurrence (CI8)",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "Disabled"
-                },
-                {
-                  "value": "true",
-                  "label": "Enabled (double arithmetic)"
-                }
-              ],
-              "hint": "Only affects CI8 tracking. This is not an integer carrier implementation."
-            },
-            {
-              "key": "dsp.tracking_square_carrier",
-              "label": "Carrier rotation",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "Precise sinusoidal"
-                },
-                {
-                  "value": "true",
-                  "label": "Fast square (experimental)"
-                }
-              ]
-            },
-            {
-              "key": "dsp.tracking_xor_correlation",
-              "label": "Correlation product",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "Precise SIMD products"
-                },
-                {
-                  "value": "true",
-                  "label": "Fast exact sign XOR"
-                }
-              ]
-            },
-            {
-              "key": "dsp.gps_square_carrier",
-              "label": "Local carrier",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "Sinusoidal"
-                },
-                {
-                  "value": "true",
-                  "label": "Squared sin/cos"
-                }
-              ]
-            },
-            {
-              "key": "dsp.gps_xor_correlation",
-              "label": "Code correlation",
-              "type": "select",
-              "default": "false",
-              "options": [
-                {
-                  "value": "false",
-                  "label": "SIMD products"
-                },
-                {
-                  "value": "true",
-                  "label": "SIMD sign XOR"
-                }
-              ],
-              "hint": "XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."
             },
             {
               "key": "dsp.galileo_square_carrier",
@@ -477,52 +520,6 @@
               "hint": "XOR reverses the sign for ±1 code chips and preserves ADC amplitudes."
             },
             {
-              "key": "dsp.tracking_mixer_bits",
-              "label": "Tracking mixer result width",
-              "type": "select",
-              "default": "0",
-              "options": [
-                {
-                  "value": "0",
-                  "label": "Precise floating point"
-                },
-                {
-                  "value": "16",
-                  "label": "8-bit ? 8-bit, signed 16-bit products"
-                },
-                {
-                  "value": "8",
-                  "label": "8-bit ? 8-bit, rounded 8-bit output"
-                },
-                {
-                  "value": "4",
-                  "label": "Input shifted to 4-bit, signed 8-bit products"
-                }
-              ],
-              "hint": "Byte modes require a CI8 common stream. Quantized carrier may reduce PVT accuracy."
-            },
-            {
-              "key": "dsp.gps_fft",
-              "label": "GPS coarse FFT arithmetic",
-              "type": "select",
-              "default": "float",
-              "options": [
-                {
-                  "value": "float",
-                  "label": "Float SIMD"
-                },
-                {
-                  "value": "integer_precise",
-                  "label": "Integer precise (unscaled int32)"
-                },
-                {
-                  "value": "integer_scaled",
-                  "label": "Integer Q14 (stage rescaled SIMD)"
-                }
-              ],
-              "hint": "FFT scale is restored before power and threshold calculations."
-            },
-            {
               "key": "dsp.galileo_fft",
               "label": "Galileo coarse FFT arithmetic",
               "type": "select",
@@ -542,32 +539,63 @@
                 }
               ],
               "hint": "FFT scale is restored before power and threshold calculations."
-            },
-            {
-              "key": "dsp.spectrum_fft",
-              "label": "Spectrum FFT arithmetic",
-              "type": "select",
-              "default": "integer_scaled",
-              "options": [
-                {
-                  "value": "float",
-                  "label": "Float SIMD"
-                },
-                {
-                  "value": "integer_precise",
-                  "label": "Integer precise (unscaled int32)"
-                },
-                {
-                  "value": "integer_scaled",
-                  "label": "Integer Q14 (stage rescaled SIMD)"
-                }
-              ],
-              "hint": "Spectrum display only; does not affect acquisition or PVT."
             }
           ]
         }
       ],
-      "rules": []
+      "rules": [
+        {
+          "kind": "lessEqual",
+          "keys": [
+            "galileo_acquisition.first_prn",
+            "galileo_acquisition.last_prn"
+          ],
+          "left": "galileo_acquisition.first_prn",
+          "right": "galileo_acquisition.last_prn",
+          "message": "First Galileo PRN must not exceed last Galileo PRN."
+        }
+      ]
+    },
+    {
+      "id": "beidou-b1c",
+      "groups": [
+        {
+          "title": "BeiDou B1C acquisition",
+          "topic": "acquisition",
+          "fields": [
+            {
+              "key": "beidou_acquisition.first_prn",
+              "label": "First BeiDou PRN",
+              "type": "number",
+              "default": 1,
+              "integer": true,
+              "min": 1,
+              "max": 63
+            },
+            {
+              "key": "beidou_acquisition.last_prn",
+              "label": "Last BeiDou PRN",
+              "type": "number",
+              "default": 63,
+              "integer": true,
+              "min": 1,
+              "max": 63
+            }
+          ]
+        }
+      ],
+      "rules": [
+        {
+          "kind": "lessEqual",
+          "keys": [
+            "beidou_acquisition.first_prn",
+            "beidou_acquisition.last_prn"
+          ],
+          "left": "beidou_acquisition.first_prn",
+          "right": "beidou_acquisition.last_prn",
+          "message": "First BeiDou PRN must not exceed last BeiDou PRN."
+        }
+      ]
     }
   ],
   "references": {

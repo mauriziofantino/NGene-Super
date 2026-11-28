@@ -26,7 +26,8 @@ const UNAVAILABLE = 'Unavailable';
 const CONSTELLATIONS = {
   1: {name: 'GPS', prefix: 'G', colour: '#69c6f4', acquisition: 'acquisition'},
   2: {name: 'Galileo', prefix: 'E', colour: '#f4bc68', acquisition: 'galileo_acquisition'},
-  3: {name: 'BeiDou B1C', prefix: 'C', colour: '#c8a4ff', acquisition: 'beidou_acquisition'}
+  3: {name: 'BeiDou B1C', prefix: 'C', colour: '#c8a4ff', acquisition: 'beidou_acquisition'},
+  4: {name: 'EGNOS L1', prefix: 'S', colour: '#64d9a2'}
 };
 const previewButton = '<button type="button" data-beidou-preview aria-pressed="false">Preview BeiDou B1C</button>';
 const previewNotice = '<p class="workspace-callout" data-beidou-preview-notice role="status" hidden>BeiDou B1C preview · Synthetic telemetry. Receiver controls still apply to the live session.</p>';
@@ -356,6 +357,13 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       const total=Number(profile['receiver.channels']||16),gps=Number(profile['receiver.gps_reserved']||0),gal=Number(profile['receiver.galileo_reserved']||0),bds=Number(profile['receiver.beidou_reserved']||0);
       channelRows=Array.from({length:total},(_,k)=>({channel_id:k+1,reservation:k<gps?1:k<gps+gal?2:k<gps+gal+bds?3:0,state:0,constellation:0,prn:0,active:false,taps:[]}));
     }
+    if (!beidouPreview && connected && display?.state === 'stopped') {
+      if (profile['tracking.egnos'] === 'true' && !channelRows.some(t => t.constellation === 4)) {
+        channelRows = [...channelRows, {channel_id:65,reservation:0,constellation:4,state:0,prn:0,active:false,taps:[]}];
+      } else if (profile['tracking.egnos'] !== 'true') {
+        channelRows = channelRows.filter(t => t.constellation !== 4);
+      }
+    }
     updateTracking(channelRows, display?.run_id, display);
     const navigationTable=document.querySelector('[data-navigation-status]');navigationTable.replaceChildren();
     const nt=document.createElement('table'),nh=nt.createTHead().insertRow(),nb=nt.createTBody();
@@ -368,7 +376,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
         : t.valid_subframes || '0';
       for (const value of [t.channel_id, `${system} ${t.prn}`, channelStages(t, display).decoding, parts,
         t.tow_valid ? `${t.tow_seconds}${t.constellation===3 ? ' BDT' : ''}` : 'Unavailable',
-        t.ephemeris_valid ? 'Consistent issue received' : 'Incomplete'])
+        t.constellation === 4 ? '?' : t.ephemeris_valid ? 'Consistent issue received' : 'Incomplete'])
         row.insertCell().textContent=String(value);
     }
     if(!nb.rows.length){const cell=nb.insertRow().insertCell();cell.colSpan=nh.cells.length;cell.textContent='No navigation data available';}
@@ -491,7 +499,7 @@ function channelStages(channel, status) {
     tracking: integrated ? 'Tracking' : channel.active ? 'Starting' : '—',
     decoding: channel.active && (channel.tow_valid || Number(channel.valid_subframes) > 0) ? 'Decoded' :
       channel.bit_synchronized ? 'Demodulating' : '—',
-    pvt: used ? 'Used in PVT' : '—'
+    pvt: channel.constellation===4 ? 'SBAS corrections' : used ? 'Used in PVT' : '—'
   };
 }
 
@@ -537,7 +545,7 @@ function updateTracking(channels, run, status) {
     const row=body.insertRow();
     row.dataset.channelId=String(t.channel_id);
     const system=CONSTELLATIONS[t.constellation]?.name || 'Unassigned';
-    const reserved=CONSTELLATIONS[t.reservation] ? `${CONSTELLATIONS[t.reservation].name} reserved` : 'Automatic';
+    const reserved=t.constellation===4 ? 'Auxiliary' : CONSTELLATIONS[t.reservation] ? `${CONSTELLATIONS[t.reservation].name} reserved` : 'Automatic';
     const first=row.insertCell(),link=document.createElement('a');
     link.href=`#tracking/${t.channel_id}`;link.textContent=`CH ${t.channel_id}`;first.append(link);
     const stages=channelStages(t,status);
@@ -605,14 +613,14 @@ function renderTracking(t,history,status) {
   note.textContent=found?`Acquisition: ${found.confirmed?'confirmed':'not confirmed'} | Doppler ${found.doppler_hz.toFixed(2)} Hz | code ${found.code_phase_chips.toFixed(4)} chips | ${found.successes}/4 confirmations`:
     t?.state===1?'Acquisition search/refinement/confirmation in progress.':
       t?.active?'Acquisition confirmed for this assignment.':'No completed acquisition for this assignment.';
-  const showMap=!!t?.prn && system!=='beidou' && !status?.preview;
+  const showMap=!!t?.prn && t.constellation!==4 && system!=='beidou' && !status?.preview;
   document.querySelector('[data-channel-search-space]').closest('section').hidden=!showMap;
   satelliteSearchSpace?.update(showMap&&status?{...status,signal:system,acquisition:{...acq,results:found?[found]:[]}}:null);
   satelliteSearchSpace?.setVisible(showMap);
   if(!t || !t.active || !Number(t.integrations)) {
     detail.textContent=t?`${t.active?'Waiting for first coherent integration':stages.acquisition==='Confirmed'?'Waiting for tracking assignment':t.state===1?'Acquisition in progress':'Waiting for an eligible search'} | C/N0 unavailable`:'No configured channels.';return;
   }
-  detail.textContent=`${status?.state!=='running'?'Receiver stopped; last observation | ':''}${t.pll?'PLL':'FLL pull-in'} / DLL | Doppler ${t.doppler_hz.toFixed(2)} Hz | code ${t.code_rate_hz.toFixed(3)} chip/s | C/N0 ${t.cn0_valid?`${t.cn0_db_hz.toFixed(1)} dB-Hz`:'unavailable'} | ${t.constellation!==1?(t.main_peak_verified?'BOC main peak verified':'BOC peak not yet consistent with the acquisition handoff'):'GPS C/A'} | epoch ${t.epoch}, samples ${t.first_sample}-${t.end_sample}`;
+  detail.textContent=`${status?.state!=='running'?'Receiver stopped; last observation | ':''}${t.pll?'PLL':'FLL pull-in'} / DLL | Doppler ${t.doppler_hz.toFixed(2)} Hz | code ${t.code_rate_hz.toFixed(3)} chip/s | C/N0 ${t.cn0_valid?`${t.cn0_db_hz.toFixed(1)} dB-Hz`:'unavailable'} | ${(t.constellation===2||t.constellation===3)?(t.main_peak_verified?'BOC main peak verified':'BOC peak not yet consistent with the acquisition handoff'):t.constellation===4?`EGNOS L1 C/A ? ${t.valid_subframes} valid frames`:'GPS C/A'} | epoch ${t.epoch}, samples ${t.first_sample}-${t.end_sample}`;
   const component='magnitude';
   const key=`${trackingRun}:${t.channel_id}`;
   const manual=trackingRanges.get(key);

@@ -14,7 +14,7 @@ const counter = (status, key) => BigInt(status.analysis[key]);
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ngene-interest-')));
   const profile = path.join(root, 'profile');
   const input = path.join(root, 'tone.cs8');
-  const iq = Buffer.alloc(400000);
+  const iq = Buffer.alloc(9600000);
   for (let n = 0; n < iq.length / 2; n++) {
     iq.writeInt8(Math.round(32 * Math.cos(2 * Math.PI * n / 10)), 2 * n);
     iq.writeInt8(Math.round(32 * Math.sin(2 * Math.PI * n / 10)), 2 * n + 1);
@@ -54,7 +54,7 @@ run_seconds=0
 idle_timeout_ms=3000
 [frontend]
 type=file
-sample_rate_hz=100000
+sample_rate_hz=2400000
 center_frequency_hz=1575420000
 signal_frequency_hz=1575420000
 [replay]

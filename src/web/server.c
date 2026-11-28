@@ -651,7 +651,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     {
         unsigned channelIndex;
         cJSON *channels = cJSON_AddArrayToObject(object, "tracking");
-        for (channelIndex = 0; channelIndex < 64; ++channelIndex) {
+        for (channelIndex = 0; channelIndex < NG_TRACKING_EGNOS_CHANNEL; ++channelIndex) {
             unsigned tap;
             const TNgTrackingSnapshot *t = &status->tracking[channelIndex];
             cJSON *row, *taps;
@@ -1684,7 +1684,7 @@ static int Handle(struct mg_connection *connection, void *context)
     }
     if (strcmp(path, "/api/v1/channels/observe") == 0) {
         cJSON *id = cJSON_GetObjectItemCaseSensitive(body, "channel_id");
-        if (!cJSON_IsNumber(id) || id->valuedouble < 0 || id->valuedouble > 64 ||
+        if (!cJSON_IsNumber(id) || id->valuedouble < 0 || id->valuedouble > NG_TRACKING_EGNOS_CHANNEL ||
             id->valuedouble != (double)id->valueint) {
             code = Failure(connection, 400, "Expected channel_id 0..64");
         } else {

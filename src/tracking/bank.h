@@ -17,6 +17,7 @@ void NgTrackingBankReadAll(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[
 void NgTrackingBankReadPvt(TNgTrackingBank *bank, TNgPvtSnapshot *snapshot);
 /** Set common-epoch PVT smoothing before receiver processing starts. */
 /** Receiver owner publishes optional correlator interest between window dispatches. */
+void NgTrackingBankReadEgnos(TNgTrackingBank *bank, TNgTrackingSnapshot *snapshot);
 void NgTrackingBankObserve(TNgTrackingBank *bank, unsigned channelId);
 /** Receiver-thread headroom for optional diagnostics; no extra clock reads or DSP. */
 int NgTrackingBankBackgroundAllowed(TNgTrackingBank *bank);

@@ -155,3 +155,19 @@ unsigned NgEgnosPrn(const TNgEgnos *egnos)
 {
     return !egnos || !egnos->active ? 0 : egnos->active == 1 ? 121u : 136u;
 }
+
+/** Snapshot the auxiliary slot, including search state before a PRN is assigned. */
+void NgEgnosRead(const TNgEgnos *egnos, TNgTrackingSnapshot *snapshot)
+{
+    memset(snapshot, 0, sizeof(*snapshot));
+    if (!egnos)
+        return;
+    if (egnos->active) {
+        NgTrackingRead(egnos->tracker, snapshot);
+        snapshot->navigation.validSubframes = egnos->bank.frameCount;
+    }
+    snapshot->channelId = NG_TRACKING_EGNOS_CHANNEL;
+    snapshot->constellation = NG_TRACKING_EGNOS_SIGNAL;
+    snapshot->prn = NgEgnosPrn(egnos);
+    snapshot->state = egnos->active ? NG_CHANNEL_TRACKING : NG_CHANNEL_ACQUISITION;
+}

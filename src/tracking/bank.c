@@ -462,7 +462,11 @@ void NgTrackingBankReadAll(TNgTrackingBank *bank, TNgTrackingSnapshot snapshots[
         memcpy(snapshots, bank->pool->slots, sizeof(*snapshots) * 64);
 }
 
-/** PVT snapshots contain values only and share the receiver-thread publication barrier. */
+void NgTrackingBankReadEgnos(TNgTrackingBank *bank, TNgTrackingSnapshot *snapshot)
+{
+    NgEgnosRead(bank ? bank->pool->egnos : NULL, snapshot);
+}
+
 void NgTrackingBankObserve(TNgTrackingBank *bank, unsigned channelId)
 {
     if (bank)

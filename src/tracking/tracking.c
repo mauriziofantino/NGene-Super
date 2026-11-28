@@ -89,6 +89,8 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
         config->gpsChannels + config->galileoChannels + config->beidouChannels > config->channelCount ||
         !isfinite(config->galileoSpacingChips) || config->galileoSpacingChips <= 0 ||
         config->galileoSpacingChips >= 1.0 / 3.0 || config->gpsChannels > 32 ||
+        !isfinite(config->beidouSpacingChips) || config->beidouSpacingChips < 0 ||
+        config->beidouSpacingChips >= 1.0 / 3.0 ||
         config->galileoChannels > 32 || config->beidouChannels > NG_SATELLITE_MAX_PRN ||
         config->autoPriority > NG_CONSTELLATION_COUNT ||
         !config->workers || config->workers > 16 ||
@@ -186,10 +188,13 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     tracking->snapshot.constellation = tracking->system;
     tracking->snapshot.epoch = result->epoch;
     tracking->snapshot.tapCount = tracking->config.tapCount;
+    double spacing = tracking->system == NG_CONSTELLATION_GPS ? tracking->config.spacingChips :
+                     tracking->config.galileoSpacingChips;
+    if (tracking->system == NG_CONSTELLATION_BEIDOU && tracking->config.beidouSpacingChips > 0)
+        spacing = tracking->config.beidouSpacingChips;
     for (k = 0; k < tracking->config.tapCount; ++k)
-        tracking->snapshot.offset[k] = tracking->offsets[k] = ((double)k - tracking->config.tapCount / 2u) *
-                                       (tracking->system != 1 ? tracking->config.galileoSpacingChips
-                                                              : tracking->config.spacingChips);
+        tracking->snapshot.offset[k] = tracking->offsets[k] =
+            ((double)k - tracking->config.tapCount / 2u) * spacing;
     memset(tracking->sumI, 0, sizeof(tracking->sumI));
     memset(tracking->sumQ, 0, sizeof(tracking->sumQ));
     if (tracking->system == 1)

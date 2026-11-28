@@ -183,6 +183,7 @@ function parseIni(text) {
       delete parsed[oldKey];
     }
   }
+  delete parsed['beidou_acquisition.enabled'];
   return parsed;
 }
 function toIni(object) {
@@ -205,10 +206,9 @@ function dirtyState(changed) {
 }
 const settingsTopics = {
   source: ['Front end', 'Choose the live SDR or recorded input, sample format, tuning and gains.', 'Before start'],
-  receiver: ['Receiver & signals', 'Configure execution and common stream buffers. GNSS processing modules are unavailable.', 'Before start'],
-  acquisition: ['Acquisition', 'GPS L1 C/A search, refinement and independent 3-of-4 confirmation.', 'Before start'],
+  receiver: ['Receiver & signals', 'Configure shared channels and reservations for GPS, Galileo and BeiDou.', 'Before start'],
+  acquisition: ['Acquisition', 'Configure the GPS, Galileo and BeiDou searches.', 'Before start'],
   tracking: ['Tracking', 'Configure worker allocation and multi-correlator geometry.', 'Before start'],
-  dsp: ['DSP Arithmetic', 'Choose the arithmetic used by acquisition and tracking.', 'Before start'],
   navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
   recording: ['Capture to disk', 'Choose a name, receiver-side folder and pre/post capture point.', 'Before start'],
   analysis: ['Diagnostic processing', 'NGene computes PSD and histograms. Apply these settings during reception.', 'Runtime'],
@@ -282,7 +282,10 @@ function buildForm() {
       if (input.max !== '') input.max = String(Number(input.max) / scaledFrequency.scale);
     }
     input.id = `config_${key.replaceAll('.', '_')}`;
-    input.value = frequencyFromHz(key, values[key]); input.addEventListener('input', () => {
+    const displayed = frequencyFromHz(key, values[key]);
+    input.value = input.type === 'number' && input.step === 'any' && /^(?:[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)$/i.test(displayed) &&
+      Number.isFinite(Number(displayed)) ? String(Number(displayed)) : displayed;
+    input.addEventListener('input', () => {
       values[key] = frequencyToHz(key, input.value) ?? input.value.trim();
       if (key === 'rtlsdr.auto_gain' && input.value === 'false' && deviceCaps?.source === 'rtlsdr') {
         const gains = deviceCaps.tuner_gains_tenths_db || [];
@@ -533,6 +536,7 @@ async function connect() {
 const analysisFields = [
   ['spectrum_enabled','Spectrum enabled',['true','false']],
   ['histogram_enabled','Histogram enabled',['true','false']],
+  ['fft_mode','Spectrum FFT arithmetic',['float','integer_precise','integer_scaled']],
   ['fft_size','FFT size',[256,512,1024,2048,4096,8192,16384]],
   ['window','Window',['rectangular','hann','hamming','blackman','blackman_harris']],
   ['overlap_percent','FFT overlap (%)',null,0,99,1],
@@ -561,7 +565,7 @@ let previousPlotSelection=plotSelection();
 const plotWork={spectrum:0,waterfall:0,waterfall3D:0};
 let waterfall3DRender={mode:'3d',style:'mesh',rows:0,columns:0};
 function diagnosticVisibility(){return document.hidden||activeWorkspaceView!=='rf'?0:(anyPlotEnabled()?1:0)|($('showHistogram').checked?2:0);}
-function diagnosticEnabled(name){const value=analysisConfig?.[name]??savedValues[`analysis.${name}`];return value!==false&&value!=='false';}
+function diagnosticEnabled(name){const value=analysisConfig?.[name]??savedValues[analysisProfileKey(name)];return value!==false&&value!=='false';}
 function plotEnabled(id){return diagnosticEnabled('spectrum_enabled')&&plotToggle(id).checked;}
 function syncPlotVisibility(){
   const computation=diagnosticEnabled('spectrum_enabled');
@@ -588,16 +592,17 @@ function diagnosticMask(){
 }
 function diagnosticInterest(){return paused?0:diagnosticMask();}
 /** Apply current server settings without replacing unrelated profile or diagnostic drafts. */
+function analysisProfileKey(name){return name==='fft_mode'?'dsp.spectrum_fft':`analysis.${name}`;}
 function acceptAnalysisConfig(result){
   const iniDraft=$('iniEditor').value,customIni=iniDraft!==toIni(values);
   revision=result.revision;analysisConfigRevision=revision;
   for(const [name,value] of Object.entries(result.analysis)){
-    const key=`analysis.${name}`,previous=savedValues[key],next=String(value),input=$(`analysis_${name}`);
+    const key=analysisProfileKey(name),previous=savedValues[key],next=String(value),input=$(`analysis_${name}`);
     if(name==='spectrum_enabled'||values[key]===previous)values[key]=next;
     if(input&&(name==='spectrum_enabled'||input.value===previous))input.value=next;
     savedValues[key]=next;
   }
-  analysisDirty=analysisFields.some(([name])=>$(`analysis_${name}`)?.value!==savedValues[`analysis.${name}`]);
+  analysisDirty=analysisFields.some(([name])=>$(`analysis_${name}`)?.value!==savedValues[analysisProfileKey(name)]);
   analysisErrors.delete('spectrum_enabled');fieldFeedback($('analysis_spectrum_enabled'),'');
   dirtyState(true);if(customIni)$('iniEditor').value=iniDraft;resetAnalysis(result.analysis);
 }
@@ -634,7 +639,7 @@ function buildAnalysisForm() {
     const input=document.createElement(options?'select':'input');input.id=`analysis_${name}`;input.name=name;
     if(options)for(const value of options){const option=document.createElement('option');option.value=String(value);option.textContent=String(value);input.append(option);}
     else {input.type='number';input.min=min;input.max=max;input.step=step;}
-    input.value=savedValues[`analysis.${name}`] ?? '';input.addEventListener('input',()=>{analysisDirty=true;setAnalysisNotice(analysisHelp);refreshAnalysisErrors();});
+    input.value=savedValues[analysisProfileKey(name)] ?? '';input.addEventListener('input',()=>{analysisDirty=true;setAnalysisNotice(analysisHelp);refreshAnalysisErrors();});
     input.addEventListener('blur',()=>{analysisTouched.add(name);refreshAnalysisErrors();});label.append(input);attachFieldFeedback(input,label);$('analysisFields').append(label);
   }
   syncPlotVisibility();controls();
@@ -665,11 +670,14 @@ $('analysisForm').addEventListener('submit',async event=>{
   event.preventDefault();
   if(!refreshAnalysisErrors(true)){ $(`analysis_${analysisErrors.keys().next().value}`).focus();return; }
   const body={revision};
-  for(const [name] of analysisFields){const value=$(`analysis_${name}`).value;body[name]=name.endsWith('_enabled')?value==='true':['window','temporal','units','spectrum_source','histogram_source'].includes(name)?value:Number(value);}
+  for (const name of ['spectrum_source','histogram_source']) {
+    if (savedValues[analysisProfileKey(name)]) body[name]=savedValues[analysisProfileKey(name)];
+  }
+  for(const [name] of analysisFields){const value=$(`analysis_${name}`).value;body[name]=name.endsWith('_enabled')?value==='true':['fft_mode','window','temporal','units','spectrum_source','histogram_source'].includes(name)?value:Number(value);}
   httpBusy=true;controls();
   try {
     const result=await api('analysis/config',body);revision=result.revision;analysisConfigRevision=revision;
-    for(const [name,value] of Object.entries(result.analysis)){savedValues[`analysis.${name}`]=String(value);values[`analysis.${name}`]=String(value);}
+    for(const [name,value] of Object.entries(result.analysis)){savedValues[analysisProfileKey(name)]=String(value);values[analysisProfileKey(name)]=String(value);}
     analysisDirty=false;dirtyState(true);resetAnalysis(result.analysis);
     setAnalysisNotice('Applied to this session. Use Apply & save in Receiver configuration while stopped to persist the full profile.');
     log('Analysis parameters applied without restarting the receiver.');requestStatus();

@@ -4,10 +4,13 @@
 #include "ngene/acquisition.h"
 #include "ngene/navigation.h"
 #define NG_TRACKING_MAX_TAPS 33u
+#define NG_TRACKING_EGNOS_CHANNEL 65u
+#define NG_TRACKING_EGNOS_SIGNAL 4u /**< Presentation identifier, outside the PVT constellation enum. */
 
 /** Frozen per-run numerical and correlator configuration; no automatic precision changes. */
 typedef struct {
     unsigned channelCount;      /**< Total shared receiver slots, 1..64. */
+    double beidouSpacingChips;  /**< BeiDou adjacent tap delay, zero inherits Galileo spacing. */
     double galileoSpacingChips; /**< Galileo adjacent tap delay, central BOC lobe. */
     unsigned gpsChannels;       /**< Slots reserved for GPS; remaining slots are shared. */
     unsigned galileoChannels;   /**< Slots reserved for Galileo; remaining slots are shared. */

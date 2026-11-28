@@ -46,7 +46,7 @@ typedef struct {
     TNgAcquisitionSnapshot galileoAcquisition;
     TNgAcquisitionSnapshot beidouAcquisition;
     TNgAcquisitionResult beidouResults[NG_SATELLITE_MAX_PRN];
-    TNgTrackingSnapshot tracking[64]; /**< Copied completed integrations. */
+    TNgTrackingSnapshot tracking[NG_TRACKING_EGNOS_CHANNEL]; /**< Copied completed integrations. */
     TNgPvtSnapshot pvt; /**< Copied common-epoch broadcast solution. */
     /** Cumulative written pairs including completed capture sessions. */
     uint64_t totalWrittenSamples;

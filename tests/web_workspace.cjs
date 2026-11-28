@@ -86,6 +86,8 @@ format=CI8
 path=${input}
 realtime=true
 loop=true
+[beidou_acquisition]
+enabled=false
 [conditioning]
 module=bypass
 [buffer]
@@ -163,7 +165,7 @@ histogram_update_hz=20
       fs.mkdirSync(process.env.NGENE_WORKSPACE_SCREENSHOTS, {recursive:true});
       await page.screenshot({path:path.join(process.env.NGENE_WORKSPACE_SCREENSHOTS, name), fullPage:true});
     };
-    const configurationTopics = ['source', 'receiver', 'acquisition', 'tracking', 'dsp', 'navigation', 'recording', 'analysis', 'display', 'profile'];
+    const configurationTopics = ['source', 'receiver', 'acquisition', 'tracking', 'navigation', 'recording', 'analysis', 'display', 'profile'];
     const referenceTopics = ['receiver', 'acquisition', 'tracking', 'navigation'];
     const referenceOnlyTopics = ['navigation'];
     const referencesDisabled = async () => {
@@ -180,7 +182,7 @@ histogram_update_hz=20
         assert.equal(await page.locator(`[data-receiver-settings="${reference}"]`).isVisible(), reference === topic,
           `Only the selected GNSS configuration section is displayed (${topic}/${reference})`);
       }
-      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'tracking', 'dsp', 'recording'].includes(topic),
+      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'tracking', 'recording'].includes(topic),
         'Only topics with real receiver parameters expose the operational form');
       await referencesDisabled();
     };
@@ -277,15 +279,19 @@ histogram_update_hz=20
     // The original configuration validation remains usable in its new workspace.
     await select('setup');
     await page.locator('[data-settings="receiver"]').click();
-    const beidou = page.locator('[name="beidou_acquisition.enabled"]');
-    assert(await beidou.isEnabled(), 'BeiDou B1C data can be selected in the receiver profile');
-    assert.equal(await beidou.inputValue(), 'false');
-    await beidou.selectOption('true');
-    assert.equal(await beidou.inputValue(), 'true');
+    assert.equal(await page.locator('[name="beidou_acquisition.enabled"], [data-settings="dsp"]').count(), 0);
+    await page.locator('[data-settings="acquisition"]').click();
+    const pfa = page.locator('[name="acquisition.pfa"]');
+    await pfa.fill('1.0e-09');
+    assert(await page.locator('[name="beidou_acquisition.first_prn"]').isVisible());
+    assert(await page.locator('[name="dsp.gps_fft"]').isVisible());
+    await page.locator('[data-settings="receiver"]').click();
     const ring = page.locator('[name="buffer.ring_blocks"]');
     assert(await ring.isEnabled(), 'Implemented receiver buffers remain editable alongside unavailable GNSS controls');
     await ring.fill('32'); await ring.blur();
     await page.locator('[data-settings="tracking"]').click();
+    assert(await page.locator('[name="dsp.tracking_mixer_bits"]').isVisible());
+    await page.locator('[name="tracking.beidou_spacing_chips"]').fill('0.21');
     const ionosphere = page.locator('[name="tracking.broadcast_ionosphere"]');
     assert.equal(await ionosphere.inputValue(), 'true');
     await ionosphere.selectOption('false');
@@ -313,8 +319,11 @@ histogram_update_hz=20
     await page.locator('#apply').click();
     await until(() => page.locator('#configBadge').textContent().then(value => /^r\d+$/.test(value)), 'valid profile saved');
     const applied = await get('config');
-    assert.match(applied.ini, /^\[beidou_acquisition\]\r?\nenabled=true(?:\r?\n|$)/m,
-      'The BeiDou choice is saved in the operational profile');
+    assert.doesNotMatch(applied.ini, /^\[beidou_acquisition\]\r?\nenabled=/m);
+    await page.locator('[data-settings="acquisition"]').click();
+    assert.equal(await pfa.inputValue(), '1e-9');
+    await page.locator('[data-settings="analysis"]').click();
+    assert(await page.locator('#analysis_fft_mode').isVisible());
     assert.match(applied.ini, /egnos=true(?:\r?\n|$)/);
     assert.match(applied.ini, /broadcast_ionosphere=false(?:\r?\n|$)/);
     assert.match(applied.ini, /ring_blocks=32(?:\r?\n|$)/, 'Implemented receiver buffer change reaches the service');
@@ -332,6 +341,11 @@ histogram_update_hz=20
     await until(async () => (await snapshot()).history.length >= 3, 'real waterfall history');
     const first = await get('status');
     assert.equal(first.beidou_acquisition.enabled, true, 'The receiver enables B1C on start');
+    assert.equal(first.tracking.find(t => t.channel_id === 65)?.constellation, 4);
+    await select('tracking');
+    await page.locator('[data-channel-id="65"]').getByText('CH 65').click();
+    await until(async () => (await page.locator('[data-satellite-title]').textContent()).includes('EGNOS L1'), 'auxiliary EGNOS detail');
+    await select('rf');
     assert(sequence(first) > 0n && histogramSequence(first) > 0n, 'Both real diagnostic producers must advance');
     assert(Math.abs(first.analysis.peak_hz - 240000) <= first.analysis.bin_hz / 2 + 1, 'RF spectrum must reflect the deterministic CI8 input');
     await screenshot('workspace-rf-real-replay.png');
