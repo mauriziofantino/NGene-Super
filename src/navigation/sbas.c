@@ -233,8 +233,9 @@ static int GridCell(const TNgSbasCorrections *bank, double now, double x, double
     }
     const unsigned w = (unsigned)(west + 72) % 72;
     const unsigned e = (unsigned)(west + width + 72) % 72;
-    const unsigned corners[4] = {1 + 31 * w + south, 1 + 31 * w + south + height,
-                                 1 + 31 * e + south, 1 + 31 * e + south + height};
+    const unsigned lower = (unsigned)south, upper = (unsigned)(south + height);
+    const unsigned corners[4] = {1 + 31 * w + lower, 1 + 31 * w + upper,
+                                 1 + 31 * e + lower, 1 + 31 * e + upper};
     unsigned found = 0, issue = 0;
     double values[4] = {0};
     for (unsigned b = 0; b < 9 && found != 15; ++b) {

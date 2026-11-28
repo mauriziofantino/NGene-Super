@@ -21,8 +21,8 @@ static double NeqCalcModip(double dLat, double dLng, const TModip *pstModip);
 static double NeqInterpolate(const double pdZ[NUM_INTER_PTS_SI], const double dDeltaX);
 static double NeqModipToAz(double dModip, int siNumCoeff, double *pdCoeff);
 static void NeqCalcSphLegCoeffs(double dUT, TCurrentCcir *pstCurrCCIR);
-static double NeqGetF2FreqFromCCIR(double dCosLat, double dLng, double pdLegCoeffs[MAX_CCIRROWS_SI],
-                                   double pdSinModipToN[MAX_SINMODIP_TERM_SI], int siMode);
+static double NeqGetF2FreqFromCCIR(double dCosLat, double dLng, const double *pdLegCoeffs,
+                                   const double pdSinModipToN[MAX_SINMODIP_TERM_SI], int siMode);
 static double NeqCriticalFreqToNe(double dF0);
 static double NeqCalcF2PeakHeight(double dM3000, double dF0E, double dF0F2);
 static double NeqEpstein(double dNmax, double dHmax, double dB, double dH);
@@ -480,8 +480,8 @@ static void NeqCalcSphLegCoeffs(double dUT, TCurrentCcir *pstCurrCCIR)
  *
  * @return The calculated foF2 or M(3000)F2 value
  */
-static double NeqGetF2FreqFromCCIR(double dCosLat, double dLng, double pdLegCoeffs[MAX_CCIRROWS_SI],
-                                   double pdSinModipToN[MAX_SINMODIP_TERM_SI], int siMode)
+static double NeqGetF2FreqFromCCIR(double dCosLat, double dLng, const double *pdLegCoeffs,
+                                   const double pdSinModipToN[MAX_SINMODIP_TERM_SI], int siMode)
 {
     int psiQFo[NUM_QF0_SI] = {/* Coeffs for spherical Legendre on F0F2 */
                               QF0_1_SI, QF0_2_SI, QF0_3_SI, QF0_4_SI, QF0_5_SI,
