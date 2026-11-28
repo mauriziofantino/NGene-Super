@@ -7,6 +7,7 @@
 #define LAB_STRATEGY ngGpsAcquisitionStrategy
 #define LAB_TABLE labGps
 #define LAB_ROWS 16
+
 static int Create(const TNgStreamInfo *stream, unsigned n, TNgSearchFftMode mode, void **out,
                   TNgError *error)
 {
@@ -18,4 +19,5 @@ static int Create(const TNgStreamInfo *stream, unsigned n, TNgSearchFftMode mode
     return NgAcquisitionGpsWorkspace(stream, out, error);
 #endif
 }
+
 #include "strategy_probe.inc"

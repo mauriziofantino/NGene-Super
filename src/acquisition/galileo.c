@@ -53,14 +53,14 @@ static void GalileoCodeMode(float *out, size_t count, const int8_t *chips, doubl
     for (k = 0; k < count; ++k) {
         double chip = phase + (double)k * codeRate / rate;
         double wrapped = fmod(fmod(chip, period) + period, period);
-        out[k] = (float)(chips[(size_t)wrapped] *
-                         (!boc || (wrapped - floor(wrapped)) < 0.5 ? 1 : -1));
+        out[k] =
+            (float)(chips[(size_t)wrapped] * (!boc || (wrapped - floor(wrapped)) < 0.5 ? 1 : -1));
     }
 }
 
 /** Native-rate replica: always BOC(1,1). */
-static void GalileoCode(float *out, size_t count, const int8_t *chips, double rate,
-                        double codeRate, double phase, unsigned period)
+static void GalileoCode(float *out, size_t count, const int8_t *chips, double rate, double codeRate,
+                        double phase, unsigned period)
 {
     GalileoCodeMode(out, count, chips, rate, codeRate, phase, 1, period);
 }
@@ -100,7 +100,7 @@ void NgAcquisitionGalileoFree(void *context)
 
 /** Allocate all replica/FFT/correlation buffers before reception. */
 static int BocWorkspace(const TNgStreamInfo *stream, unsigned fftSize, int beidou,
-                                  TNgSearchFftMode mode, void **out, TNgError *error)
+                        TNgSearchFftMode mode, void **out, TNgError *error)
 {
     TNgGalileoSearch *search;
     unsigned prn;
@@ -109,7 +109,8 @@ static int BocWorkspace(const TNgStreamInfo *stream, unsigned fftSize, int beido
     if (stream == NULL || stream->sampleRateHz < 2048000 || stream->sampleRateHz > 20000000)
         return NgFail(error, "Galileo E1-B acquisition rate must be 2.048..20 Msps");
     size_t size = fftSize != 0 ? fftSize : (stream->sampleRateHz >= 4096000 ? 16384 : 8192);
-    if (NgAcquisitionValidateGrid("Galileo E1-B", stream->sampleRateHz, beidou ? 10u : 4u, size, error) != NG_OK)
+    if (NgAcquisitionValidateGrid("Galileo E1-B", stream->sampleRateHz, beidou ? 10u : 4u, size,
+                                  error) != NG_OK)
         return NG_ERROR;
     search = calloc(1, sizeof(*search));
     if (search == NULL)
@@ -121,7 +122,8 @@ static int BocWorkspace(const TNgStreamInfo *stream, unsigned fftSize, int beido
     unsigned lastPrn = beidou ? NG_SATELLITE_MAX_PRN : NG_LEGACY_MAX_PRN;
     search->fftMode = mode;
     search->wipe = search->size == 4096;
-    search->nativeCapacity = (stream->sampleRateHz + search->periodsPerSecond - 1u) / search->periodsPerSecond;
+    search->nativeCapacity =
+        (stream->sampleRateHz + search->periodsPerSecond - 1u) / search->periodsPerSecond;
     capacity = search->nativeCapacity > search->size ? search->nativeCapacity : search->size;
     search->baseband = calloc(search->size * NG_GAL_SEARCH_PERIODS, sizeof(TNgComplex));
     if (mode != NG_SEARCH_FFT_FLOAT)
@@ -146,7 +148,8 @@ static int BocWorkspace(const TNgStreamInfo *stream, unsigned fftSize, int beido
     for (prn = 1; prn <= lastPrn; ++prn) {
         size_t k;
         if (beidou) {
-            if (NgBeidouB1cGenerate(prn, NG_BEIDOU_B1C_DATA, search->chips[prn - 1], error) != NG_OK) {
+            if (NgBeidouB1cGenerate(prn, NG_BEIDOU_B1C_DATA, search->chips[prn - 1], error) !=
+                NG_OK) {
                 NgAcquisitionGalileoFree(search);
                 return NgFail(error, "Cannot generate BeiDou B1C acquisition replica");
             }
@@ -159,7 +162,8 @@ static int BocWorkspace(const TNgStreamInfo *stream, unsigned fftSize, int beido
             continue;
         TNgComplex *spectrum = search->codeFft + (prn - 1) * search->size;
         GalileoCodeMode(search->code, search->size, search->chips[prn - 1],
-                        (double)search->size * search->periodsPerSecond, 1023000.0, 0, !search->wipe && !search->dataSideband, search->periodChips);
+                        (double)search->size * search->periodsPerSecond, 1023000.0, 0,
+                        !search->wipe && !search->dataSideband, search->periodChips);
         for (k = 0; k < search->size; ++k)
             spectrum[k].i = search->code[k];
         NgSearchFftExecute(search->fft, spectrum, 0);
@@ -186,12 +190,12 @@ static int Prepare(TNgGalileoSearch *search, const TNgAcquisitionCapture *captur
     }
     search->meanI /= (double)capture->count;
     search->meanQ /= (double)capture->count;
-    double coarseIf = (double)capture->stream.digitalIfHz +
-                      (search->dataSideband ? NG_BEIDOU_B1C_RATE_HZ : 0);
+    double coarseIf =
+        (double)capture->stream.digitalIfHz + (search->dataSideband ? NG_BEIDOU_B1C_RATE_HZ : 0);
     if (coarseIf == 0) {
         for (k = 0; k < outputCount; ++k) {
-            size_t begin =
-                (size_t)((uint64_t)k * capture->stream.sampleRateHz / ((uint64_t)search->size * search->periodsPerSecond));
+            size_t begin = (size_t)((uint64_t)k * capture->stream.sampleRateHz /
+                                    ((uint64_t)search->size * search->periodsPerSecond));
             size_t end = (size_t)((uint64_t)(k + 1) * capture->stream.sampleRateHz /
                                   ((uint64_t)search->size * search->periodsPerSecond));
             size_t j;
@@ -213,12 +217,14 @@ static int Prepare(TNgGalileoSearch *search, const TNgAcquisitionCapture *captur
         if (cancel(cancelContext))
             return NG_END;
         for (ms = 0; ms < NG_GAL_SEARCH_PERIODS; ++ms) {
-            size_t begin = (size_t)((uint64_t)ms * capture->stream.sampleRateHz / search->periodsPerSecond);
-            size_t end = (size_t)((uint64_t)(ms + 1) * capture->stream.sampleRateHz / search->periodsPerSecond);
+            size_t begin =
+                (size_t)((uint64_t)ms * capture->stream.sampleRateHz / search->periodsPerSecond);
+            size_t end = (size_t)((uint64_t)(ms + 1) * capture->stream.sampleRateHz /
+                                  search->periodsPerSecond);
             size_t count = end - begin;
             size_t j;
-            NgSearchCarrier(search->carrier, count, rate, coarseIf,
-                            (double)begin * coarseIf / rate, 0);
+            NgSearchCarrier(search->carrier, count, rate, coarseIf, (double)begin * coarseIf / rate,
+                            0);
             for (j = 0; j < count; ++j) {
                 search->native[j].i = (float)(capture->samples[begin + j].i - search->meanI);
                 search->native[j].q = (float)((capture->samples[begin + j].q - search->meanQ) *
@@ -278,26 +284,26 @@ static int Coarse(TNgGalileoSearch *search, unsigned prn, double doppler, int sq
     size_t k;
     if (fftMode != search->fftMode)
         return NG_ERROR;
-    const TNgComplex *code = fftMode == NG_SEARCH_FFT_FLOAT
-                                ? search->codeFft + (prn - 1) * search->size
-                                : NULL;
+    const TNgComplex *code =
+        fftMode == NG_SEARCH_FFT_FLOAT ? search->codeFft + (prn - 1) * search->size : NULL;
     memset(search->power, 0, search->size * sizeof(*search->power));
     if (fftMode != NG_SEARCH_FFT_FLOAT &&
         (search->integerCodePrn != prn || search->integerCodeMode != fftMode)) {
         GalileoCodeMode(search->code, search->size, search->chips[prn - 1],
-                        (double)search->size * search->periodsPerSecond, 1023000.0, 0, !search->wipe && !search->dataSideband, search->periodChips);
+                        (double)search->size * search->periodsPerSecond, 1023000.0, 0,
+                        !search->wipe && !search->dataSideband, search->periodChips);
         if (NgSearchIntegerCode(search->fft, search->code, fftMode, NULL) != NG_OK)
             return NG_ERROR;
         search->integerCodePrn = prn;
         search->integerCodeMode = fftMode;
     }
-    NgSearchCarrier(search->carrier, search->size, (double)search->size * search->periodsPerSecond, doppler, 0, square);
+    NgSearchCarrier(search->carrier, search->size, (double)search->size * search->periodsPerSecond,
+                    doppler, 0, square);
     for (ms = 0; ms < NG_GAL_SUMS; ++ms) {
         if (fftMode != NG_SEARCH_FFT_FLOAT) {
-            if (NgSearchIntegerPcps(search->fft,
-                    search->integerBaseband + 2 * ms * search->size,
-                    search->carrier, search->integerScale, fftMode,
-                    search->power, NULL) != NG_OK)
+            if (NgSearchIntegerPcps(search->fft, search->integerBaseband + 2 * ms * search->size,
+                                    search->carrier, search->integerScale, fftMode, search->power,
+                                    NULL) != NG_OK)
                 return NG_ERROR;
             continue;
         }
@@ -328,7 +334,8 @@ static void MixGrid(TNgGalileoSearch *search, unsigned startMs, double doppler, 
         TNgComplex *output = search->signal + ms * search->size;
         memcpy(output, search->baseband + (startMs + ms) * search->size,
                search->size * sizeof(*output));
-        NgSearchCarrier(search->carrier, search->size, (double)search->size * search->periodsPerSecond, doppler,
+        NgSearchCarrier(search->carrier, search->size,
+                        (double)search->size * search->periodsPerSecond, doppler,
                         (double)(startMs + ms) * doppler / search->periodsPerSecond, square);
         NgSearchMix(output, search->carrier, search->size);
     }
@@ -346,7 +353,8 @@ static double GridPower(TNgGalileoSearch *search, unsigned prn, unsigned startMs
         double q;
         GalileoCodeMode(search->code, search->size, search->chips[prn - 1],
                         (double)search->size * search->periodsPerSecond, codeRate,
-                        phase + (startMs + ms) * codeRate / search->periodsPerSecond, !search->wipe && !search->dataSideband, search->periodChips);
+                        phase + (startMs + ms) * codeRate / search->periodsPerSecond,
+                        !search->wipe && !search->dataSideband, search->periodChips);
         NgSearchCorrelate(search->signal + ms * search->size, search->code, search->size, xorSigns,
                           &i, &q);
         power += i * i + q * q;
@@ -355,8 +363,8 @@ static double GridPower(TNgGalileoSearch *search, unsigned prn, unsigned startMs
 }
 
 /** Native-rate coherent prompt; carrier and code share exact capture-relative sample origin. */
-static double NativePower(TNgGalileoSearch *search, const TNgAcquisitionCapture *capture, unsigned prn,
-                          unsigned startMs, double doppler, double phase,
+static double NativePower(TNgGalileoSearch *search, const TNgAcquisitionCapture *capture,
+                          unsigned prn, unsigned startMs, double doppler, double phase,
                           const TNgAcquisitionConfig *config, double *noise, double carrierOffset)
 {
     double power = 0;
@@ -373,8 +381,10 @@ static double NativePower(TNgGalileoSearch *search, const TNgAcquisitionCapture 
         symbolOffset = (size_t)floor(remaining * rate / codeRate);
     }
     for (ms = startMs; ms < startMs + NG_GAL_SUMS; ++ms) {
-        size_t begin = (size_t)((uint64_t)ms * capture->stream.sampleRateHz / search->periodsPerSecond);
-        size_t end = (size_t)((uint64_t)(ms + 1) * capture->stream.sampleRateHz / search->periodsPerSecond);
+        size_t begin =
+            (size_t)((uint64_t)ms * capture->stream.sampleRateHz / search->periodsPerSecond);
+        size_t end =
+            (size_t)((uint64_t)(ms + 1) * capture->stream.sampleRateHz / search->periodsPerSecond);
         size_t count = end - begin;
         begin += symbolOffset;
         if (begin > capture->count || count > capture->count - begin)
@@ -386,7 +396,7 @@ static double NativePower(TNgGalileoSearch *search, const TNgAcquisitionCapture 
         NgSearchCarrier(search->carrier, count, rate, frequency, (double)begin * frequency / rate,
                         config->squareCarrier);
         GalileoCode(search->code, count, search->chips[prn - 1], rate, codeRate,
-                     phase + (double)begin * codeRate / rate, search->periodChips);
+                    phase + (double)begin * codeRate / rate, search->periodChips);
         for (k = 0; k < count; ++k) {
             search->native[k].i = (float)(capture->samples[begin + k].i - search->meanI);
             search->native[k].q = (float)((capture->samples[begin + k].q - search->meanQ) *
@@ -455,7 +465,8 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
             return NgFail(error, "Galileo integer coarse FFT failed");
         for (k = 0; k < search->size; ++k) {
             if (search->periodsPerSecond != 100 && capture->displayPrn == prn) {
-                size_t column = ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS / search->size;
+                size_t column =
+                    ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS / search->size;
                 float value = (float)(search->power[k] / threshold);
                 if (value > search->space.power[bin][column])
                     search->space.power[bin][column] = value;
@@ -486,8 +497,8 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
         const unsigned last = search->dataSideband ? 20u : 134u;
         for (bin = 0; bin <= last; ++bin) {
             double frequency = search->dataSideband
-                ? coarseDoppler - 50 + (double)bin * 5
-                : coarseDoppler - 667 + (bin == 134 ? 1334 : (double)bin * 10);
+                                   ? coarseDoppler - 50 + (double)bin * 5
+                                   : coarseDoppler - 667 + (bin == 134 ? 1334 : (double)bin * 10);
             double power;
             if (cancel(cancelContext))
                 return NG_END;
@@ -512,8 +523,8 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
         double coarsePhase = phase;
         best = 0;
         for (delta = -radius; delta <= radius; ++delta) {
-            double test = coarsePhase +
-                          (double)delta * 1023000.0 / (double)capture->stream.sampleRateHz;
+            double test =
+                coarsePhase + (double)delta * 1023000.0 / (double)capture->stream.sampleRateHz;
             double power;
             if (cancel(cancelContext))
                 return NG_END;
@@ -533,7 +544,8 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
             if (cancel(cancelContext))
                 return NG_END;
             double frequency = center + offset;
-            double power = NativePower(search, capture, prn, 8, frequency, phase, config, &noise, 0);
+            double power =
+                NativePower(search, capture, prn, 8, frequency, phase, config, &noise, 0);
             if (power > best) {
                 best = power;
                 doppler = frequency;
@@ -559,8 +571,8 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
             double offset = AcquisitionNoiseOffset(reference);
             if (cancel(cancelContext))
                 return NG_END;
-            referenceNoise += NativePower(search, capture, prn, startMs, doppler, phase, config,
-                                    &noise, offset);
+            referenceNoise +=
+                NativePower(search, capture, prn, startMs, doppler, phase, config, &noise, offset);
         }
         referenceNoise /= (double)(8 * NG_GAL_SUMS);
         if (referenceNoise > 0 && power > referenceNoise * factor)
@@ -578,25 +590,30 @@ static int Search(void *context, const TNgAcquisitionCapture *capture, unsigned 
 /** Public strategy interface; no receiver/controller dependency. */
 /** Build a confirmed satellite's archive after publishing its seed to tracking. */
 int NgAcquisitionGalileoDisplay(void *context, unsigned prn, const TNgAcquisitionConfig *config,
-                               TNgAcquisitionCancel cancel, void *cancelContext)
+                                TNgAcquisitionCancel cancel, void *cancelContext)
 {
     TNgGalileoSearch *search = context;
-    unsigned bin; size_t k;
-    memset(search->space.power,0,sizeof(search->space.power));
-    search->space.valid=0;
-    if (!(search->space.threshold>0)) return NG_END;
-    for(bin=0;bin<116;++bin) {
-        double frequency=-5000 + (double)bin * 87;
-        if(cancel(cancelContext)) return NG_END;
-        if (Coarse(search,prn,frequency,config->squareCarrier,config->fftMode) != NG_OK)
+    unsigned bin;
+    size_t k;
+    memset(search->space.power, 0, sizeof(search->space.power));
+    search->space.valid = 0;
+    if (!(search->space.threshold > 0))
+        return NG_END;
+    for (bin = 0; bin < 116; ++bin) {
+        double frequency = -5000 + (double)bin * 87;
+        if (cancel(cancelContext))
             return NG_END;
-        for(k=0;k<search->size;++k) {
-            size_t column=((search->size-k)%search->size)*NG_ACQUISITION_CODE_BINS/search->size;
-            float value=(float)(search->power[k]/search->space.threshold);
-            if(value>search->space.power[bin][column])search->space.power[bin][column]=value;
+        if (Coarse(search, prn, frequency, config->squareCarrier, config->fftMode) != NG_OK)
+            return NG_END;
+        for (k = 0; k < search->size; ++k) {
+            size_t column =
+                ((search->size - k) % search->size) * NG_ACQUISITION_CODE_BINS / search->size;
+            float value = (float)(search->power[k] / search->space.threshold);
+            if (value > search->space.power[bin][column])
+                search->space.power[bin][column] = value;
         }
     }
-    search->space.valid=1;
+    search->space.valid = 1;
     return NG_OK;
 }
 

@@ -36,19 +36,19 @@ typedef struct TNgOrbit {
     int sisa;   /**< Signal-In-Space Accuracy (for GPS: URA, Use Range Accuracy) */
     /* Galileo dedicated fields */
     int galileoDataValidity; /**< Validity status of the Galileo navigation data */
-    double axisRate;       /**< B1C rate of semi-major axis [m/s]. */
-    double meanMotionRate; /**< B1C rate of mean-motion correction [rad/s²]. */
+    double axisRate;         /**< B1C rate of semi-major axis [m/s]. */
+    double meanMotionRate;   /**< B1C rate of mean-motion correction [rad/s²]. */
 } TNgOrbit;
 
 typedef struct TNgBroadcastClock {
-    double toc;         /**< Reference time (Clock) */
-    double af[3];       /**< Satellite clock correction coefficients */
-    double tGroupDelay; /**< Group delay */
-    double bgd_E1E5a;   /**< Broadcast Group delay E1,E5a (Galileo) */
-    double bgd_E1E5b;   /**< Broadcast Group delay E1,E5b (Galileo) */
-    int iodc;           /**< Issue Of Data */
+    double toc;           /**< Reference time (Clock) */
+    double af[3];         /**< Satellite clock correction coefficients */
+    double tGroupDelay;   /**< Group delay */
+    double bgd_E1E5a;     /**< Broadcast Group delay E1,E5a (Galileo) */
+    double bgd_E1E5b;     /**< Broadcast Group delay E1,E5b (Galileo) */
+    int iodc;             /**< Issue Of Data */
     double beidouDataIsc; /**< B1C data-to-pilot signal correction [s]. */
-    double beidouB2aTgd; /**< B2a pilot group delay [s], stored from B-CNAV1. */
+    double beidouB2aTgd;  /**< B2a pilot group delay [s], stored from B-CNAV1. */
 } TNgBroadcastClock;
 
 /** Consistent issue-of-data cache, owned by one channel. */
@@ -59,8 +59,8 @@ typedef struct {
     struct {
         double alphaGal[3]; /**< Galileo I/NAV word 5 effective ionization coefficients. */
         double alphaBds[9]; /**< B-CNAV1 SF3 page 1 BDGIM coefficients (TECU). */
-        int utcLeap; /**< Broadcast whole-second system time offset for ionosphere models. */
-        unsigned bdsTow; /**< BDT seconds of week of the accepted BDGIM page. */
+        int utcLeap;        /**< Broadcast whole-second system time offset for ionosphere models. */
+        unsigned bdsTow;    /**< BDT seconds of week of the accepted BDGIM page. */
         double alphaGps[4], betaGps[4]; /**< LNAV SF4 page 18 Klobuchar coefficients. */
         int sf[5];
     } iono; /**< Broadcast ionosphere model for this channel. */

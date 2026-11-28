@@ -207,8 +207,8 @@ static void CheckAcquisitionGrid(const char *path)
                   "sample_rate_hz=2048000\ncenter_frequency_hz=1575381500\n"
                   "signal_frequency_hz=1575420000\ndigital_if_hz=38500\n"
                   "spectrum_inverted=1\nconditioning=bypass\nrecording_point=post_conditioning\n"
-                  "data_file=%s\n[result]\ncomplete=true\nwritten_samples=%d\n", path,
-                  NG_TEST_PAIRS) > 0);
+                  "data_file=%s\n[result]\ncomplete=true\nwritten_samples=%d\n",
+                  path, NG_TEST_PAIRS) > 0);
     CHECK(fclose(file) == 0);
 
     NgConfigDefaults(&config);
@@ -224,11 +224,13 @@ static void CheckAcquisitionGrid(const char *path)
     CHECK(frontend.info.nativeFormat == NG_FORMAT_CI8 && frontend.info.format == NG_FORMAT_CI16);
     CHECK(frontend.info.spectrumInverted == 1);
     CHECK(NgAcquisitionCreateGalileo(&config.galileoAcquisition, &frontend.info, &search, &channel,
-                                     &error) == NG_ERROR && search == NULL);
+                                     &error) == NG_ERROR &&
+          search == NULL);
     CHECK(strstr(error.message, "Effective rate is 2048000") != NULL);
     config.galileoAcquisition.fftSize = 0;
     CHECK(NgAcquisitionCreateGalileo(&config.galileoAcquisition, &frontend.info, &search, &channel,
-                                     &error) == NG_OK && search != NULL);
+                                     &error) == NG_OK &&
+          search != NULL);
     NgAcquisitionDestroy(search);
     NgFrontendDestroy(&frontend);
     CHECK(remove(sidecar) == 0);

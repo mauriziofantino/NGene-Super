@@ -1,5 +1,23 @@
 # NGene EVO · Piano incrementale e registro di attuazione
 
+## Stato di avanzamento · 28 novembre 2026
+
+- **B0–B7** sono integrati nella catena BeiDou B1C fino al PVT. **B8** ha evidenza
+  end-to-end su replay Windows e confronti RMS a epoche comuni. Restano aperti
+  accuratezza delle pseudorange, ripetibilità in condizioni critiche e la perdita
+  di PLL osservata sul secondo HackRF senza gap I/Q.
+- **B9** è sospeso per una nuova sessione RF perché l'antenna non è disponibile.
+  Le catture RF HackRF già eseguite restano documentate. **B10** è operativo e
+  verificato in browser su Windows. BeiDou si avvia con GPS e Galileo e usa
+  telemetria operativa. Restano le verifiche native Linux e macOS.
+- **EGNOS L1** e ionosfera broadcast sono integrati nel PVT e provati su replay
+  Windows. EDAS rimane sospeso. **F6b**, periodo coerente configurabile per
+  segnale, è il prossimo incremento prioritario sul tracking. La parte GPS è
+  disponibile, mentre Galileo, EGNOS e BeiDou restano da implementare e
+  qualificare.
+- **F7/U2** resta aperto per la copertura completa delle opzioni GUI e per la
+  selezione runtime di tutti i backend DSP qualificati, come previsto a fine piano.
+
 ## Consolidamento delle scelte GNSS · 26 novembre 2026
 
 Riferimento per le decisioni successive: [verifica tecnica e matrice di conformità](CONSOLIDAMENTO_GNSS.md). La verifica riguarda EVO `2ae930f` con le modifiche locali B8–B10 e il sorgente Classic disponibile. Le righe del registro in §13 conservano la copertura delle singole misure.
@@ -412,6 +430,97 @@ Per Q14 e int32 richiedere parità bit per bit con il riferimento della modalit�
 | T9 · Distribuzione | Build normale Release, test CTest pertinenti, configurazioni web on/off e backend disponibili. Installazione/packaging, avvio da pacchetto e replay breve. Annotare piattaforme effettivamente eseguite. |
 
 Eseguire T1–T3 e i contratti toccati in CI per modifica. Eseguire i confronti temporali su host controllato e RF quando disponibile. Prima di ogni fase fissare input/hash, seed e numero di trial, dimensioni, tolleranze numeriche e criterio di decisione nel registro. Distinguere falsi allarmi per cella e per ricerca. Con 0 eventi in 100 prove indipendenti il limite superiore unilaterale al 95% è circa 0,0295. Una tale campagna non verifica una Pfa di 10⁻⁹.
+
+### 10.1 Requisito prioritario F6b · Integrazione coerente configurabile per segnale
+
+Il periodo coerente dei loop deve essere selezionabile da **GUI**, persistito nel
+profilo **INI** e verificabile via **API** per GPS L1 C/A, Galileo E1, EGNOS L1 e
+BeiDou B1C. Mostrare separatamente il valore richiesto e il periodo effettivo per
+canale. All'avvio e dopo una discontinuità partire con la cadenza di aggancio
+qualificata. Estendere l'integrazione solo dopo il sincronismo richiesto e
+ricalcolare i coefficienti dei loop interessati quando cambia il periodo.
+Preservare cadenza, segno e riferimento in campioni dei prompt di demodulazione e
+delle osservazioni. Conservare le fasi di acquisizione, il passaggio al tracking
+e i relativi riferimenti in chip e campioni.
+
+| Segnale | Stato e lavoro restante |
+|---|---|
+| GPS L1 C/A | Operativo a 1, 2, 4, 5, 10 o 20 ms. FLL e prompt LNAV a 1 ms. PLL e DLL passano al periodo richiesto su gruppi allineati entro un bit dopo il sincronismo. Test Windows a 5 ms eseguito. Completare la qualifica della matrice dei periodi. |
+| Galileo E1 | Partenza a 4 ms. Qualificare gli intervalli estesi gestendo il segno dei simboli E1-B oppure il sincronismo e la rimozione del secondario sul pilota, secondo la componente usata. |
+| EGNOS L1 | Partenza a 1 ms. Qualificare il passaggio a 2 ms sulla fase di simbolo identificata dal decoder, mantenendo il percorso FEC e la validazione CRC. |
+| BeiDou B1C | Partenza a 10 ms. Qualificare i multipli del periodo primario sul pilota dopo sincronismo e compensazione del secondario, mantenendo i prompt dati B-CNAV1. |
+
+#### Accumulo coerente e non coerente, modalità dati/pilota
+
+Classic ha già affrontato le durate di integrazione coerente e non coerente
+per Galileo. Partire dal suo codice e dai profili Galileo per ricostruire la
+cadenza dei blocchi, i vincoli di segno e le prove riutilizzabili. Per le somme
+non coerenti distinguere durata del singolo blocco, numero di blocchi e durata
+totale. Conservare le decisioni dell'acquisizione operativa durante la migrazione.
+
+BeiDou B1C condivide con Galileo E1 la struttura a due componenti dati e pilota.
+Riutilizzare l'architettura di accumulo e selezione dei correlatori, con repliche,
+periodi, modulazione e sincronismo del secondario propri di ciascun segnale.
+
+Integrare il **pilota Galileo E1-C** nel tracking. Esporre in GUI una scelta
+indipendente per **Galileo E1** e **BeiDou B1C**, persistita nel profilo e
+riportata dalla telemetria del canale.
+
+| Modalità | Prompt (P) | Early e Late (E/L) |
+|---|---|---|
+| Solo dati | Galileo E1-B o B1C dati | Stessa componente dati |
+| Dati + pilota | Galileo E1-B o B1C dati | Galileo E1-C o B1C pilota |
+
+In modalità mista il DLL usa E/L del pilota. Il prompt dati resta a disposizione
+dei loop di portante e del decoder alla cadenza prevista. Verificare
+separatamente polarità, allineamento temporale, sincronismo e rimozione del
+secondario del pilota, guadagno del discriminatore DLL, transizione FLL→PLL,
+riaggancio e continuità di decodifica e pseudorange. Confrontare le due
+modalità sugli stessi campioni, con segnali deboli e multipath. La chiusura di
+F6b comprende entrambe le modalità per entrambi i segnali.
+
+#### Cadenza dei prompt dati, aggiornamento dei loop e carico CPU
+
+Separare l'intervallo di lavoro DSP, il periodo di produzione dei prompt dati
+e il periodo di aggiornamento dei loop. Per Galileo E1-B, con integrazione
+coerente richiesta di 16 ms, consegnare al decoder ogni prompt dati da 4 ms,
+in ordine e con il suo riferimento in campioni. Aggiornare i loop una volta
+ogni quattro intervalli da 4 ms e ricalcolare i coefficienti per 16 ms.
+Compensare i cambi di segno dei simboli o del codice secondario nella sola
+somma destinata ai loop, secondo la componente usata. Se il segno non è
+disponibile, mantenere la durata coerente qualificata o usare la combinazione
+non coerente prevista dal profilo.
+
+Sfruttare la linearità della correlazione per sommare i contributi complessi
+su tranche oppure elaborare il blocco in un'unica chiamata se il budget CPU
+e le scadenze lo consentono. Anche nel secondo caso conservare i quattro
+prompt intermedi. Preservare l'avanzamento di fase di codice e portante e
+verificare la parità dei risultati tra blocco unico e tranche.
+
+Applicare lo stesso principio a BeiDou B1C. I prompt dati restano alla
+cadenza di 10 ms del percorso B-CNAV1. Provare gli aggiornamenti dei loop
+su multipli di 10 ms compatibili con la componente, dopo aver verificato
+sincronismo e compensazione del segno. Qualificare le durate su BeiDou
+indipendentemente da quelle di Galileo.
+
+Il **risparmio CPU è un requisito di accettazione**. A parità di cattura,
+canali, backend e configurazione, confrontare il profilo con aggiornamento
+dei loop a ogni prompt, il profilo esteso a tranche e il profilo a blocco
+unico. Misurare tempo CPU per secondo di segnale e per canale, separando
+correlazione, accumulo, demodulazione e aggiornamento dei loop. Registrare
+anche picchi di carico, latenza, scadenze e gap. Per qualificare il risparmio
+dimostrare una riduzione misurabile del costo complessivo mentre i prompt
+arrivano tutti alla cadenza prevista e tracking e PVT rispettano i criteri
+di continuità e accuratezza del piano.
+
+Per chiudere F6b verificare persistenza e valori limite, sincronismo e perdita,
+riaggancio e gap, continuità di portante e codice, transizione FLL→PLL e
+ricalcolo alla durata effettiva. Confrontare decodifica e osservabili agli stessi
+campioni e misurare RMS e continuità dei fix contro un riferimento noto.
+Ripetere su Windows, Linux e macOS. F6b è distinto dallo studio F6a sul Doppler
+di codice e non richiede variazioni delle soglie o delle decisioni di
+acquisizione. La derivazione indipendente dei coefficienti di anello resta
+da qualificare. [Contratto tracking](TRACKING.md#configurable-loop-filters)
 
 ## 11. Ipotesi e decisioni aperte
 

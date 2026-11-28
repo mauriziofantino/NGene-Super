@@ -57,7 +57,7 @@ void NgTrackingReplica(float *output, const double *phases, size_t count, const 
         __m128i integer = _mm_unpacklo_epi64(_mm_cvttpd_epi32(phase), _mm_cvttpd_epi32(phase2));
         _mm_storeu_si128((__m128i *)indices, integer);
         __m128 signs = _mm_cvtepi32_ps(_mm_set_epi32(chips[indices[3]], chips[indices[2]],
-                                                   chips[indices[1]], chips[indices[0]]));
+                                                     chips[indices[1]], chips[indices[0]]));
         _mm_storeu_ps(output + n, signs);
     }
 #elif NG_NEON
@@ -96,8 +96,8 @@ void NgTrackingReplica(float *output, const double *phases, size_t count, const 
 
 /** One replica sample with exactly NgTrackingCodePhases + NgTrackingReplica arithmetic.
  * value receives the code position before truncation, in index units. */
-static size_t ReplicaIndex(size_t n, double base, double codeRate, double sampleRate,
-                           double offset, unsigned period, int boc, double *value)
+static size_t ReplicaIndex(size_t n, double base, double codeRate, double sampleRate, double offset,
+                           unsigned period, int boc, double *value)
 {
     double phase = base + (double)n * codeRate / sampleRate;
     phase -= offset;
@@ -118,8 +118,7 @@ static int SameIndex(size_t n, size_t level, double base, double codeRate, doubl
 {
     double value;
     size_t top = boc ? 2u * (size_t)period : period;
-    return ReplicaIndex(n, base, codeRate, sampleRate, offset, period, boc, &value) ==
-           level % top;
+    return ReplicaIndex(n, base, codeRate, sampleRate, offset, period, boc, &value) == level % top;
 }
 
 /** Margin, in samples, beyond which a predicted chip boundary cannot be wrong: the
@@ -127,8 +126,8 @@ static int SameIndex(size_t n, size_t level, double base, double codeRate, doubl
 #define NG_RUN_MARGIN 1e-6
 
 void NgTrackingCorrelateRuns(const double *prefix, size_t count, double base, double codeRate,
-                             double sampleRate, const int8_t *chips, unsigned period,
-                             double offset, int boc, double *i, double *q)
+                             double sampleRate, const int8_t *chips, unsigned period, double offset,
+                             int boc, double *i, double *q)
 {
     double first, step = codeRate / sampleRate * (boc ? 2.0 : 1.0), inverse = 1.0 / step;
     size_t top = boc ? 2u * (size_t)period : period, start = 0, level, chip;
@@ -155,8 +154,8 @@ void NgTrackingCorrelateRuns(const double *prefix, size_t count, double base, do
                 end = start;
             if (whole - cross < NG_RUN_MARGIN || cross - (whole - 1.0) < NG_RUN_MARGIN) {
                 /* Too close to a sample boundary to trust: settle it per sample, exactly. */
-                while (end > start && !SameIndex(end - 1, level, base, codeRate, sampleRate,
-                                                 offset, period, boc))
+                while (end > start &&
+                       !SameIndex(end - 1, level, base, codeRate, sampleRate, offset, period, boc))
                     --end;
                 while (end < count &&
                        SameIndex(end, level, base, codeRate, sampleRate, offset, period, boc))

@@ -16,9 +16,9 @@ void F4GroupWorkerStart(F4GroupWorker *worker, F4GroupWork run, void *context);
 int F4GroupWorkerWait(F4GroupWorker *worker, double *cpu);
 void F4GroupTrackingReport(void);
 
-
 /* Each request lives on the owning worker's stack until its wait and return. */
 typedef int (*F4ReuseRow)(void *workspace, void *context);
+
 typedef struct F4ReuseRequest {
     struct F4ReuseRequest *next;
     void *workspace, *context;
@@ -34,4 +34,3 @@ int F4GroupWaitReuse(void *context, F4ReuseRequest *request);
 void F4GroupReturnReuse(void *context, F4ReuseRequest *request, int completed);
 
 #endif
-

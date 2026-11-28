@@ -9,10 +9,7 @@
 #define NG_BEIDOU_B1C_PERIOD_MS 10u
 #define NG_BEIDOU_B1C_SUBCHIPS 12u
 
-typedef enum {
-    NG_BEIDOU_B1C_DATA,
-    NG_BEIDOU_B1C_PILOT
-} TNgBeidouB1cComponent;
+typedef enum { NG_BEIDOU_B1C_DATA, NG_BEIDOU_B1C_PILOT } TNgBeidouB1cComponent;
 
 /** Generate one primary period for PRN 1..63, starting at chip zero.
  * ICD bit 0 maps to +1 and bit 1 to -1. Output is untouched on error. */

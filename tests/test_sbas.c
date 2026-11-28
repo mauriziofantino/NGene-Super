@@ -6,7 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CHECK(x) do { if (!(x)) { fprintf(stderr, "line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
+#define CHECK(x)                                                                                   \
+    do {                                                                                           \
+        if (!(x)) {                                                                                \
+            fprintf(stderr, "line %d: %s\n", __LINE__, #x);                                        \
+            exit(1);                                                                               \
+        }                                                                                          \
+    } while (0)
 
 /** Put a synthetic field into an initially zero frame. */
 static void Pack(uint8_t *bytes, unsigned start, unsigned size, unsigned value)
@@ -135,8 +141,8 @@ static void Ionosphere(void)
         }
         Seal(frame);
         CHECK(NgSbasPushFrame(&bank, frame, 1 + issue));
-        CHECK(NgSbasIonosphere(&bank, 1 + issue, 42.5 * degree, 2.5 * degree, 0,
-                               90 * degree, &delay) == (issue == 2));
+        CHECK(NgSbasIonosphere(&bank, 1 + issue, 42.5 * degree, 2.5 * degree, 0, 90 * degree,
+                               &delay) == (issue == 2));
     }
     CHECK(fabs(delay - 2.5) < 1e-12);
     memset(frame, 0, sizeof(frame));

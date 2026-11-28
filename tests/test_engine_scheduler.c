@@ -571,7 +571,8 @@ static void TestIdleAcquisitionSkip(void)
             CHECK(NgChannelDispatchProcess(dispatch, &view, &error) == NG_OK);
         NgChannelDispatchDestroy(dispatch);
         CHECK(idleCalls[0] == 0 && idleCalls[2] == 0 && idleCalls[1] == 5 && idleCalls[3] == 5);
-        CHECK(channels[0].state == NG_CHANNEL_ACQUISITION && channels[1].state == NG_CHANNEL_TRACKING);
+        CHECK(channels[0].state == NG_CHANNEL_ACQUISITION &&
+              channels[1].state == NG_CHANNEL_TRACKING);
     }
     NgMutexDestroy(&idleMutex);
 }

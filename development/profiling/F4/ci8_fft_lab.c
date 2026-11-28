@@ -145,8 +145,7 @@ static int64_t AdaptiveDivisor(size_t n, size_t width, int64_t unit, unsigned *s
     return divisor;
 }
 
-static void CompactStage(size_t n, size_t width, int64_t unit, int64_t divisor,
-                         unsigned *clips)
+static void CompactStage(size_t n, size_t width, int64_t unit, int64_t divisor, unsigned *clips)
 {
     for (size_t base = 0; base < n; base += width) {
         for (size_t j = 0; j < width / 2; ++j) {
@@ -161,8 +160,8 @@ static void CompactStage(size_t n, size_t width, int64_t unit, int64_t divisor,
     }
 }
 
-static void IntegerStages(size_t n, int bits, int mode, int compact_case,
-                          unsigned *shift, unsigned *clips)
+static void IntegerStages(size_t n, int bits, int mode, int compact_case, unsigned *shift,
+                          unsigned *clips)
 {
     const int64_t unit = INT64_C(1) << bits;
     for (size_t width = 2; width <= n; width *= 2) {
@@ -171,17 +170,17 @@ static void IntegerStages(size_t n, int bits, int mode, int compact_case,
             if (use_buffered && width >= 16) {
                 if (use_madd)
                     *shift += Ci8FftCompactAdaptiveMaddAvx2(compact, stage_scratch, lab_wr, lab_wi,
-                                                           n, width, (unsigned)bits);
+                                                            n, width, (unsigned)bits);
                 else
-                    *shift += Ci8FftCompactAdaptiveBufferedAvx2(compact, stage_scratch, lab_wr, lab_wi,
-                                                               n, width, (unsigned)bits);
+                    *shift += Ci8FftCompactAdaptiveBufferedAvx2(compact, stage_scratch, lab_wr,
+                                                                lab_wi, n, width, (unsigned)bits);
                 continue;
             }
 #endif
 #ifdef CI8_LAB_COMPACT_AVX2
             if (use_compact_avx2 && width >= 16) {
                 *shift += Ci8FftCompactAdaptiveStageAvx2(compact, lab_wr, lab_wi, n, width,
-                                                        (unsigned)bits);
+                                                         (unsigned)bits);
                 continue;
             }
 #endif
@@ -278,8 +277,8 @@ static void Run(size_t n, unsigned pattern, int inverse, int bits, int mode)
         max_error = fmax(max_error, fabs(error));
         sum += error * error;
     }
-    printf("%zu,%u,%d,%d,%d,%u,%u,%.9g,%.9g\n", n, pattern, inverse, bits, mode,
-           shift, clips, max_error, sqrt(sum / (2 * n)));
+    printf("%zu,%u,%d,%d,%d,%u,%u,%.9g,%.9g\n", n, pattern, inverse, bits, mode, shift, clips,
+           max_error, sqrt(sum / (2 * n)));
 }
 
 static void Matrix(int round)
@@ -290,10 +289,10 @@ static void Matrix(int round)
             for (size_t k = 0; k < 2 * n; ++k) {
                 random = random * UINT32_C(1664525) + UINT32_C(1013904223);
                 double angle = TAU * 2.375 * (double)(k / 2) / (double)n;
-                int value = pattern == 0 ? (k == 2 * (n / 3) ? -128 : 0)
-                          : pattern == 1 ? ((k & 2) ? -128 : 127)
-                          : pattern == 2 ? (int)lround(127 * ((k & 1) ? sin(angle) : cos(angle)))
-                          : (int)(random >> 24) - 128;
+                int value = pattern == 0   ? (k == 2 * (n / 3) ? -128 : 0)
+                            : pattern == 1 ? ((k & 2) ? -128 : 127)
+                            : pattern == 2 ? (int)lround(127 * ((k & 1) ? sin(angle) : cos(angle)))
+                                           : (int)(random >> 24) - 128;
                 lab_input[k] = (int8_t)value;
             }
             for (int inverse = 0; inverse <= 1; ++inverse)
@@ -318,8 +317,8 @@ static void Matrix(int round)
                             continue;
                         }
                         /* Each six rounds cover every order for each vector. */
-                        int mode = round < 0 ? slot
-                                 : (round / 2 + (round % 2 ? 3 - slot : slot)) % 3;
+                        int mode =
+                            round < 0 ? slot : (round / 2 + (round % 2 ? 3 - slot : slot)) % 3;
                         Run(n, pattern, inverse, bits, mode);
                     }
         }
@@ -349,7 +348,8 @@ int main(int argc, char **argv)
             Matrix(round);
             for (int q = 0; q < 2; ++q)
                 for (int variant = 0; variant < 2; ++variant)
-                    printf("%d,%d,%s,%.9f\n", round, 7 + 8 * q, variant == 0 ? first_variant : second_variant,
+                    printf("%d,%d,%s,%.9f\n", round, 7 + 8 * q,
+                           variant == 0 ? first_variant : second_variant,
                            adaptive_ticks[q][variant]);
         }
         return 0;
@@ -415,8 +415,9 @@ int main(int argc, char **argv)
 #endif
     use_compact = argc == 3 && strcmp(argv[2], "compact") == 0;
     adaptive_before = argc == 3 && strcmp(argv[2], "compact-adaptive-before") == 0;
-    use_adaptive = adaptive_before || (argc == 3 &&
-                   (strcmp(argv[2], "compact-adaptive") == 0 || requested_compact_avx2));
+    use_adaptive =
+        adaptive_before ||
+        (argc == 3 && (strcmp(argv[2], "compact-adaptive") == 0 || requested_compact_avx2));
 #ifdef CI8_LAB_BUFFERED
     use_adaptive |= use_buffered;
 #endif

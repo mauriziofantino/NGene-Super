@@ -21,16 +21,26 @@ static void MakeVector(size_t n, unsigned vector)
     uint32_t random = SEED + vector;
     for (size_t k = 0; k < 2 * n; ++k) {
         switch (vector) {
-        case 0: input[k] = 0; break;
-        case 1: input[k] = k == 2 * (n / 3) ? Q14_LIMIT : 0; break;
+        case 0:
+            input[k] = 0;
+            break;
+        case 1:
+            input[k] = k == 2 * (n / 3) ? Q14_LIMIT : 0;
+            break;
         case 2: {
             double phase = TAU * 17.375 * (double)(k / 2) / (double)n;
             input[k] = (int32_t)lround(8192 * ((k & 1) ? sin(phase) : cos(phase)));
             break;
         }
-        case 3: input[k] = (k & 2) ? -Q14_LIMIT : Q14_LIMIT; break;
-        case 4: input[k] = -Q14_LIMIT; break;
-        case 5: input[k] = (int32_t)(k % 17) - 8; break;
+        case 3:
+            input[k] = (k & 2) ? -Q14_LIMIT : Q14_LIMIT;
+            break;
+        case 4:
+            input[k] = -Q14_LIMIT;
+            break;
+        case 5:
+            input[k] = (int32_t)(k % 17) - 8;
+            break;
         default:
             random = random * UINT32_C(1664525) + UINT32_C(1013904223);
             input[k] = (int32_t)((random >> 8) % (2 * Q14_LIMIT + 1)) - Q14_LIMIT;
@@ -63,8 +73,8 @@ int main(int argc, char **argv)
             double elapsed = 0;
             for (unsigned trial = 0; trial < 32; ++trial) {
                 const double start = NgMonotonicSeconds();
-                if (NgSearchFftCreateForMode(n, NG_SEARCH_FFT_INTEGER_PRECISE, &plan,
-                                             &error) != NG_OK) {
+                if (NgSearchFftCreateForMode(n, NG_SEARCH_FFT_INTEGER_PRECISE, &plan, &error) !=
+                    NG_OK) {
                     fprintf(stderr, "%s\n", error.message);
                     return EXIT_FAILURE;
                 }

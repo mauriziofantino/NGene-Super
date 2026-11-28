@@ -34,9 +34,9 @@
 #else
 #define NOINLINE __attribute__((noinline))
 #endif
-static const char *names[MODES] = {"double_oracle", "iq16_q15_simd", "iq8_q15_simd",
-                                   "iq8_xor_square", "sign1_xor_square",
-                                   "iq8_carrier16", "iq8_q15_rescaled"};
+static const char *names[MODES] = {"double_oracle",   "iq16_q15_simd",    "iq8_q15_simd",
+                                   "iq8_xor_square",  "sign1_xor_square", "iq8_carrier16",
+                                   "iq8_q15_rescaled"};
 
 typedef struct {
     double i, q;
@@ -356,6 +356,7 @@ static Complex Rescaled(const Block *b, size_t *clipped)
 static void RotationReuse(void)
 {
     enum { N = 521, TAPS = 3, SPLIT = 173 };
+
     const double fs = 16367600, hz = 4001375.25;
     const double offsets[TAPS] = {0, 0.5, 1};
     int8_t chips[1023];

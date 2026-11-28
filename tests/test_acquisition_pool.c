@@ -335,8 +335,6 @@ static void BeidouPrnLimits(void)
     CHECK(NgAtomicGet(&mock.cancelled));
 }
 
-
-
 /** Every per-satellite decision must remain identical under concurrent PRN scheduling. */
 int main(void)
 {

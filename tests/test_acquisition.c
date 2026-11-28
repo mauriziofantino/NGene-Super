@@ -113,7 +113,8 @@ static int Scenario(uint32_t rate, int64_t digitalIf, int square, int xorSigns, 
             }
         CHECK(fabs(maximum - space.result.peakRatio) < 1e-5 * (1 + maximum));
         if (signal) {
-            unsigned peakColumn = (unsigned)(space.peakCodePhaseChips * NG_ACQUISITION_CODE_BINS / 1023);
+            unsigned peakColumn =
+                (unsigned)(space.peakCodePhaseChips * NG_ACQUISITION_CODE_BINS / 1023);
             unsigned peakRow = (unsigned)lround((space.peakDopplerHz + 5000) / 667);
             CHECK(fabs(space.power[peakRow][peakColumn] - maximum) < 1e-5 * (1 + maximum));
         }
@@ -167,7 +168,9 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
         if (rate == 8183800)
             carrier = -carrier;
         double amplitude =
-            signal && (!truncated || time < 0.096) ? 5 * chips[(size_t)codePhase] * ((codePhase - floor(codePhase)) < 0.5 ? 1 : -1) : 0;
+            signal && (!truncated || time < 0.096)
+                ? 5 * chips[(size_t)codePhase] * ((codePhase - floor(codePhase)) < 0.5 ? 1 : -1)
+                : 0;
         samples[k].i = (int8_t)lround(amplitude * cos(carrier) + 28 * Noise(&random) + 2.3);
         samples[k].q = (int8_t)lround(amplitude * sin(carrier) + 28 * Noise(&random) - 1.7);
     }
@@ -242,42 +245,50 @@ static int GalileoScenario(uint32_t rate, int64_t digitalIf, int square, int xor
            origin, including data transitions and native inverted/wide formats. */
         TNgTrackingConfig trackingConfig;
         TNgTrackingSnapshot tracked;
-        TNgTracking *tracking=NULL;
-        size_t followed=0;
-        size_t future=count+(size_t)((uint64_t)rate*137u/1000u)+257;
-        size_t followCount=(size_t)((uint64_t)rate*160u/1000u);
+        TNgTracking *tracking = NULL;
+        size_t followed = 0;
+        size_t future = count + (size_t)((uint64_t)rate * 137u / 1000u) + 257;
+        size_t followCount = (size_t)((uint64_t)rate * 160u / 1000u);
         NgTrackingDefaults(&trackingConfig);
-        CHECK(NgTrackingCreate(&trackingConfig,&stream,2,&tracking,&error)==NG_OK);
-        CHECK(NgTrackingSeed(tracking,&snapshot.results[6],&error)==NG_OK);
-        while(followed<followCount) {
-            size_t take=followCount-followed;
+        CHECK(NgTrackingCreate(&trackingConfig, &stream, 2, &tracking, &error) == NG_OK);
+        CHECK(NgTrackingSeed(tracking, &snapshot.results[6], &error) == NG_OK);
+        while (followed < followCount) {
+            size_t take = followCount - followed;
             size_t n;
-            if(take>4096)take=4096;
-            for(n=0;n<take;++n) {
-                double time=(double)(future+followed+n)/rate;
-                double unwrapped=phase+time*1023000.0*(1+doppler/1575420000.0);
-                double chip=fmod(unwrapped,4092);
-                double angle=6.283185307179586*((double)digitalIf+doppler)*time+0.71;
-                double amplitude=5*chips[(size_t)chip]*(chip-floor(chip)<0.5?1:-1);
-                if(((unsigned long long)floor(unwrapped/4092))%2u)amplitude=-amplitude;
-                if(stream.spectrumInverted)angle=-angle;
-                int i=(int)lround(amplitude*cos(angle)+28*Noise(&random)+2.3);
-                int q=(int)lround(amplitude*sin(angle)+28*Noise(&random)-1.7);
-                samples[n].i=(int8_t)i;samples[n].q=(int8_t)q;
-                if(wide){wideSamples[2*n]=(int16_t)(i*101);wideSamples[2*n+1]=(int16_t)(q*101);}
+            if (take > 4096)
+                take = 4096;
+            for (n = 0; n < take; ++n) {
+                double time = (double)(future + followed + n) / rate;
+                double unwrapped = phase + time * 1023000.0 * (1 + doppler / 1575420000.0);
+                double chip = fmod(unwrapped, 4092);
+                double angle = 6.283185307179586 * ((double)digitalIf + doppler) * time + 0.71;
+                double amplitude = 5 * chips[(size_t)chip] * (chip - floor(chip) < 0.5 ? 1 : -1);
+                if (((unsigned long long)floor(unwrapped / 4092)) % 2u)
+                    amplitude = -amplitude;
+                if (stream.spectrumInverted)
+                    angle = -angle;
+                int i = (int)lround(amplitude * cos(angle) + 28 * Noise(&random) + 2.3);
+                int q = (int)lround(amplitude * sin(angle) + 28 * Noise(&random) - 1.7);
+                samples[n].i = (int8_t)i;
+                samples[n].q = (int8_t)q;
+                if (wide) {
+                    wideSamples[2 * n] = (int16_t)(i * 101);
+                    wideSamples[2 * n + 1] = (int16_t)(q * 101);
+                }
             }
-            window.samples=wide?(const TNgIq8 *)wideSamples:samples;
-            window.meta.firstSample=1000000+future+followed;window.meta.count=take;
-            CHECK(NgTrackingProcess(tracking,&window,&error)==NG_OK);
-            followed+=take;
+            window.samples = wide ? (const TNgIq8 *)wideSamples : samples;
+            window.meta.firstSample = 1000000 + future + followed;
+            window.meta.count = take;
+            CHECK(NgTrackingProcess(tracking, &window, &error) == NG_OK);
+            followed += take;
         }
-        NgTrackingRead(tracking,&tracked);
+        NgTrackingRead(tracking, &tracked);
         CHECK(tracked.active && tracked.mainPeakVerified);
-        CHECK(fabs(tracked.dopplerHz-doppler)<5);
-        CHECK(hypot(tracked.i[1],tracked.q[1])>hypot(tracked.i[0],tracked.q[0]));
-        CHECK(hypot(tracked.i[1],tracked.q[1])>hypot(tracked.i[2],tracked.q[2]));
-        printf("Galileo acquisition-to-tracking handoff: Fs=%u native=%s main-peak=%d\n",
-               rate,wide?"CI16":"CI8",tracked.mainPeakVerified);
+        CHECK(fabs(tracked.dopplerHz - doppler) < 5);
+        CHECK(hypot(tracked.i[1], tracked.q[1]) > hypot(tracked.i[0], tracked.q[0]));
+        CHECK(hypot(tracked.i[1], tracked.q[1]) > hypot(tracked.i[2], tracked.q[2]));
+        printf("Galileo acquisition-to-tracking handoff: Fs=%u native=%s main-peak=%d\n", rate,
+               wide ? "CI16" : "CI8", tracked.mainPeakVerified);
         NgTrackingDestroy(tracking);
     }
     NgAcquisitionDestroy(acquisition);
@@ -316,8 +327,8 @@ static int Kernels(void)
     }
     NgSearchFftExecute(fft, values, 1);
     CHECK(fabs(values[3].i - 0.37) < 1e-6);
-    for (unsigned mode = NG_SEARCH_FFT_INTEGER_PRECISE;
-         mode <= NG_SEARCH_FFT_INTEGER_SCALED; ++mode) {
+    for (unsigned mode = NG_SEARCH_FFT_INTEGER_PRECISE; mode <= NG_SEARCH_FFT_INTEGER_SCALED;
+         ++mode) {
         memset(values, 0, sizeof(values));
         values[3].i = 0.37f;
         values[3].q = -0.19f;
@@ -328,8 +339,7 @@ static int Kernels(void)
                   (mode == NG_SEARCH_FFT_INTEGER_PRECISE ? 0.002 : 0.02));
         }
         NgSearchFftExecuteMode(fft, values, 1, (TNgSearchFftMode)mode);
-        CHECK(fabs(values[3].i - 0.37) <
-              (mode == NG_SEARCH_FFT_INTEGER_PRECISE ? 0.002 : 0.02));
+        CHECK(fabs(values[3].i - 0.37) < (mode == NG_SEARCH_FFT_INTEGER_PRECISE ? 0.002 : 0.02));
     }
     for (k = 0; k < 16; ++k)
         code[k] = k % 2 ? -1.0f : 1.0f;
@@ -526,33 +536,24 @@ static int GridGeometryContract(void)
         size_t size;
         int valid;
     } cases[] = {
-        {"GPS L1 C/A", 1, 1023999, 1024, 0},
-        {"GPS L1 C/A", 1, 1024000, 1024, 1},
-        {"GPS L1 C/A", 1, 2047999, 2048, 0},
-        {"GPS L1 C/A", 1, 2048000, 2048, 1},
-        {"GPS L1 C/A", 1, 4095999, 4096, 0},
-        {"GPS L1 C/A", 1, 4096000, 4096, 1},
-        {"Galileo E1-B", 4, 1023999, 4096, 0},
-        {"Galileo E1-B", 4, 1024000, 4096, 1},
-        {"Galileo E1-B", 4, 2047999, 8192, 0},
-        {"Galileo E1-B", 4, 2048000, 8192, 1},
-        {"Galileo E1-B", 4, 4095999, 16384, 0},
-        {"Galileo E1-B", 4, 4096000, 16384, 1},
-        {"BeiDou B1C", 10, 1638399, 16384, 0},
-        {"BeiDou B1C", 10, 1638400, 16384, 1},
-        {"BeiDou B1C", 10, 2048000, 16384, 1},
-        {"BeiDou B1C", 10, 8183800, 16384, 1},
-        {"BeiDou B1C", 10, 2048000, 20480, 0},
-        {"BeiDou B1C", 10, 8183800, 32768, 0},
-        {"BeiDou B1C", 10, 8183800, 81838, 0},
-        {"BeiDou B1C", 10, 8183800, 0, 0},
-        {"BeiDou B1C", 0,  8183800, 16384, 0},
+        {"GPS L1 C/A", 1, 1023999, 1024, 0},    {"GPS L1 C/A", 1, 1024000, 1024, 1},
+        {"GPS L1 C/A", 1, 2047999, 2048, 0},    {"GPS L1 C/A", 1, 2048000, 2048, 1},
+        {"GPS L1 C/A", 1, 4095999, 4096, 0},    {"GPS L1 C/A", 1, 4096000, 4096, 1},
+        {"Galileo E1-B", 4, 1023999, 4096, 0},  {"Galileo E1-B", 4, 1024000, 4096, 1},
+        {"Galileo E1-B", 4, 2047999, 8192, 0},  {"Galileo E1-B", 4, 2048000, 8192, 1},
+        {"Galileo E1-B", 4, 4095999, 16384, 0}, {"Galileo E1-B", 4, 4096000, 16384, 1},
+        {"BeiDou B1C", 10, 1638399, 16384, 0},  {"BeiDou B1C", 10, 1638400, 16384, 1},
+        {"BeiDou B1C", 10, 2048000, 16384, 1},  {"BeiDou B1C", 10, 8183800, 16384, 1},
+        {"BeiDou B1C", 10, 2048000, 20480, 0},  {"BeiDou B1C", 10, 8183800, 32768, 0},
+        {"BeiDou B1C", 10, 8183800, 81838, 0},  {"BeiDou B1C", 10, 8183800, 0, 0},
+        {"BeiDou B1C", 0, 8183800, 16384, 0},
     };
+
     for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); ++k) {
         TNgError error = {{0}};
         CHECK(NgAcquisitionValidateGrid(cases[k].signal, cases[k].rate, cases[k].periodMs,
-                                        cases[k].size, &error) ==
-              (cases[k].valid ? NG_OK : NG_ERROR));
+                                        cases[k].size,
+                                        &error) == (cases[k].valid ? NG_OK : NG_ERROR));
         if (!cases[k].valid)
             CHECK(strstr(error.message, cases[k].signal) != NULL);
     }
@@ -566,10 +567,11 @@ static int NativeGridContract(void)
         unsigned fftSize;
         int valid;
     } galileo[] = {
-        {2048000, 4096, 1}, {2048000, 8192, 1}, {2048000, 16384, 0},
+        {2048000, 4096, 1},  {2048000, 8192, 1},  {2048000, 16384, 0},
         {4095999, 16384, 0}, {4096000, 16384, 1}, {4096001, 16384, 1},
-        {2048000, 0, 1}, {4095999, 0, 1}, {4096000, 0, 1},
+        {2048000, 0, 1},     {4095999, 0, 1},     {4096000, 0, 1},
     };
+
     TNgAcquisitionConfig config;
     TNgStreamInfo stream = {0};
     TNgAcquisition *search;
@@ -640,8 +642,8 @@ static int BeidouScenario(void)
     capture.origin.firstSample = 8173921;
     NgAcquisitionDefaults(&config);
     CHECK(NgAcquisitionBeidouWorkspace(&capture.stream, &workspace, &error) == NG_OK);
-    CHECK(ngBeidouAcquisitionStrategy.search(workspace, &capture, prn, &config,
-          NeverCancel, NULL, &result, &error) == NG_OK);
+    CHECK(ngBeidouAcquisitionStrategy.search(workspace, &capture, prn, &config, NeverCancel, NULL,
+                                             &result, &error) == NG_OK);
     CHECK(result.confirmed && result.prn == prn && result.epoch == 9 &&
           result.firstSample == capture.origin.firstSample);
     CHECK(fabs(result.codePhaseChips - phase) < 0.15);

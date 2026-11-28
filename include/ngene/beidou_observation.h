@@ -13,9 +13,9 @@
 
 /** Per-PRN state, zero-initialized before use. The receiver owns one cache per satellite. */
 typedef struct {
-    TNgBroadcast broadcast; /**< Last matched orbit/clock pair, including latest health. */
+    TNgBroadcast broadcast;      /**< Last matched orbit/clock pair, including latest health. */
     uint64_t epoch, firstSample; /**< Continuity and SF1 first-chip sample. */
-    unsigned prn, week, tow; /**< Latest timing anchor in native BDT. */
+    unsigned prn, week, tow;     /**< Latest timing anchor in native BDT. */
 } TNgBcnv1Cache;
 
 /** Consume a frame returned by the B-CNAV1 decoder. Retains the last matched pair while

@@ -185,13 +185,13 @@ void NgControlSnapshot(TNgControl *control, TNgControlStatus *status);
 
 /** @brief Compact snapshot for control commands and capture-file operations. */
 typedef struct {
-    TNgRunState state;            /**< Receiver lifecycle state. */
+    TNgRunState state;             /**< Receiver lifecycle state. */
     TNgRecordState recordingState; /**< Recorder lifecycle state. */
-    uint64_t revision;            /**< Current configuration revision. */
-    uint64_t commandId;           /**< Most recently accepted command. */
-    uint64_t completedCommandId;  /**< Most recently completed command. */
-    char recordingName[160];      /**< Active capture basename. */
-    char outputDirectory[320];    /**< Receiver-side capture directory. */
+    uint64_t revision;             /**< Current configuration revision. */
+    uint64_t commandId;            /**< Most recently accepted command. */
+    uint64_t completedCommandId;   /**< Most recently completed command. */
+    char recordingName[160];       /**< Active capture basename. */
+    char outputDirectory[320];     /**< Receiver-side capture directory. */
 } TNgControlLifecycle;
 
 /**
@@ -205,7 +205,7 @@ void NgControlReadLifecycle(TNgControl *control, TNgControlLifecycle *status);
 void NgControlObserveChannel(TNgControl *control, unsigned channelId);
 /** Copy an archived completed coarse map, retained after stop and reset on start. */
 void NgControlAcquisitionSearchSpace(TNgControl *control, unsigned prn,
-                                    TNgAcquisitionSearchSpace *space);
+                                     TNgAcquisitionSearchSpace *space);
 /** Copy the archived Galileo map under the controller mutex. */
 void NgControlGalileoSearchSpace(TNgControl *control, unsigned prn,
                                  TNgAcquisitionSearchSpace *space);

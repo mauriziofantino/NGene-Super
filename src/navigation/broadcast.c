@@ -986,8 +986,8 @@ static void NgParseGpsIono(TNgNavParser *p)
     if (dataId != 1 || page != 56)
         return;
     for (k = 0; k < 8; ++k) {
-        double value = ldexp((double)NgExtractTwoCompField(p->subframe, first[k], first[k] + 1,
-                                                            6, 2, 8), shift[k]);
+        double value = ldexp(
+            (double)NgExtractTwoCompField(p->subframe, first[k], first[k] + 1, 6, 2, 8), shift[k]);
         if (k < 4)
             b->iono.alphaGps[k] = value;
         else

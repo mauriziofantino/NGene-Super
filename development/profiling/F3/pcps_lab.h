@@ -3,8 +3,14 @@
 #include "prepare_lab.h"
 
 typedef enum {
-    PCPS_CARRIER, PCPS_ROTATE, PCPS_FORWARD, PCPS_PRODUCT, PCPS_PACK,
-    PCPS_INVERSE, PCPS_POWER, PCPS_PART_COUNT
+    PCPS_CARRIER,
+    PCPS_ROTATE,
+    PCPS_FORWARD,
+    PCPS_PRODUCT,
+    PCPS_PACK,
+    PCPS_INVERSE,
+    PCPS_POWER,
+    PCPS_PART_COUNT
 } TPcpsPart;
 
 void NgPcpsProfilePart(TPcpsPart part, double *mark);

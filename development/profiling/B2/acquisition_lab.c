@@ -16,25 +16,25 @@
 #define CHECK(condition)                                                                           \
     do {                                                                                           \
         if (!(condition)) {                                                                        \
-            fprintf(stderr, "line %d: %s\n", __LINE__, #condition);                                 \
+            fprintf(stderr, "line %d: %s\n", __LINE__, #condition);                                \
             exit(1);                                                                               \
         }                                                                                          \
     } while (0)
 
 typedef struct {
-    TNgSearchFft *fft; /**< Shared tables for grid and zero-padded blocks. */
-    double nativeEnergy; /**< Matched replica energy for normalization. */
-    double gridEnergy; /**< Energy of the zero-lag grid replica. */
+    TNgSearchFft *fft;    /**< Shared tables for grid and zero-padded blocks. */
+    double nativeEnergy;  /**< Matched replica energy for normalization. */
+    double gridEnergy;    /**< Energy of the zero-lag grid replica. */
     size_t count, blocks; /**< Native samples per period and number of linear partitions. */
     TNgComplex *code, *carrier, *mixed, *capture; /**< Native samples in capture order. */
-    TNgComplex *codeSpectra, *signalSpectra; /**< Transform storage for linear blocks. */
-    TNgComplex *gridSpectrum, *work, *product; /**< Grid and independent FFT scratch. */
-    TNgComplex *map; /**< Complex cyclic correlation in increasing delay order. */
+    TNgComplex *codeSpectra, *signalSpectra;      /**< Transform storage for linear blocks. */
+    TNgComplex *gridSpectrum, *work, *product;    /**< Grid and independent FFT scratch. */
+    TNgComplex *map;      /**< Complex cyclic correlation in increasing delay order. */
     float *codeI, *codeQ; /**< Two repeated periods for contiguous real SIMD dot products. */
 } TNgB1cLab;
 
 typedef struct {
-    size_t delay; /**< Circular lag on the grid of the chosen backend. */
+    size_t delay;                   /**< Circular lag on the grid of the chosen backend. */
     double hz, power, milliseconds; /**< Best row frequency, peak power and scan wall time. */
 } TNgB1cPeak;
 
@@ -53,7 +53,7 @@ static void Accumulate(TNgComplex *to, const TNgComplex *from, size_t count)
 #if NG_SSE2
     for (; k + 2 <= count; k += 2)
         _mm_storeu_ps((float *)(to + k), _mm_add_ps(_mm_loadu_ps((const float *)(to + k)),
-                                                   _mm_loadu_ps((const float *)(from + k))));
+                                                    _mm_loadu_ps((const float *)(from + k))));
 #elif NG_NEON
     for (; k + 2 <= count; k += 2)
         vst1q_f32((float *)(to + k), vaddq_f32(vld1q_f32((const float *)(to + k)),
@@ -104,8 +104,7 @@ static void FilterReplica(TNgB1cLab *lab, uint32_t rate)
     const double cutoff = fmin(0.39, 2500000.0 / rate);
     double taps[17], gain = 0;
     for (int t = -8; t <= 8; ++t) {
-        const double sinc = t ? sin(NG_B1C_TAU * cutoff * t) / (0.5 * NG_B1C_TAU * t)
-                              : 2 * cutoff;
+        const double sinc = t ? sin(NG_B1C_TAU * cutoff * t) / (0.5 * NG_B1C_TAU * t) : 2 * cutoff;
         taps[t + 8] = sinc * (0.54 + 0.46 * cos(NG_B1C_TAU * t / 16));
         gain += taps[t + 8];
     }
@@ -162,8 +161,8 @@ static void Prepare(TNgB1cLab *lab, unsigned prn, uint32_t rate, int filtered)
 }
 
 /** Build a reproducible cyclic delay plus coherent carrier and independent complex noise. */
-static void Capture(TNgB1cLab *lab, uint32_t rate, size_t delay, double hz,
-                    unsigned interval, float amplitude)
+static void Capture(TNgB1cLab *lab, uint32_t rate, size_t delay, double hz, unsigned interval,
+                    float amplitude)
 {
     uint32_t noise = UINT32_C(2654435761) ^ (interval + 1u);
     for (size_t k = 0; k < lab->count; ++k) {
@@ -238,8 +237,8 @@ static size_t Distance(size_t a, size_t b, size_t count)
 }
 
 /** Accumulate a prompt span in the phase frame of the whole period. */
-static void PromptSpan(const TNgB1cLab *lab, size_t delay, size_t from, size_t to,
-                       double *i, double *q)
+static void PromptSpan(const TNgB1cLab *lab, size_t delay, size_t from, size_t to, double *i,
+                       double *q)
 {
     const size_t start = lab->count - delay + from;
     double ii, qi, iq, qq;
@@ -340,8 +339,7 @@ static TNgB1cPeak Coarse(TNgB1cLab *lab, uint32_t rate, TNgB1cCoarseMode mode)
 }
 
 /** Evaluate a separate Doppler interval and code interval with native SIMD prompts. */
-static TNgB1cPeak Refine(TNgB1cLab *lab, uint32_t rate, TNgB1cPeak coarse,
-                        size_t delay, double hz)
+static TNgB1cPeak Refine(TNgB1cLab *lab, uint32_t rate, TNgB1cPeak coarse, size_t delay, double hz)
 {
     TNgB1cPeak best = coarse;
     best.power = 0;
@@ -372,7 +370,7 @@ static TNgB1cPeak Refine(TNgB1cLab *lab, uint32_t rate, TNgB1cPeak coarse,
 
 /** Check three-of-four sequencing with disjoint clean/noise fixtures and a test-only amplitude cut. */
 static unsigned Confirm(TNgB1cLab *lab, uint32_t rate, TNgB1cPeak peak, size_t delay, double hz,
-                         unsigned present)
+                        unsigned present)
 {
     const double cut = 0.25 * (double)lab->count;
     unsigned successes = 0;
@@ -403,8 +401,8 @@ static TNgComplex Oracle(const TNgB1cLab *lab, size_t delay)
 static void Run(TNgB1cLab *lab, uint32_t rate, unsigned prn)
 {
     Prepare(lab, prn, rate, 0);
-    const size_t delays[] = {0, 1, lab->count - 1, lab->count / 3, NG_B1C_BLOCK - 1,
-                             NG_B1C_BLOCK, NG_B1C_BLOCK + 1};
+    const size_t delays[] = {
+        0, 1, lab->count - 1, lab->count / 3, NG_B1C_BLOCK - 1, NG_B1C_BLOCK, NG_B1C_BLOCK + 1};
     for (unsigned t = 0; t < sizeof(delays) / sizeof(*delays); ++t) {
         const size_t delay = delays[t];
         const double coarseHz = t < 3 ? 0 : (t % 2 == 0 ? 100 : -100);
@@ -422,20 +420,25 @@ static void Run(TNgB1cLab *lab, uint32_t rate, unsigned prn)
         Mix(lab, rate, hz);
         BlockMap(lab);
         const size_t halfChip = (rate + NG_BEIDOU_B1C_RATE_HZ) / (2 * NG_BEIDOU_B1C_RATE_HZ);
-        const size_t probes[] = {0, 1, lab->count - 1, delay, (delay + halfChip) % lab->count,
-                                  (delay + NG_B1C_BLOCK) % lab->count, lab->count / 2};
+        const size_t probes[] = {0,
+                                 1,
+                                 lab->count - 1,
+                                 delay,
+                                 (delay + halfChip) % lab->count,
+                                 (delay + NG_B1C_BLOCK) % lab->count,
+                                 lab->count / 2};
         double residual = 0;
         for (unsigned k = 0; k < sizeof(probes) / sizeof(*probes); ++k) {
             const TNgComplex sample = lab->map[probes[k]];
             const TNgComplex ref = Oracle(lab, probes[k]);
-            const double error = hypot((double)sample.i - ref.i, (double)sample.q - ref.q) /
-                                 (double)lab->count;
+            const double error =
+                hypot((double)sample.i - ref.i, (double)sample.q - ref.q) / (double)lab->count;
             if (error > residual)
                 residual = error;
         }
         CHECK(residual < 2e-6);
-        const double sidelobe = Power(lab->map[(delay + halfChip) % lab->count]) /
-                                Power(lab->map[delay]);
+        const double sidelobe =
+            Power(lab->map[(delay + halfChip) % lab->count]) / Power(lab->map[delay]);
         const double nativeEnergy = lab->nativeEnergy;
         const double blockGain = block.power / (nativeEnergy * nativeEnergy);
         const double gridGain = grid.power / (lab->gridEnergy * lab->gridEnergy);
@@ -447,8 +450,8 @@ static void Run(TNgB1cLab *lab, uint32_t rate, unsigned prn)
         CHECK(Confirm(lab, rate, refined, delay, hz, 0) == 0);
         refined = Refine(lab, rate, grid, delay, hz);
         CHECK(refined.delay == delay && refined.hz == hz);
-        printf("%u,%u,%zu,%.0f,%zu,%.0f,%zu,%.0f,%.3f,%.3f,%.8g,%.6f,%.4f\n",
-               rate, prn, delay, hz, Distance(grid.delay, delay, lab->count), grid.hz,
+        printf("%u,%u,%zu,%.0f,%zu,%.0f,%zu,%.0f,%.3f,%.3f,%.8g,%.6f,%.4f\n", rate, prn, delay, hz,
+               Distance(grid.delay, delay, lab->count), grid.hz,
                Distance(refined.delay, delay, lab->count), refined.hz, grid.milliseconds,
                block.milliseconds, residual, sidelobe, gridLossDb);
     }
@@ -473,8 +476,8 @@ static void Sweep(TNgB1cLab *lab, uint32_t rate, unsigned prn)
     Prepare(lab, prn, rate, 1);
     for (unsigned level = 0; level < sizeof(amplitudes) / sizeof(*amplitudes); ++level) {
         for (unsigned t = 0; t < 24; ++t) {
-            const size_t delay = t < 12 ? (lab->count + t - 6) % lab->count :
-                                         (lab->count / 3 + t - 12) % lab->count;
+            const size_t delay =
+                t < 12 ? (lab->count + t - 6) % lab->count : (lab->count / 3 + t - 12) % lab->count;
             const double hz = (t % 2 == 0) ? 30 : -30;
             TNgB1cPeak peak[3];
             Capture(lab, rate, delay, hz, t, amplitudes[level]);
@@ -490,8 +493,8 @@ static void Sweep(TNgB1cLab *lab, uint32_t rate, unsigned prn)
                 const double energy = m == 2 ? lab->nativeEnergy : lab->gridEnergy;
                 const double normalized = peak[m].power / (energy * energy);
                 const double exact = peak[2].power / (lab->nativeEnergy * lab->nativeEnergy);
-                printf("%u,%u,%.3f,%zu,%.0f,%u,%zu,%.0f,%d,%.3f,%.5f,%.9g\n",
-                       rate, prn, amplitudes[level], delay, hz, m, miss, peak[m].hz,
+                printf("%u,%u,%.3f,%zu,%.0f,%u,%zu,%.0f,%d,%.3f,%.5f,%.9g\n", rate, prn,
+                       amplitudes[level], delay, hz, m, miss, peak[m].hz,
                        miss <= radius && peak[m].hz == 0.0, peak[m].milliseconds,
                        10 * log10(normalized / exact), trancheError);
             }
@@ -532,8 +535,9 @@ int main(int argc, char **argv)
         Sweep(&lab, 8000000, 33);
         Sweep(&lab, 8183800, 63);
     } else {
-        puts("rate_hz,prn,delay,doppler_hz,grid_error,grid_hz,refined_grid_error,refined_grid_hz,"
-             "grid_ms,block_ms,max_normalized_complex_error,half_chip_relative_power,grid_relative_peak_db");
+        puts(
+            "rate_hz,prn,delay,doppler_hz,grid_error,grid_hz,refined_grid_error,refined_grid_hz,"
+            "grid_ms,block_ms,max_normalized_complex_error,half_chip_relative_power,grid_relative_peak_db");
         Run(&lab, 2048000, 1);
         Run(&lab, 2048000, 32);
         Run(&lab, 8183800, 33);

@@ -13,20 +13,24 @@
 
 /** Receiver-owned pool. All allocation/assignment happens outside DSP jobs. */
 typedef struct {
-    TNgEgnos *egnos;                     /**< Optional GPS L1 augmentation channel. */
-    TNgPvtSnapshot pvt;                   /**< Last common-epoch code/Doppler solve. */
-    double sampleRate;                    /**< Actual source pairs per second. */
-    uint64_t lastPvtSample;               /**< Last periodic solver invocation. */
-    TNgTrackingConfig config;             /**< Frozen total capacity and reservations. */
-    TNgTracking *tracking[64];            /**< One reusable private workspace per receiver slot. */
-    TNgChannel jobs[64];                  /**< Stable identities independent of constellation. */
-    TNgTrackingSnapshot slots[64];        /**< Copied observation state. */
-    unsigned reservation[64];             /**< 0 shared, 1 GPS, 2 Galileo. */
-    TNgChannel captures[NG_CONSTELLATION_COUNT];               /**< Borrowed original acquisition registrations. */
-    TNgAcquisition *acquisition[NG_CONSTELLATION_COUNT];       /**< Borrowed workers. */
-    TNgAcquisitionResult accepted[NG_CONSTELLATION_COUNT][NG_SATELLITE_MAX_PRN]; /**< Consumed seeds. */
-    TNgBroadcast broadcast[NG_CONSTELLATION_COUNT][NG_SATELLITE_MAX_PRN]; /**< Classic satellite cache survives slot reacquisition. */
-    TNgChannelDispatch *dispatch;  /**< One fixed pool for all slots. */
+    TNgEgnos *egnos;               /**< Optional GPS L1 augmentation channel. */
+    TNgPvtSnapshot pvt;            /**< Last common-epoch code/Doppler solve. */
+    double sampleRate;             /**< Actual source pairs per second. */
+    uint64_t lastPvtSample;        /**< Last periodic solver invocation. */
+    TNgTrackingConfig config;      /**< Frozen total capacity and reservations. */
+    TNgTracking *tracking[64];     /**< One reusable private workspace per receiver slot. */
+    TNgChannel jobs[64];           /**< Stable identities independent of constellation. */
+    TNgTrackingSnapshot slots[64]; /**< Copied observation state. */
+    unsigned reservation[64];      /**< 0 shared, 1 GPS, 2 Galileo. */
+    TNgChannel
+        captures[NG_CONSTELLATION_COUNT]; /**< Borrowed original acquisition registrations. */
+    TNgAcquisition *acquisition[NG_CONSTELLATION_COUNT]; /**< Borrowed workers. */
+    TNgAcquisitionResult accepted[NG_CONSTELLATION_COUNT]
+                                 [NG_SATELLITE_MAX_PRN]; /**< Consumed seeds. */
+    TNgBroadcast broadcast
+        [NG_CONSTELLATION_COUNT]
+        [NG_SATELLITE_MAX_PRN];   /**< Classic satellite cache survives slot reacquisition. */
+    TNgChannelDispatch *dispatch; /**< One fixed pool for all slots. */
     uint64_t epoch, firstSample, expected; /**< Common-window identity. */
     size_t count;                          /**< Last window sample count. */
     int haveWindow;                        /**< A frame has been processed. */
@@ -37,9 +41,9 @@ typedef struct {
     TNgBlockMeta lastInput;   /**< Deduplicate GPS/Galileo subscriptions before batching. */
     int haveInput;
     unsigned char batch[20000u * 4u * NG_BANK_BATCH_MS]; /**< One batch, allocated before RX. */
-    TNgIqView pending;                /**< Owned batch geometry; no ring pointer retained. */
-    size_t batchLimit;                /**< NG_BANK_BATCH_MS * ceil(actual sample rate / 1000). */
-    size_t order[64];                 /**< Dispatch claim order, costliest slots first. */
+    TNgIqView pending; /**< Owned batch geometry; no ring pointer retained. */
+    size_t batchLimit; /**< NG_BANK_BATCH_MS * ceil(actual sample rate / 1000). */
+    size_t order[64];  /**< Dispatch claim order, costliest slots first. */
 } TNgChannelPool;
 
 /** A light signal subscriber points to the same shared pool after linking. */
@@ -136,7 +140,7 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
         unsigned n = 0, pass;
         for (pass = 0; pass < 3; ++pass)
             for (k = 0; k < pool->config.channelCount; ++k) {
-                unsigned rank = !pool->slots[k].active ? 2u
+                unsigned rank = !pool->slots[k].active              ? 2u
                                 : pool->slots[k].constellation == 2 ? 0u
                                                                     : 1u;
                 if (rank == pass)
@@ -263,7 +267,7 @@ static int Frame(TNgChannelPool *pool, const TNgIqView *window, TNgError *error)
                                                      : 0u;
         NgAcquisitionSetBudget(pool->acquisition[system], delay);
         NgAcquisitionSetAdmissionMask(pool->acquisition[system], mask[system],
-                                  slot == pool->config.channelCount);
+                                      slot == pool->config.channelCount);
         for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane) {
             unsigned prn = searches[system].currentPrns[lane];
             slot = FreeSlot(pool, system + 1, 1);
@@ -287,11 +291,10 @@ static int Accumulate(TNgChannelPool *pool, const TNgIqView *window, TNgError *e
         pool->lastInput.firstSample == window->meta.firstSample &&
         pool->lastInput.count == window->meta.count)
         return NG_OK;
-    int discontinuity =
-        (window->meta.flags & NG_BLOCK_GAP) ||
-        (pool->haveInput && (pool->lastInput.epoch != window->meta.epoch ||
-                             pool->lastInput.firstSample + pool->lastInput.count !=
-                                 window->meta.firstSample));
+    int discontinuity = (window->meta.flags & NG_BLOCK_GAP) ||
+                        (pool->haveInput && (pool->lastInput.epoch != window->meta.epoch ||
+                                             pool->lastInput.firstSample + pool->lastInput.count !=
+                                                 window->meta.firstSample));
     if (discontinuity && pool->pending.meta.count) {
         /* The batch before a discontinuity is contiguous signal: process it, then restart. */
         if (Frame(pool, &pool->pending, error) != NG_OK)
@@ -417,11 +420,11 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
     pool->captures[bank->system] = *channel;
     pool->acquisition[bank->system] = acquisition;
     for (k = 0; k < config->channelCount; ++k) {
-        pool->reservation[k] = k < config->gpsChannels                             ? 1u
-                               : k < config->gpsChannels + config->galileoChannels ? 2u
-                               : k < config->gpsChannels + config->galileoChannels +
-                                         config->beidouChannels ? 3u
-                                                               : 0u;
+        pool->reservation[k] =
+            k < config->gpsChannels                                                      ? 1u
+            : k < config->gpsChannels + config->galileoChannels                          ? 2u
+            : k < config->gpsChannels + config->galileoChannels + config->beidouChannels ? 3u
+                                                                                         : 0u;
         if (NgTrackingCreate(config, stream, 1, &pool->tracking[k], error) != NG_OK) {
             NgTrackingBankDestroy(bank);
             return NG_ERROR;
@@ -524,8 +527,8 @@ int NgTrackingBankLink(TNgTrackingBank *gps, TNgTrackingBank *galileo, TNgError 
     const unsigned target = galileo->system;
     if (gps->pool->acquisition[target])
         return NgFail(error, "Duplicate signal subscriber");
-    if (NgAcquisitionLink(gps->pool->acquisition[gps->system],
-                          galileo->pool->acquisition[target], error) != NG_OK)
+    if (NgAcquisitionLink(gps->pool->acquisition[gps->system], galileo->pool->acquisition[target],
+                          error) != NG_OK)
         return NG_ERROR;
     gps->pool->captures[target] = galileo->pool->captures[target];
     gps->pool->acquisition[target] = galileo->pool->acquisition[target];

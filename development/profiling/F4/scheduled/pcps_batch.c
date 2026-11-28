@@ -63,8 +63,8 @@ static void ProcessRows(void *context)
     BatchLane *lane = context;
     lane->status = NG_ERROR;
     for (unsigned bin = lane->index; bin < batch.ops->rows; bin += batch.count) {
-        if (batch.ops->row(lane->workspace, batch.prn, batch.frequency(bin),
-                           batch.square, batch.mode) != NG_OK)
+        if (batch.ops->row(lane->workspace, batch.prn, batch.frequency(bin), batch.square,
+                           batch.mode) != NG_OK)
             return;
         size_t size;
         const double *row = batch.ops->power(lane->workspace, &size);
@@ -75,8 +75,8 @@ static void ProcessRows(void *context)
     lane->status = NG_OK;
 }
 
-int F4BatchFill(F4BatchFrequency frequency, unsigned prn, int square,
-                TNgSearchFftMode mode, double *power, size_t size)
+int F4BatchFill(F4BatchFrequency frequency, unsigned prn, int square, TNgSearchFftMode mode,
+                double *power, size_t size)
 {
     if (!batch.maps || size != batch.size)
         return NG_ERROR;
@@ -116,12 +116,11 @@ int F4BatchRead(unsigned bin, double *power, size_t size)
 
 void F4BatchReport(double prepare, double search, double cpu)
 {
-    printf("batch,%u,%.9f,%.9f,%.9f,%.9f,%zu\n", batch.count,
-           prepare, search, cpu, batch.fill_seconds, batch.bytes);
+    printf("batch,%u,%.9f,%.9f,%.9f,%.9f,%zu\n", batch.count, prepare, search, cpu,
+           batch.fill_seconds, batch.bytes);
 }
 
 void F4BatchFree(void)
 {
     free(batch.maps);
 }
-

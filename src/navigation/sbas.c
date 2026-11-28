@@ -98,8 +98,8 @@ static void LongTerm(TNgSbasCorrections *bank, const uint8_t *data, unsigned sta
         bank->orbit[i].iode = Bits(data, base + 6, 8);
         for (unsigned axis = 0; axis < 3; ++axis) {
             bank->orbit[i].xyz[axis] = 0.125 * Signed(data, base + 14 + axis * width, width);
-            bank->orbit[i].velocity[axis] = dynamic ?
-                ldexp(Signed(data, base + 58 + 8 * axis, 8), -11) : 0;
+            bank->orbit[i].velocity[axis] =
+                dynamic ? ldexp(Signed(data, base + 58 + 8 * axis, 8), -11) : 0;
         }
         bank->orbit[i].clock = ldexp(Signed(data, base + 14 + 3 * width, dynamic ? 11u : 10u), -31);
         bank->orbit[i].drift = dynamic ? ldexp(Signed(data, base + 82, 8), -39) : 0;
@@ -131,7 +131,8 @@ static void IonoMessage(TNgSbasCorrections *bank, const uint8_t *data, unsigned 
             }
         }
         const unsigned issue = Bits(data, 22, 2);
-        if (grid->issue != issue || grid->count != count || memcmp(grid->mask, mask, sizeof(mask))) {
+        if (grid->issue != issue || grid->count != count ||
+            memcmp(grid->mask, mask, sizeof(mask))) {
             memset(grid, 0, sizeof(*grid));
         }
         memcpy(grid->mask, mask, sizeof(mask));
@@ -143,14 +144,16 @@ static void IonoMessage(TNgSbasCorrections *bank, const uint8_t *data, unsigned 
         for (unsigned i = 0; i < 15 && start + i < grid->count; ++i) {
             const unsigned delay = Bits(data, 22 + 13 * i, 9);
             const unsigned give = Bits(data, 31 + 13 * i, 4);
-            grid->delay[start + i] = (uint16_t)(delay == 511 ? UINT16_MAX : give == 15 ? 0 : delay + 1);
+            grid->delay[start + i] = (uint16_t)(delay == 511 ? UINT16_MAX
+                                                : give == 15 ? 0
+                                                             : delay + 1);
             grid->time[start + i] = now;
         }
     }
 }
 
-int NgSbasPushFrame(TNgSbasCorrections *bank, const uint8_t data[NG_SBAS_FRAME_BYTES],
-                    double now)
+/** Validate CRC and chronological order before changing the correction bank. */
+int NgSbasPushFrame(TNgSbasCorrections *bank, const uint8_t data[NG_SBAS_FRAME_BYTES], double now)
 {
     if (!bank || !data || !isfinite(now) || now < 0 || !Valid(data) ||
         (bank->frameCount && now <= bank->lastFrame)) {
@@ -191,8 +194,9 @@ int NgSbasPushFrame(TNgSbasCorrections *bank, const uint8_t data[NG_SBAS_FRAME_B
     return 1;
 }
 
-int NgSbasRead(const TNgSbasCorrections *bank, unsigned prn, unsigned iode, double now,
-               double tx, TNgSbasCorrection *out)
+/** Require matching broadcast IODE and both valid differential corrections. */
+int NgSbasRead(const TNgSbasCorrections *bank, unsigned prn, unsigned iode, double now, double tx,
+               TNgSbasCorrection *out)
 {
     if (!out) {
         return 0;
@@ -225,8 +229,8 @@ int NgSbasRead(const TNgSbasCorrections *bank, unsigned prn, unsigned iode, doub
 }
 
 /** Interpolate a rectangle or a triangle that contains the pierce point. */
-static int GridCell(const TNgSbasCorrections *bank, double now, double x, double y,
-                    int west, int south, int width, int height, double *delay)
+static int GridCell(const TNgSbasCorrections *bank, double now, double x, double y, int west,
+                    int south, int width, int height, double *delay)
 {
     if (south < 0 || south + height > 30) {
         return 0;
@@ -234,8 +238,8 @@ static int GridCell(const TNgSbasCorrections *bank, double now, double x, double
     const unsigned w = (unsigned)(west + 72) % 72;
     const unsigned e = (unsigned)(west + width + 72) % 72;
     const unsigned lower = (unsigned)south, upper = (unsigned)(south + height);
-    const unsigned corners[4] = {1 + 31 * w + lower, 1 + 31 * w + upper,
-                                 1 + 31 * e + lower, 1 + 31 * e + upper};
+    const unsigned corners[4] = {1 + 31 * w + lower, 1 + 31 * w + upper, 1 + 31 * e + lower,
+                                 1 + 31 * e + upper};
     unsigned found = 0, issue = 0;
     double values[4] = {0};
     for (unsigned b = 0; b < 9 && found != 15; ++b) {
@@ -263,12 +267,30 @@ static int GridCell(const TNgSbasCorrections *bank, double now, double x, double
     const double dx = (x - west) / width, dy = (y - south) / height;
     double weights[4] = {(1 - dx) * (1 - dy), (1 - dx) * dy, dx * (1 - dy), dx * dy};
     switch (found) {
-    case 15: break;
-    case 14: weights[1] = 1 - dx; weights[2] = 1 - dy; weights[3] = dx + dy - 1; break;
-    case 13: weights[0] = 1 - dx; weights[2] = dx - dy; weights[3] = dy; break;
-    case 11: weights[0] = 1 - dy; weights[1] = dy - dx; weights[3] = dx; break;
-    case 7: weights[0] = 1 - dx - dy; weights[1] = dy; weights[2] = dx; break;
-    default: return 0;
+    case 15:
+        break;
+    case 14:
+        weights[1] = 1 - dx;
+        weights[2] = 1 - dy;
+        weights[3] = dx + dy - 1;
+        break;
+    case 13:
+        weights[0] = 1 - dx;
+        weights[2] = dx - dy;
+        weights[3] = dy;
+        break;
+    case 11:
+        weights[0] = 1 - dy;
+        weights[1] = dy - dx;
+        weights[3] = dx;
+        break;
+    case 7:
+        weights[0] = 1 - dx - dy;
+        weights[1] = dy;
+        weights[2] = dx;
+        break;
+    default:
+        return 0;
     }
     double value = 0;
     for (unsigned k = 0; k < 4; ++k) {
@@ -283,22 +305,24 @@ static int GridCell(const TNgSbasCorrections *bank, double now, double x, double
     return found == 15 ? 2 : 1;
 }
 
-int NgSbasIonosphere(const TNgSbasCorrections *bank, double now, double latitude,
-                    double longitude, double azimuth, double elevation, double *delay)
+/** Project the line of sight onto the 350-km shell and interpolate eligible grid points. */
+int NgSbasIonosphere(const TNgSbasCorrections *bank, double now, double latitude, double longitude,
+                     double azimuth, double elevation, double *delay)
 {
     const double degree = 0.017453292519943295;
     if (!bank || !delay || !(elevation > 0) || !isfinite(latitude) || !isfinite(longitude) ||
-        !isfinite(azimuth) || !isfinite(now) || now < bank->blockedUntil ||
-        now < bank->lastFrame || now - bank->lastFrame > 4) {
+        !isfinite(azimuth) || !isfinite(now) || now < bank->blockedUntil || now < bank->lastFrame ||
+        now - bank->lastFrame > 4) {
         return 0;
     }
     const double ratio = 6378.1363 / (6378.1363 + 350);
     const double zenith = ratio * cos(elevation);
     const double psi = 90 * degree - elevation - asin(zenith);
-    const double phi = asin(fmax(-1, fmin(1, sin(latitude) * cos(psi) +
-                               cos(latitude) * sin(psi) * cos(azimuth))));
-    const double lambda = longitude + atan2(sin(psi) * sin(azimuth),
-                        cos(latitude) * cos(psi) - sin(latitude) * sin(psi) * cos(azimuth));
+    const double phi =
+        asin(fmax(-1, fmin(1, sin(latitude) * cos(psi) + cos(latitude) * sin(psi) * cos(azimuth))));
+    const double lambda =
+        longitude + atan2(sin(psi) * sin(azimuth),
+                          cos(latitude) * cos(psi) - sin(latitude) * sin(psi) * cos(azimuth));
     const double y = (phi / degree + 75) / 5;
     if (y < 0 || y >= 30) {
         return 0;
@@ -312,8 +336,8 @@ int NgSbasIonosphere(const TNgSbasCorrections *bank, double now, double latitude
         for (int row = 0; row < height && best != 2; ++row) {
             for (int col = 0; col < width && best != 2; ++col) {
                 double cell;
-                const int kind = GridCell(bank, now, x, y, (int)x - col, (int)y - row,
-                                          width, height, &cell);
+                const int kind =
+                    GridCell(bank, now, x, y, (int)x - col, (int)y - row, width, height, &cell);
                 if (kind > best) {
                     best = kind;
                     value = cell;

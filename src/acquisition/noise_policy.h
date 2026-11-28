@@ -2,6 +2,7 @@
 #ifndef NG_ACQUISITION_NOISE_POLICY_H
 #define NG_ACQUISITION_NOISE_POLICY_H
 #include <math.h>
+
 /** Integer-shape gamma survival inverse, same statistical equation as Classic FalseAlarm.
  * Returns threshold / mean single-period noise power for a SUM of periods powers. */
 static double AcquisitionThreshold(unsigned periods, double pfa)

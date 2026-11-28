@@ -196,17 +196,22 @@ static int ParseBool(const char *text, int *value)
 
 static int ParseSearchFft(const char *text, TNgSearchFftMode *mode)
 {
-    if (strcmp(text, "float") == 0) *mode = NG_SEARCH_FFT_FLOAT;
-    else if (strcmp(text, "integer_precise") == 0) *mode = NG_SEARCH_FFT_INTEGER_PRECISE;
-    else if (strcmp(text, "integer_scaled") == 0) *mode = NG_SEARCH_FFT_INTEGER_SCALED;
-    else return NG_ERROR;
+    if (strcmp(text, "float") == 0)
+        *mode = NG_SEARCH_FFT_FLOAT;
+    else if (strcmp(text, "integer_precise") == 0)
+        *mode = NG_SEARCH_FFT_INTEGER_PRECISE;
+    else if (strcmp(text, "integer_scaled") == 0)
+        *mode = NG_SEARCH_FFT_INTEGER_SCALED;
+    else
+        return NG_ERROR;
     return NG_OK;
 }
 
 static const char *SearchFftName(TNgSearchFftMode mode)
 {
-    return mode == NG_SEARCH_FFT_INTEGER_PRECISE ? "integer_precise" :
-           mode == NG_SEARCH_FFT_INTEGER_SCALED ? "integer_scaled" : "float";
+    return mode == NG_SEARCH_FFT_INTEGER_PRECISE  ? "integer_precise"
+           : mode == NG_SEARCH_FFT_INTEGER_SCALED ? "integer_scaled"
+                                                  : "float";
 }
 
 /**
@@ -264,10 +269,10 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     if (strcmp(key, "pvt.carrier_smoothing_length") == 0) {
         return ParseU64(value, &n) == NG_OK && n <= 1024 ? NG_OK : NG_ERROR;
     }
-    if (strcmp(key,"tracking.enabled")==0 || strcmp(key,"acquisition.enabled")==0 ||
-        strcmp(key,"galileo_acquisition.enabled")==0) {
+    if (strcmp(key, "tracking.enabled") == 0 || strcmp(key, "acquisition.enabled") == 0 ||
+        strcmp(key, "galileo_acquisition.enabled") == 0) {
         int legacy;
-        return ParseBool(value,&legacy); /* Accepted on import; stages remain active. */
+        return ParseBool(value, &legacy); /* Accepted on import; stages remain active. */
     }
     UINT_KEY("receiver.channels", tracking.channelCount)
     UINT_KEY("receiver.gps_reserved", tracking.gpsChannels)
@@ -288,10 +293,12 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
             for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
                 char option[48];
                 TNgLoopSettings *settings = &c->tracking.loops[signal][loop];
-                snprintf(option, sizeof(option), "%s_%s_bandwidth_hz", loopSignals[signal], loopNames[loop]);
+                snprintf(option, sizeof(option), "%s_%s_bandwidth_hz", loopSignals[signal],
+                         loopNames[loop]);
                 if (strcmp(key + 9, option) == 0)
                     return ParseReal(value, &settings->bandwidthHz);
-                snprintf(option, sizeof(option), "%s_%s_gain", loopSignals[signal], loopNames[loop]);
+                snprintf(option, sizeof(option), "%s_%s_gain", loopSignals[signal],
+                         loopNames[loop]);
                 if (strcmp(key + 9, option) == 0)
                     return ParseReal(value, &settings->gain);
             }
@@ -609,7 +616,9 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
                  strcmp(section, "replay") != 0 && strcmp(section, "analysis") != 0 &&
                  strcmp(section, "rtlsdr") != 0 && strcmp(section, "bladerf") != 0 &&
                  strcmp(section, "tracking") != 0 && strcmp(section, "dsp") != 0 &&
-                 strcmp(section, "navigation") != 0 && strcmp(section, "pvt") != 0 && strcmp(section, "acquisition") != 0 && strcmp(section, "galileo_acquisition") != 0 &&
+                 strcmp(section, "navigation") != 0 && strcmp(section, "pvt") != 0 &&
+                 strcmp(section, "acquisition") != 0 &&
+                 strcmp(section, "galileo_acquisition") != 0 &&
                  strcmp(section, "beidou_acquisition") != 0)) {
                 return NgFail(error, "Unknown section at line %zu", number);
             }
@@ -679,7 +688,8 @@ int NgConfigValidate(const TNgConfig *config, TNgError *error)
         return NG_ERROR;
     if (NgAcquisitionValidate(&config->galileoAcquisition, error) != NG_OK)
         return NG_ERROR;
-    if (NgTrackingValidate(&config->tracking, error) != NG_OK) return NG_ERROR;
+    if (NgTrackingValidate(&config->tracking, error) != NG_OK)
+        return NG_ERROR;
     if (NgAcquisitionValidate(&config->acquisition, error) != NG_OK)
         return NG_ERROR;
     if (config->dcRemoval != 0 ||
@@ -870,25 +880,30 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
     fprintf(output, "\n[receiver]\nmode=%s\nrun_seconds=%.17g\nidle_timeout_ms=%u\n",
             (config->recordOnly) != 0 ? "record" : "capture", config->runSeconds,
             config->idleTimeoutMs);
-    fprintf(output,"channels=%u\ngps_reserved=%u\ngalileo_reserved=%u\nbeidou_reserved=%u\nauto_priority=%u\n",
-            config->tracking.channelCount,config->tracking.gpsChannels,
-            config->tracking.galileoChannels,config->tracking.beidouChannels,config->tracking.autoPriority);
+    fprintf(
+        output,
+        "channels=%u\ngps_reserved=%u\ngalileo_reserved=%u\nbeidou_reserved=%u\nauto_priority=%u\n",
+        config->tracking.channelCount, config->tracking.gpsChannels,
+        config->tracking.galileoChannels, config->tracking.beidouChannels,
+        config->tracking.autoPriority);
     fprintf(output, "egnos=%s\n", config->tracking.egnosEnabled ? "true" : "false");
-    fprintf(output,"\n[tracking]\nworkers=%u\ntap_count=%u\nspacing_chips=%.17g\n"
-                   "galileo_spacing_slots=%.17g\ndoppler_smoothing_ms=%u\n",config->tracking.workers,
-            config->tracking.tapCount,config->tracking.spacingChips,
-            2.0 * config->tracking.galileoSpacingChips,config->tracking.dopplerSmoothingMs);
+    fprintf(output,
+            "\n[tracking]\nworkers=%u\ntap_count=%u\nspacing_chips=%.17g\n"
+            "galileo_spacing_slots=%.17g\ndoppler_smoothing_ms=%u\n",
+            config->tracking.workers, config->tracking.tapCount, config->tracking.spacingChips,
+            2.0 * config->tracking.galileoSpacingChips, config->tracking.dopplerSmoothingMs);
     for (unsigned signal = 0; signal < NG_TRACKING_EGNOS_SIGNAL; ++signal) {
         for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
             const TNgLoopSettings settings = config->tracking.loops[signal][loop];
-            fprintf(output, "%s_%s_bandwidth_hz=%.17g\n%s_%s_gain=%.17g\n",
-                    loopSignals[signal], loopNames[loop], settings.bandwidthHz,
-                    loopSignals[signal], loopNames[loop], settings.gain);
+            fprintf(output, "%s_%s_bandwidth_hz=%.17g\n%s_%s_gain=%.17g\n", loopSignals[signal],
+                    loopNames[loop], settings.bandwidthHz, loopSignals[signal], loopNames[loop],
+                    settings.gain);
         }
     }
     fprintf(output, "gps_coherent_ms=%u\ngps_transition_checks=%u\n",
             config->tracking.gpsCoherentMs, config->tracking.gpsTransitionChecks);
-    fprintf(output, "fll_decision_updates=%u\nfll_decision_interval_ms=%u\nfll_transition_hz=%.17g\n",
+    fprintf(output,
+            "fll_decision_updates=%u\nfll_decision_interval_ms=%u\nfll_transition_hz=%.17g\n",
             config->tracking.fllDecisionUpdates, config->tracking.fllDecisionIntervalMs,
             config->tracking.fllTransitionHz);
     fprintf(output, "beidou_spacing_chips=%.17g\n", config->tracking.beidouSpacingChips);
@@ -896,27 +911,27 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
             config->tracking.egnosSpacingChips, config->tracking.cn0CutoffDbHz);
     fprintf(output, "\n[navigation]\nbroadcast_ionosphere=%s\n",
             config->tracking.broadcastIonosphere ? "true" : "false");
-    fprintf(output,"\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\ncpu_budget=%.17g\n",
-            config->acquisition.firstPrn,config->acquisition.lastPrn,config->acquisition.falseAlarmProbability,
-            config->acquisition.cpuBudget);
+    fprintf(output, "\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\ncpu_budget=%.17g\n",
+            config->acquisition.firstPrn, config->acquisition.lastPrn,
+            config->acquisition.falseAlarmProbability, config->acquisition.cpuBudget);
     fprintf(output, "\n[beidou_acquisition]\nfirst_prn=%u\nlast_prn=%u\n",
             config->beidouAcquisition.firstPrn, config->beidouAcquisition.lastPrn);
-    fprintf(output,"\n[galileo_acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\nfft_size=%u\n",
-            config->galileoAcquisition.firstPrn,config->galileoAcquisition.lastPrn,
-            config->galileoAcquisition.falseAlarmProbability,
-            config->galileoAcquisition.fftSize);
-    fprintf(output,"\n[dsp]\ntracking_fast_carrier=%s\ntracking_square_carrier=%s\n"
-                   "tracking_xor_correlation=%s\ntracking_mixer_bits=%u\n"
-                   "gps_square_carrier=%s\ngps_xor_correlation=%s\n"
-                   "galileo_square_carrier=%s\ngalileo_xor_correlation=%s\n"
-                   "gps_fft=%s\ngalileo_fft=%s\nspectrum_fft=%s\n",
-            config->tracking.fastCarrier?"true":"false",
-            config->tracking.squareCarrier?"true":"false",
-            config->tracking.xorCorrelation?"true":"false",config->tracking.mixerBits,
-            config->acquisition.squareCarrier?"true":"false",
-            config->acquisition.xorCorrelation?"true":"false",
-            config->galileoAcquisition.squareCarrier?"true":"false",
-            config->galileoAcquisition.xorCorrelation?"true":"false",
+    fprintf(output, "\n[galileo_acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\nfft_size=%u\n",
+            config->galileoAcquisition.firstPrn, config->galileoAcquisition.lastPrn,
+            config->galileoAcquisition.falseAlarmProbability, config->galileoAcquisition.fftSize);
+    fprintf(output,
+            "\n[dsp]\ntracking_fast_carrier=%s\ntracking_square_carrier=%s\n"
+            "tracking_xor_correlation=%s\ntracking_mixer_bits=%u\n"
+            "gps_square_carrier=%s\ngps_xor_correlation=%s\n"
+            "galileo_square_carrier=%s\ngalileo_xor_correlation=%s\n"
+            "gps_fft=%s\ngalileo_fft=%s\nspectrum_fft=%s\n",
+            config->tracking.fastCarrier ? "true" : "false",
+            config->tracking.squareCarrier ? "true" : "false",
+            config->tracking.xorCorrelation ? "true" : "false", config->tracking.mixerBits,
+            config->acquisition.squareCarrier ? "true" : "false",
+            config->acquisition.xorCorrelation ? "true" : "false",
+            config->galileoAcquisition.squareCarrier ? "true" : "false",
+            config->galileoAcquisition.xorCorrelation ? "true" : "false",
             SearchFftName(config->acquisition.fftMode),
             SearchFftName(config->galileoAcquisition.fftMode),
             SearchFftName(config->analysis.fftMode));

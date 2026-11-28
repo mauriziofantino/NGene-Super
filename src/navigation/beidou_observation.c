@@ -85,11 +85,10 @@ int NgBcnv1Accept(TNgBcnv1Cache *cache, const TNgBcnv1Frame *frame, uint64_t epo
     const unsigned tow = frame->hour * 3600u + frame->soh * 18u;
     TNgBcnv1Cache next = {0};
     if (cache->prn && epoch == cache->epoch) {
-        const unsigned deltaWeek = (frame->week + NG_BDS_WN_MODULUS - cache->week) %
-                                   NG_BDS_WN_MODULUS;
+        const unsigned deltaWeek =
+            (frame->week + NG_BDS_WN_MODULUS - cache->week) % NG_BDS_WN_MODULUS;
         const double elapsed = (double)deltaWeek * NG_BDT_WEEK_SECONDS + tow - cache->tow;
-        if (firstSample <= cache->firstSample || elapsed <= 0 ||
-            deltaWeek >= NG_BDS_WN_MODULUS / 2)
+        if (firstSample <= cache->firstSample || elapsed <= 0 || deltaWeek >= NG_BDS_WN_MODULUS / 2)
             return NG_END;
         if (elapsed <= NG_BCNV1_MAX_BROADCAST_AGE)
             next = *cache;
@@ -105,8 +104,8 @@ int NgBcnv1Accept(TNgBcnv1Cache *cache, const TNgBcnv1Frame *frame, uint64_t epo
         fabs(Age(tow, next.broadcast.clk.toc)) > NG_BCNV1_MAX_BROADCAST_AGE)
         next.broadcast.ephemeridesReceived = 0;
     next.broadcast.satelliteId = (int)frame->prn;
-    next.broadcast.eph.health = frame->pageId < 1 || frame->pageId > 4 ||
-                                frame->health || frame->dif || frame->sif || frame->aif;
+    next.broadcast.eph.health = frame->pageId < 1 || frame->pageId > 4 || frame->health ||
+                                frame->dif || frame->sif || frame->aif;
     next.broadcast.subframe2Received = 1;
     next.broadcast.subframe3Received = frame->pageId >= 1 && frame->pageId <= 4;
     /* B1C SIS ICD Figure 6-8 and Table 7-10. Keep the last accepted page
@@ -116,8 +115,8 @@ int NgBcnv1Accept(TNgBcnv1Cache *cache, const TNgBcnv1Frame *frame, uint64_t epo
         next.broadcast.iono.alphaBds[0] = (double)Read(frame->sf3, &bit, 10) / 8.0;
         for (unsigned k = 1; k < 9; ++k) {
             next.broadcast.iono.alphaBds[k] =
-                (k == 1 || k >= 5) ? Signed(frame->sf3, &bit, 8, -3) :
-                (k == 4 ? -0.125 : 0.125) * (double)Read(frame->sf3, &bit, 8);
+                (k == 1 || k >= 5) ? Signed(frame->sf3, &bit, 8, -3)
+                                   : (k == 4 ? -0.125 : 0.125) * (double)Read(frame->sf3, &bit, 8);
         }
         bit += 36; /* A0UTC, A1UTC and A2UTC precede delta-tLS. */
         next.broadcast.iono.utcLeap = (int)Signed(frame->sf3, &bit, 8, 0);

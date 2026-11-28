@@ -74,8 +74,8 @@ static double Noise(uint32_t *seed)
     return (double)(*seed >> 8) / 16777216.0 - 0.5;
 }
 
-static uint64_t Fixture(TNgComplex *samples, const TNgAcquisitionCapture *capture,
-                         int galileo, int scenario)
+static uint64_t Fixture(TNgComplex *samples, const TNgAcquisitionCapture *capture, int galileo,
+                        int scenario)
 {
     int8_t chips[4092];
     uint32_t seed = 20261121;
@@ -111,8 +111,8 @@ static uint64_t Fixture(TNgComplex *samples, const TNgAcquisitionCapture *captur
     for (size_t k = 0; k < capture->count; ++k) {
         double t = (double)k / rate;
         double phase = fmod(123.42 + t * 1023000.0 * (1 + doppler / 1575420000.0), length);
-        double carrier = 6.283185307179586 * ((double)capture->stream.digitalIfHz + doppler) * t +
-                         0.71;
+        double carrier =
+            6.283185307179586 * ((double)capture->stream.digitalIfHz + doppler) * t + 0.71;
         double amplitude = signalAmplitude * chips[(unsigned)phase];
         if (galileo && phase - floor(phase) >= 0.5)
             amplitude = -amplitude;
@@ -286,8 +286,9 @@ static void Verify(TLane *lane, TNgSearchFftMode mode, int scenario)
     double cpuStart = ProcessCpuSeconds();
     double searchStart = NgMonotonicSeconds();
 #endif
-    Check(lane->ops->strategy->search(lane->workspace, &lane->capture, lane->capture.displayPrn, &config,
-                                     Trace, &trace, &result, &error) == NG_OK, error.message);
+    Check(lane->ops->strategy->search(lane->workspace, &lane->capture, lane->capture.displayPrn,
+                                      &config, Trace, &trace, &result, &error) == NG_OK,
+          error.message);
 #ifdef F4_PCPS_BATCH
     double searchSeconds = NgMonotonicSeconds() - searchStart;
     double searchCpu = ProcessCpuSeconds() - cpuStart;
@@ -298,10 +299,10 @@ static void Verify(TLane *lane, TNgSearchFftMode mode, int scenario)
     if (trace.mapDump)
         Check(fclose(trace.mapDump) == 0, "Cannot close F4 coarse map");
     const TNgAcquisitionSearchSpace *space = lane->ops->space(lane->workspace);
-    printf("verify,%d,%016" PRIx64 ",%a,%a,%a,%a,%a,%a,%a,%d,%u,%u\n",
-           scenario, trace.hash, trace.noise, space->threshold, space->peakDopplerHz,
-           space->peakCodePhaseChips, result.peakRatio, result.dopplerHz, result.codePhaseChips,
-           result.confirmed, result.successes, trace.seen);
+    printf("verify,%d,%016" PRIx64 ",%a,%a,%a,%a,%a,%a,%a,%d,%u,%u\n", scenario, trace.hash,
+           trace.noise, space->threshold, space->peakDopplerHz, space->peakCodePhaseChips,
+           result.peakRatio, result.dopplerHz, result.codePhaseChips, result.confirmed,
+           result.successes, trace.seen);
 #ifdef F4_PCPS_BATCH
     F4BatchReport(searchStart - prepareStart, searchSeconds, searchCpu);
 #endif
@@ -321,18 +322,19 @@ int main(int argc, char **argv)
     TNgAcquisitionCapture capture = {0};
     TNgError error = {{0}};
     TLane lanes[LANES] = {0};
-    Check((galileo || strcmp(argv[1], "gps") == 0) && (count == 1 || count == LANES
+    Check((galileo || strcmp(argv[1], "gps") == 0) &&
+              (count == 1 || count == LANES
 #ifdef F4_PCPS_BATCH
-           || count == 2
+               || count == 2
 #endif
-          ) &&
-          scenario >= 0 &&
+               ) &&
+              scenario >= 0 &&
 #ifdef NGENE_PCPS_LAB
-          scenario <= 5 &&
+              scenario <= 5 &&
 #else
-          scenario <= 3 &&
+              scenario <= 3 &&
 #endif
-          mode >= 0 && mode <= NG_SEARCH_FFT_INTEGER_SCALED,
+              mode >= 0 && mode <= NG_SEARCH_FFT_INTEGER_SCALED,
           "Invalid profile arguments");
     capture.stream.sampleRateHz = rate;
     capture.stream.digitalIfHz = ifHz;
@@ -358,8 +360,8 @@ int main(int argc, char **argv)
     } else
 #endif
         hash = Fixture(samples, &capture, galileo, scenario);
-    printf("fixture,%s,%u,%u,%d,%d,%u,%zu,%016" PRIx64 "\n", argv[1], rate, grid, ifHz, mode,
-           count, capture.count, hash);
+    printf("fixture,%s,%u,%u,%d,%d,%u,%zu,%016" PRIx64 "\n", argv[1], rate, grid, ifHz, mode, count,
+           capture.count, hash);
     size_t residentBefore = Resident();
     double start = NgMonotonicSeconds();
     for (unsigned k = 0; k < count; ++k) {
@@ -377,10 +379,11 @@ int main(int argc, char **argv)
         for (unsigned k = 0; k < count; ++k)
             workspaces[k] = lanes[k].workspace;
         printf("allocated,%zu\n", requestedBytes);
-        Check(NgPcpsLab(ops, &capture, workspaces, count, mode, scenario) == NG_OK, "PCPS lab failed");
+        Check(NgPcpsLab(ops, &capture, workspaces, count, mode, scenario) == NG_OK,
+              "PCPS lab failed");
     } else
 #endif
-    if (scenario) {
+        if (scenario) {
 #ifdef F4_PCPS_BATCH
         void *workspaces[LANES];
         for (unsigned k = 0; k < count; ++k)
@@ -418,8 +421,8 @@ int main(int argc, char **argv)
                 NgThreadJoin(threads[k]);
                 Check(lanes[k].status == NG_OK, "Prepare cancellation or retry failed");
                 if (trial >= WARMUPS)
-                    printf("time,%u,%u,%.9f,%.9f,%.9f\n", trial - WARMUPS, k,
-                           lanes[k].elapsed, lanes[k].cancelLag, lanes[k].longestGap);
+                    printf("time,%u,%u,%.9f,%.9f,%.9f\n", trial - WARMUPS, k, lanes[k].elapsed,
+                           lanes[k].cancelLag, lanes[k].longestGap);
             }
         }
     }

@@ -7,8 +7,8 @@
 typedef struct TNgEgnos TNgEgnos;
 
 /** Prepare one optional GEO tracker and one private search worker. */
-int NgEgnosCreate(const TNgStreamInfo *stream, const TNgTrackingConfig *config,
-                  TNgEgnos **out, TNgError *error);
+int NgEgnosCreate(const TNgStreamInfo *stream, const TNgTrackingConfig *config, TNgEgnos **out,
+                  TNgError *error);
 /** Process one unique common input interval, before computing PVT. */
 int NgEgnosProcess(TNgEgnos *egnos, const TNgIqView *view, int searchAllowed, TNgError *error);
 /** Free the tracker after joining the private search worker. */
@@ -22,6 +22,6 @@ unsigned NgEgnosPrn(const TNgEgnos *egnos);
 
 /** Start a private C/A tracker and route its 1-ms prompts to the GEO decoder. */
 int NgTrackingSeedEgnos(TNgTracking *tracking, const TNgAcquisitionResult *result,
-                        void (*prompt)(void *context, double value, uint64_t sample),
-                        void *context, TNgError *error);
+                        void (*prompt)(void *context, double value, uint64_t sample), void *context,
+                        TNgError *error);
 #endif

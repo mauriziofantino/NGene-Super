@@ -46,10 +46,9 @@ static int Measure(size_t n, TNgSearchFftMode mode)
             return 0;
         }
         if (frame) {
-            printf("%zu,%u,%" PRIu64 ",%" PRIu32 ",%.17g,%.17g,%.6f,%.6f\n",
-                   n, frame, result.firstSample, result.integrity.checksum, result.peakHz,
-                   result.peakDbfs, result.computeMs,
-                   1000 * (result.producedSeconds - result.capturedSeconds));
+            printf("%zu,%u,%" PRIu64 ",%" PRIu32 ",%.17g,%.17g,%.6f,%.6f\n", n, frame,
+                   result.firstSample, result.integrity.checksum, result.peakHz, result.peakDbfs,
+                   result.computeMs, 1000 * (result.producedSeconds - result.capturedSeconds));
         }
         view.meta.firstSample += view.meta.count;
         NgSleepMs(36);
@@ -62,8 +61,8 @@ int main(int argc, char **argv)
 {
     if (argc > 2 || (argc == 2 && strcmp(argv[1], "--q14") != 0))
         return EXIT_FAILURE;
-    const TNgSearchFftMode mode = argc == 2 ? NG_SEARCH_FFT_INTEGER_SCALED :
-                                            NG_SEARCH_FFT_INTEGER_PRECISE;
+    const TNgSearchFftMode mode =
+        argc == 2 ? NG_SEARCH_FFT_INTEGER_SCALED : NG_SEARCH_FFT_INTEGER_PRECISE;
     for (size_t k = 0; k < sizeof(samples) / sizeof(samples[0]); ++k) {
         const double phase = 6.283185307179586 * (double)(k % 16) / 16;
         samples[k].i = (int8_t)lround(64 * cos(phase));

@@ -24,12 +24,12 @@ void NgFftQ14StageAvx2(int16_t *data, const int16_t *twiddles, size_t n, size_t 
             const __m256i signs = _mm256_srai_epi16(top, 15);
             const __m256i low = _mm256_unpacklo_epi16(top, signs);
             const __m256i high = _mm256_unpackhi_epi16(top, signs);
-            const __m256i sum = _mm256_packs_epi32(
-                _mm256_srai_epi32(_mm256_add_epi32(low, prodLow), 1),
-                _mm256_srai_epi32(_mm256_add_epi32(high, prodHigh), 1));
-            const __m256i diff = _mm256_packs_epi32(
-                _mm256_srai_epi32(_mm256_sub_epi32(low, prodLow), 1),
-                _mm256_srai_epi32(_mm256_sub_epi32(high, prodHigh), 1));
+            const __m256i sum =
+                _mm256_packs_epi32(_mm256_srai_epi32(_mm256_add_epi32(low, prodLow), 1),
+                                   _mm256_srai_epi32(_mm256_add_epi32(high, prodHigh), 1));
+            const __m256i diff =
+                _mm256_packs_epi32(_mm256_srai_epi32(_mm256_sub_epi32(low, prodLow), 1),
+                                   _mm256_srai_epi32(_mm256_sub_epi32(high, prodHigh), 1));
             _mm256_storeu_si256((__m256i *)(void *)(u + 2 * j), sum);
             _mm256_storeu_si256((__m256i *)(void *)(v + 2 * j), diff);
         }

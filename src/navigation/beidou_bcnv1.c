@@ -18,13 +18,13 @@ typedef struct {
 
 typedef struct {
     int belief[NG_BCNV1_MAX_SYMBOLS][NG_BCNV1_GF]; /**< Current symbol metrics. */
-    int edge[NG_BCNV1_MAX_ROWS][4][NG_BCNV1_GF]; /**< Previous check messages. */
-    uint8_t gf[NG_BCNV1_GF][NG_BCNV1_GF]; /**< GF(64) product permutations. */
+    int edge[NG_BCNV1_MAX_ROWS][4][NG_BCNV1_GF];   /**< Previous check messages. */
+    uint8_t gf[NG_BCNV1_GF][NG_BCNV1_GF];          /**< GF(64) product permutations. */
 } TNgBcnv1Ldpc;
 
 typedef struct {
     unsigned soh, errors; /**< Header SOH index and BCH Hamming distance. */
-    int inverted; /**< Received polarity relative to the ICD. */
+    int inverted;         /**< Received polarity relative to the ICD. */
 } TNgBcnv1Header;
 
 static const TNgBcnv1Code sf2Code = {sf2Columns, sf2Coefficients, 100};
@@ -152,8 +152,7 @@ static void UpdateRow(TNgBcnv1Ldpc *work, const TNgBcnv1Code *code, unsigned row
 }
 
 /** Decode with a hard-decision fast path, then bounded soft iterations if needed. */
-static int Ldpc(const TNgBcnv1Code *code, const int16_t *llr, uint8_t *bytes,
-                unsigned *changed)
+static int Ldpc(const TNgBcnv1Code *code, const int16_t *llr, uint8_t *bytes, unsigned *changed)
 {
     uint8_t hard[NG_BCNV1_MAX_SYMBOLS], word[NG_BCNV1_MAX_SYMBOLS];
     const unsigned symbols = 2 * code->rows;
@@ -236,8 +235,7 @@ static unsigned Field(const uint8_t *bytes, unsigned start, unsigned width)
 }
 
 /** Reverse the joint interleaver and publish only a fully checked candidate. */
-static int Payload(const int8_t *symbols, unsigned prn, TNgBcnv1Header header,
-                   TNgBcnv1Frame *frame)
+static int Payload(const int8_t *symbols, unsigned prn, TNgBcnv1Header header, TNgBcnv1Frame *frame)
 {
     int16_t sf2[1200], sf3[528];
     unsigned n2 = 0, n3 = 0;
@@ -284,8 +282,7 @@ static int Payload(const int8_t *symbols, unsigned prn, TNgBcnv1Header header,
     return NG_OK;
 }
 
-int NgBcnv1Decode(const int8_t symbols[NG_BCNV1_FRAME_SYMBOLS], unsigned prn,
-                  TNgBcnv1Frame *frame)
+int NgBcnv1Decode(const int8_t symbols[NG_BCNV1_FRAME_SYMBOLS], unsigned prn, TNgBcnv1Frame *frame)
 {
     TNgBcnv1Header header;
     if (!symbols || !frame || !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn))
@@ -321,8 +318,7 @@ int NgBcnv1Find(const int8_t *symbols, size_t count, unsigned prn, size_t *offse
 
 /** Evaluate each complete framing window once and preserve its SF1 sample anchor. */
 int NgBcnv1Push(TNgBcnv1Stream *stream, unsigned prn, uint64_t epoch, uint64_t firstSample,
-                uint64_t endSample, int8_t symbol, TNgBcnv1Frame *frame,
-                uint64_t *frameStartSample)
+                uint64_t endSample, int8_t symbol, TNgBcnv1Frame *frame, uint64_t *frameStartSample)
 {
     if (!stream || !frame || !frameStartSample || endSample <= firstSample ||
         !NgSatellitePrnValid(NG_CONSTELLATION_BEIDOU, prn))
@@ -360,11 +356,11 @@ int NgBcnv1Push(TNgBcnv1Stream *stream, unsigned prn, uint64_t epoch, uint64_t f
         }
     }
     size_t offset;
-    const int result = NgBcnv1Find(stream->symbols + stream->writeIndex, stream->count,
-                                   prn, &offset, frame);
+    const int result =
+        NgBcnv1Find(stream->symbols + stream->writeIndex, stream->count, prn, &offset, frame);
     if (result == NG_OK) {
-        *frameStartSample = stream->firstSamples[(stream->writeIndex + offset) %
-                                                NG_BCNV1_SYNC_SYMBOLS];
+        *frameStartSample =
+            stream->firstSamples[(stream->writeIndex + offset) % NG_BCNV1_SYNC_SYMBOLS];
         stream->elapsedSymbols = NG_BCNV1_SYNC_SYMBOLS;
         stream->lastSoh = frame->soh;
         stream->nextFrame = NG_BCNV1_FRAME_SYMBOLS - NG_BCNV1_HEADER_SYMBOLS;

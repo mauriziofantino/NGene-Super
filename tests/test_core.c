@@ -62,7 +62,8 @@ static void TestConfig(void)
     CHECK(Parse("[galileo_acquisition]\nlast_prn=33\n", &c) == NG_ERROR);
     CHECK(Parse("[galileo_acquisition]\nenabled=maybe\n", &c) == NG_ERROR);
     CHECK(Parse("[beidou_acquisition]\nenabled=true\nfirst_prn=33\nlast_prn=63\n"
-                "[receiver]\nbeidou_reserved=4\n", &c) == NG_OK);
+                "[receiver]\nbeidou_reserved=4\n",
+                &c) == NG_OK);
     CHECK(c.beidouAcquisition.enabled && c.beidouAcquisition.firstPrn == 33 &&
           c.beidouAcquisition.lastPrn == 63 && c.tracking.beidouChannels == 4);
     CHECK(Parse("[beidou_acquisition]\nlast_prn=64\n", &c) == NG_ERROR);
@@ -136,7 +137,8 @@ static void TestConfig(void)
     CHECK(Parse("[galileo_acquisition]\nfft_size=2048\n", &c) == NG_ERROR);
     CHECK(Parse("[tracking]\nfast_carrier=true\n", &c) == NG_OK && c.tracking.fastCarrier == 1);
     CHECK(Parse("[dsp]\ngps_fft=integer_precise\ngalileo_fft=integer_scaled\n"
-                "spectrum_fft=float\ntracking_mixer_bits=16\n", &c) == NG_OK &&
+                "spectrum_fft=float\ntracking_mixer_bits=16\n",
+                &c) == NG_OK &&
           c.acquisition.fftMode == NG_SEARCH_FFT_INTEGER_PRECISE &&
           c.galileoAcquisition.fftMode == NG_SEARCH_FFT_INTEGER_SCALED &&
           c.analysis.fftMode == NG_SEARCH_FFT_FLOAT && c.tracking.mixerBits == 16);

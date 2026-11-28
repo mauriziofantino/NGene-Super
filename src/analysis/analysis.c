@@ -206,8 +206,7 @@ int NgAnalysisValidate(const TNgAnalysisConfig *config, TNgError *error)
 {
     if (config == NULL || config->fftSize < NG_SPECTRUM_MIN_FFT_SIZE ||
         config->fftSize > NG_FFT_MAX_SIZE || ((config->fftSize) & (config->fftSize - 1)) != 0 ||
-        config->fftMode < NG_SEARCH_FFT_FLOAT ||
-        config->fftMode > NG_SEARCH_FFT_INTEGER_SCALED ||
+        config->fftMode < NG_SEARCH_FFT_FLOAT || config->fftMode > NG_SEARCH_FFT_INTEGER_SCALED ||
         config->window < NG_WINDOW_RECT || config->window > NG_WINDOW_BLACKMAN_HARRIS ||
         config->overlapPercent > NG_SPECTRUM_MAX_OVERLAP_PERCENT || config->averages < 1 ||
         config->averages > NG_SPECTRUM_MAX_AVERAGES || isfinite(config->updateHz) == 0 ||
@@ -539,27 +538,27 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                 return 0;
             }
             if (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED)
-            for (k = 0; k < n; ++k) {
-                int iValue, qValue;
-                iValue = a->centered[2 * (offset + k)];
-                qValue = a->centered[2 * (offset + k) + 1];
-                {
-                    int32_t product = (int32_t)iValue * fftScale * a->window[k];
-                    if (b->format == NG_FORMAT_CI16)
-                        product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
-                    if (fftAttenuated)
-                        product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
-                    a->input[2 * k] = (int16_t)Shift15(product);
+                for (k = 0; k < n; ++k) {
+                    int iValue, qValue;
+                    iValue = a->centered[2 * (offset + k)];
+                    qValue = a->centered[2 * (offset + k) + 1];
+                    {
+                        int32_t product = (int32_t)iValue * fftScale * a->window[k];
+                        if (b->format == NG_FORMAT_CI16)
+                            product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                        if (fftAttenuated)
+                            product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                        a->input[2 * k] = (int16_t)Shift15(product);
+                    }
+                    {
+                        int32_t product = (int32_t)qValue * fftScale * a->window[k];
+                        if (b->format == NG_FORMAT_CI16)
+                            product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                        if (fftAttenuated)
+                            product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
+                        a->input[2 * k + 1] = (int16_t)Shift15(product);
+                    }
                 }
-                {
-                    int32_t product = (int32_t)qValue * fftScale * a->window[k];
-                    if (b->format == NG_FORMAT_CI16)
-                        product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
-                    if (fftAttenuated)
-                        product = product >= 0 ? product / 2 : -1 - ((-1 - product) / 2);
-                    a->input[2 * k + 1] = (int16_t)Shift15(product);
-                }
-            }
             if (BurstCurrent(a, b) == 0) {
                 return 0;
             }
@@ -572,10 +571,10 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
                 double scale = (double)fftScale * (b->format == NG_FORMAT_CI16 ? 0.5 : 1.0) *
                                (fftAttenuated ? 0.5 : 1.0) / 32768.0;
                 for (k = 0; k < n; ++k) {
-                    a->alternateInput[k].i = (float)((double)a->centered[2 * (offset + k)] *
-                                                      scale * a->window[k]);
-                    a->alternateInput[k].q = (float)((double)a->centered[2 * (offset + k) + 1] *
-                                                      scale * a->window[k]);
+                    a->alternateInput[k].i =
+                        (float)((double)a->centered[2 * (offset + k)] * scale * a->window[k]);
+                    a->alternateInput[k].q =
+                        (float)((double)a->centered[2 * (offset + k) + 1] * scale * a->window[k]);
                 }
                 NgSearchFftExecuteMode(a->searchPlan, a->alternateInput, 0, c->fftMode);
                 for (k = 0; k < n; ++k) {
@@ -593,8 +592,8 @@ static int Calculate(TNgAnalysis *a, const TNgBurst *b, TNgAnalysisSnapshot *s)
             a->temporalContinuity = b->continuity;
         }
         for (k = 0; k < n; ++k) {
-            double value = (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED ?
-                            (double)a->power[k] : a->alternatePower[k]) *
+            double value = (c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED ? (double)a->power[k]
+                                                                       : a->alternatePower[k]) *
                            (fftAttenuated ? 4.0 : 1.0) /
                            ((double)c->averages * 16384 * 16384 * gain * gain);
             if (c->density != 0) {

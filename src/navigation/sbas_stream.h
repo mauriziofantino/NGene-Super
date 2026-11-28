@@ -21,6 +21,12 @@ typedef struct {
     unsigned havePrompt, parity, pairPhase[2];
 } TNgSbasStream;
 
-/** Feed a coherent 1-ms in-phase prompt, delivering CRC-valid frames to the bank. */
+/** @brief Submit one consecutive 1-ms in-phase prompt to the SBAS decoder.
+ * @param[in,out] stream Zero-initialized Viterbi and symbol phase state.
+ * @param[in,out] bank Correction bank for this GEO assignment.
+ * @param[in] prompt Signed coherent I in native ADC units per sample.
+ * @param[in] now End of the prompt in receiver signal seconds.
+ * The receiver thread owns both objects and resets them on discontinuity.
+ */
 void NgSbasPrompt(TNgSbasStream *stream, TNgSbasCorrections *bank, double prompt, double now);
 #endif

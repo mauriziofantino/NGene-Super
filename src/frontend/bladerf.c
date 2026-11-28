@@ -48,8 +48,7 @@ typedef struct {
 static void TransportFailure(TNgBladerfSource *source, const char *message)
 {
     NgMutexLock(&source->ingress.mutex);
-    (void)snprintf(source->transportDiagnostic, sizeof(source->transportDiagnostic), "%s",
-                   message);
+    (void)snprintf(source->transportDiagnostic, sizeof(source->transportDiagnostic), "%s", message);
     NgMutexUnlock(&source->ingress.mutex);
     NgIngressTransportError(&source->ingress);
 }
@@ -175,8 +174,8 @@ static void Receive(void *context)
             NgFail(&diagnostic,
                    "bladerf_sync_rx failed: %s (%d); actual_count=%u requested=%u "
                    "timestamp=%" PRIu64 " status=0x%08" PRIx32,
-                   bladerf_strerror(result), result, metadata.actual_count,
-                   source->transferSamples, metadata.timestamp, metadata.status);
+                   bladerf_strerror(result), result, metadata.actual_count, source->transferSamples,
+                   metadata.timestamp, metadata.status);
             TransportFailure(source, diagnostic.message);
             break;
         }
@@ -214,8 +213,7 @@ static void Receive(void *context)
          * the hardware clock intact and omit that pair rather than delivering
          * duplicate time to the DSP. Larger regressions remain terminal. */
         if (metadata.timestamp < source->expectedTimestamp &&
-            source->expectedTimestamp - metadata.timestamp == 1 &&
-            metadata.actual_count > 1) {
+            source->expectedTimestamp - metadata.timestamp == 1 && metadata.actual_count > 1) {
             overlap = 1;
             ++metadata.timestamp;
             --metadata.actual_count;
@@ -235,9 +233,9 @@ static void Receive(void *context)
             break;
         }
         missing = metadata.timestamp - source->expectedTimestamp;
-        view.samples = (const TNgIq8 *)(const void *)
-            ((const unsigned char *)source->buffer +
-             (size_t)overlap * NgSampleBytes(source->ingress.format));
+        view.samples =
+            (const TNgIq8 *)(const void *)((const unsigned char *)source->buffer +
+                                           (size_t)overlap * NgSampleBytes(source->ingress.format));
         view.format = source->ingress.format;
         view.meta.count = metadata.actual_count;
         view.meta.firstSample = metadata.timestamp - source->origin;

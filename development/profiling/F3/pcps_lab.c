@@ -72,8 +72,8 @@ static void Measure(void *context)
     }
     ++lane->capture.origin.epoch;
     double start = NgMonotonicSeconds();
-    if (ops->strategy->search(lane->workspace, &lane->capture, PRN, &lane->config,
-                              NeverCancel, NULL, &result, &error) != NG_OK ||
+    if (ops->strategy->search(lane->workspace, &lane->capture, PRN, &lane->config, NeverCancel,
+                              NULL, &result, &error) != NG_OK ||
         !result.confirmed || result.successes != 3)
         return;
     lane->searchTime = NgMonotonicSeconds() - start;

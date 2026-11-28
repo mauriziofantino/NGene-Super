@@ -145,7 +145,8 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     fprintf(stderr, "system %u inverted %d sign %d Doppler %.6f DLL %.6f PLL %d\n", system,
             inverted, offsetSign, snapshot.dopplerHz, snapshot.dllError, snapshot.pll);
     CHECK(snapshot.active && snapshot.pll);
-    if (system == NG_CONSTELLATION_GPS) CHECK(snapshot.loopCoherentMs == coherentMs);
+    if (system == NG_CONSTELLATION_GPS)
+        CHECK(snapshot.loopCoherentMs == coherentMs);
     CHECK(fabs(snapshot.dopplerHz - 350) < 0.5);
     CHECK(fabs(snapshot.dllError) < 0.05);
     if (seconds > 1) {
@@ -204,7 +205,8 @@ static void Cn0Reference(void)
     for (ms = 1; ms <= 30000; ++ms) {
         for (n = 0; n < 2048; ++n) {
             double phase = fmod(0.25 + (double)n * 1023000 / 2048000, 1023);
-            samples[n].i = (int8_t)lround((double)chips[(size_t)phase] * ((ms / 20) % 2 ? -1 : 1) + 8 * Gaussian(&random));
+            samples[n].i = (int8_t)lround((double)chips[(size_t)phase] * ((ms / 20) % 2 ? -1 : 1) +
+                                          8 * Gaussian(&random));
             samples[n].q = (int8_t)lround(8 * Gaussian(&random));
         }
         view.meta.firstSample = (uint64_t)ms * 2048;
@@ -328,37 +330,36 @@ static void QuantizedMixContract(void)
         input[k].q = (int8_t)(k == 1 ? -128 : (int)(k * 43) % 256 - 128);
     }
     for (mode = 4; mode <= 16; mode *= 2)
-    for (inverted = 0; inverted < 2; ++inverted) {
-        NgSearchMixPrefixCi8Arithmetic(prefix, input, 65, 8183800, 38500, 0.37,
-                                       inverted, mode);
-        ci = cos(-6.28318530717958647692 * 0.37);
-        cq = sin(-6.28318530717958647692 * 0.37);
-        di = cos(-6.28318530717958647692 * 38500 / 8183800);
-        dq = sin(-6.28318530717958647692 * 38500 / 8183800);
-        sumI = sumQ = 0;
-        for (k = 0; k < 65; ++k) {
-            int c = (int)lround(7 * ci), s = (int)lround(7 * cq);
-            int i = input[k].i, q = input[k].q;
-            int real = i * c - q * s, imag = i * s + q * c;
-            double next = ci * di - cq * dq;
-            if (mode == 4) {
-                i = i >= 0 ? i / 16 : -1 - ((-1 - i) / 16);
-                q = q >= 0 ? q / 16 : -1 - ((-1 - q) / 16);
+        for (inverted = 0; inverted < 2; ++inverted) {
+            NgSearchMixPrefixCi8Arithmetic(prefix, input, 65, 8183800, 38500, 0.37, inverted, mode);
+            ci = cos(-6.28318530717958647692 * 0.37);
+            cq = sin(-6.28318530717958647692 * 0.37);
+            di = cos(-6.28318530717958647692 * 38500 / 8183800);
+            dq = sin(-6.28318530717958647692 * 38500 / 8183800);
+            sumI = sumQ = 0;
+            for (k = 0; k < 65; ++k) {
+                int c = (int)lround(7 * ci), s = (int)lround(7 * cq);
+                int i = input[k].i, q = input[k].q;
+                int real = i * c - q * s, imag = i * s + q * c;
+                double next = ci * di - cq * dq;
+                if (mode == 4) {
+                    i = i >= 0 ? i / 16 : -1 - ((-1 - i) / 16);
+                    q = q >= 0 ? q / 16 : -1 - ((-1 - q) / 16);
+                }
+                q *= inverted ? -1 : 1;
+                real = i * c - q * s;
+                imag = i * s + q * c;
+                if (mode == 8) {
+                    real = real < 0 ? -((-real + 8) / 16) : (real + 8) / 16;
+                    imag = imag < 0 ? -((-imag + 8) / 16) : (imag + 8) / 16;
+                }
+                sumI += (double)real * (mode == 16 ? 1.0 / 7.0 : 16.0 / 7.0);
+                sumQ += (double)imag * (mode == 16 ? 1.0 / 7.0 : 16.0 / 7.0);
+                CHECK(prefix[2 * k + 2] == sumI && prefix[2 * k + 3] == sumQ);
+                cq = ci * dq + cq * di;
+                ci = next;
             }
-            q *= inverted ? -1 : 1;
-            real = i * c - q * s;
-            imag = i * s + q * c;
-            if (mode == 8) {
-                real = real < 0 ? -((-real + 8) / 16) : (real + 8) / 16;
-                imag = imag < 0 ? -((-imag + 8) / 16) : (imag + 8) / 16;
-            }
-            sumI += (double)real * (mode == 16 ? 1.0 / 7.0 : 16.0 / 7.0);
-            sumQ += (double)imag * (mode == 16 ? 1.0 / 7.0 : 16.0 / 7.0);
-            CHECK(prefix[2 * k + 2] == sumI && prefix[2 * k + 3] == sumQ);
-            cq = ci * dq + cq * di;
-            ci = next;
         }
-    }
 }
 
 /** Opt-in four-lane carrier: same mixed samples up to float rounding of a double carrier
@@ -423,12 +424,11 @@ static void RunCorrelationContract(void)
         size_t count = counts[(trial / 10) % 5], n;
         /* Every fourth trial puts chip boundaries exactly on samples. */
         int exact = (trial / 50) % 4 == 0;
-        double codeRate = exact ? rate / 16.0
-                                : 1023000.0 + (Uniform(&state) - 0.5) * 6000.0;
+        double codeRate = exact ? rate / 16.0 : 1023000.0 + (Uniform(&state) - 0.5) * 6000.0;
         double span = (double)count * codeRate / rate;
         double base = exact ? (double)(trial % 7) : Uniform(&state) * ((double)period - span);
-        double offset = exact ? ((double)(trial % 9) - 4.0) * 0.0625
-                              : (Uniform(&state) - 0.5) * 4.0;
+        double offset =
+            exact ? ((double)(trial % 9) - 4.0) * 0.0625 : (Uniform(&state) - 0.5) * 4.0;
         double i, q, ri, rq, magnitudeI = 0, magnitudeQ = 0;
         if (exact && span > period - base)
             base = 0;

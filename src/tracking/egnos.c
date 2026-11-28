@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** Receiver-thread GEO state and private search worker for one auxiliary channel. */
 struct TNgEgnos {
     TNgAcquisition *search;
     void *workspace;
@@ -25,8 +26,8 @@ static int Search(void *workspace, const TNgAcquisitionCapture *capture, unsigne
                   const TNgAcquisitionConfig *config, TNgAcquisitionCancel cancel,
                   void *cancelContext, TNgAcquisitionResult *result, TNgError *error)
 {
-    return ngGpsAcquisitionStrategy.search(workspace, capture, slot, config, cancel,
-                                           cancelContext, result, error);
+    return ngGpsAcquisitionStrategy.search(workspace, capture, slot, config, cancel, cancelContext,
+                                           result, error);
 }
 
 static const TNgAcquisitionStrategy egnosSearch = {Search};
@@ -39,8 +40,9 @@ static void Prompt(void *context, double value, uint64_t sample)
     egnos->blockUntil[egnos->active - 1] = egnos->bank.blockedUntil;
 }
 
-int NgEgnosCreate(const TNgStreamInfo *stream, const TNgTrackingConfig *config,
-                  TNgEgnos **out, TNgError *error)
+/** Allocate the independent GEO search and tracking state before reception. */
+int NgEgnosCreate(const TNgStreamInfo *stream, const TNgTrackingConfig *config, TNgEgnos **out,
+                  TNgError *error)
 {
     *out = NULL;
     TNgEgnos *egnos = calloc(1, sizeof(*egnos));
@@ -73,6 +75,7 @@ int NgEgnosCreate(const TNgStreamInfo *stream, const TNgTrackingConfig *config,
     return NG_OK;
 }
 
+/** Stop the auxiliary worker before releasing its workspace. */
 void NgEgnosDestroy(TNgEgnos *egnos)
 {
     if (egnos) {
@@ -91,14 +94,15 @@ static void ResetAssignment(TNgEgnos *egnos)
     memset(&egnos->decoder, 0, sizeof(egnos->decoder));
 }
 
+/** Apply the common continuity contract before searching or updating the current GEO. */
 int NgEgnosProcess(TNgEgnos *egnos, const TNgIqView *view, int searchAllowed, TNgError *error)
 {
     if (!egnos) {
         return NG_OK;
     }
     const int gap = (view->meta.flags & NG_BLOCK_GAP) ||
-        (egnos->haveInput && (egnos->epoch != view->meta.epoch ||
-                             egnos->expected != view->meta.firstSample));
+                    (egnos->haveInput && (egnos->epoch != view->meta.epoch ||
+                                          egnos->expected != view->meta.firstSample));
     if (gap) {
         ResetAssignment(egnos);
         egnos->usedMask = 0;
@@ -151,7 +155,7 @@ int NgEgnosProcess(TNgEgnos *egnos, const TNgIqView *view, int searchAllowed, TN
     NgAcquisitionSetAdmission(egnos->search, 0, egnos->active || !searchAllowed);
     TNgChannelState next = NG_CHANNEL_ACQUISITION;
     return egnos->capture.ops->process(egnos->capture.context, &egnos->capture.id,
-                                      NG_CHANNEL_ACQUISITION, view, &next, error);
+                                       NG_CHANNEL_ACQUISITION, view, &next, error);
 }
 
 const TNgSbasCorrections *NgEgnosCorrections(const TNgEgnos *egnos)
@@ -164,6 +168,7 @@ unsigned NgEgnosPrn(const TNgEgnos *egnos)
     return !egnos || !egnos->active ? 0 : egnos->active == 1 ? 121u : 136u;
 }
 
+/** Forward diagnostic tap interest to the private tracker. */
 void NgEgnosObserve(TNgEgnos *egnos, int observed)
 {
     if (egnos)

@@ -16,8 +16,8 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
 
 /** Benchmark uses the same bounded scheduler and barrier as production. */
 static const TNgChannelOps ops = {
-    Process, 0,
-    NULL, 0}; /** Measure private channels against nominal signal duration; input generation is excluded. */
+    Process, 0, NULL,
+    0}; /** Measure private channels against nominal signal duration; input generation is excluded. */
 
 int main(int argc, char **argv)
 {
@@ -62,7 +62,9 @@ int main(int argc, char **argv)
                 NG_OK ||
             NgTrackingSeed(channels[channel], &seed, &error) != NG_OK)
             return 1;
-        if (argc > 8) NgTrackingObserve(channels[channel], atoi(argv[8]) == 2 ? channel == 0 : atoi(argv[8]) != 0);
+        if (argc > 8)
+            NgTrackingObserve(channels[channel],
+                              atoi(argv[8]) == 2 ? channel == 0 : atoi(argv[8]) != 0);
     }
     for (channel = 0; channel < count; ++channel) {
         jobs[channel].ops = &ops;

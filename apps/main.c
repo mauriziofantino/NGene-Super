@@ -228,16 +228,18 @@ int main(int argc, char **argv)
            frontend.info.signalFrequencyHz, frontend.info.digitalIfHz, conditioner.name);
     config.acquisition.enabled = config.galileoAcquisition.enabled = 1;
     config.tracking.enabled = 1;
-    if (!config.recordOnly && NgAcquisitionCreate(&config.acquisition, &frontend.info, &acquisition,
-                                                  &acquisitionChannels[acquisitionCount], &error) != NG_OK) {
+    if (!config.recordOnly &&
+        NgAcquisitionCreate(&config.acquisition, &frontend.info, &acquisition,
+                            &acquisitionChannels[acquisitionCount], &error) != NG_OK) {
         fprintf(stderr, "%s\n", error.message);
         NgFrontendDestroy(&frontend);
         return 1;
     }
     if (acquisition)
         acquisitionCount++;
-    if (!config.recordOnly && NgAcquisitionCreateGalileo(&config.galileoAcquisition, &frontend.info,
-            &galileoAcquisition, &acquisitionChannels[acquisitionCount], &error) != NG_OK) {
+    if (!config.recordOnly &&
+        NgAcquisitionCreateGalileo(&config.galileoAcquisition, &frontend.info, &galileoAcquisition,
+                                   &acquisitionChannels[acquisitionCount], &error) != NG_OK) {
         fprintf(stderr, "%s\n", error.message);
         NgAcquisitionDestroy(acquisition);
         NgFrontendDestroy(&frontend);
@@ -253,12 +255,15 @@ int main(int argc, char **argv)
     }
     {
         size_t trackingIndex = 0;
-        TNgAcquisition *workers[NG_CONSTELLATION_COUNT] = {acquisition, galileoAcquisition, beidouAcquisition};
+        TNgAcquisition *workers[NG_CONSTELLATION_COUNT] = {acquisition, galileoAcquisition,
+                                                           beidouAcquisition};
         unsigned system;
         for (system = 0; system < NG_CONSTELLATION_COUNT; ++system) {
-            if (!workers[system]) continue;
+            if (!workers[system])
+                continue;
             if (NgTrackingBankCreate(&config.tracking, &frontend.info, workers[system],
-                &acquisitionChannels[trackingIndex++], &trackingBanks[system], &error) != NG_OK) {
+                                     &acquisitionChannels[trackingIndex++], &trackingBanks[system],
+                                     &error) != NG_OK) {
                 goto cleanup;
             }
         }
@@ -266,9 +271,9 @@ int main(int argc, char **argv)
     if (NgTrackingBankLink(trackingBanks[0], trackingBanks[1], &error) != NG_OK ||
         NgTrackingBankLink(trackingBanks[0], trackingBanks[2], &error) != NG_OK)
         goto cleanup;
-    result =
-        NgReceiverRun(&config, &frontend, &conditioner, acquisitionCount ? acquisitionChannels : NULL,
-                      acquisitionCount, ShouldStop, NULL, &stats, &error);
+    result = NgReceiverRun(&config, &frontend, &conditioner,
+                           acquisitionCount ? acquisitionChannels : NULL, acquisitionCount,
+                           ShouldStop, NULL, &stats, &error);
     printf("windows=%" PRIu64 " processed_pairs=%" PRIu64 " written_pairs=%" PRIu64 " gaps=%" PRIu64
            " known_input_drops=%" PRIu64 " queued_discarded_at_stop=%" PRIu64
            " wall_seconds=%.6f\n",
@@ -294,16 +299,18 @@ int main(int argc, char **argv)
         TNgAcquisitionSnapshot snapshot;
         unsigned prn;
         NgAcquisitionRead(galileoAcquisition, &snapshot);
-        printf("Galileo acquisition: searches=%" PRIu64 " skipped_pairs=%" PRIu64 " gaps=%" PRIu64 "\n",
+        printf("Galileo acquisition: searches=%" PRIu64 " skipped_pairs=%" PRIu64 " gaps=%" PRIu64
+               "\n",
                snapshot.searches, snapshot.skippedSamples, snapshot.gaps);
         for (prn = 0; prn < 32; ++prn) {
             const TNgAcquisitionResult *found = &snapshot.results[prn];
             if (found->prn != 0)
-                printf("Galileo PRN%02u %s Doppler=%.1f Hz code_phase=%.6f chips peak/threshold=%.3f "
-                       "confirmation=%u/4 epoch=%" PRIu64 " sample=%" PRIu64 "\n",
-                       found->prn, found->confirmed ? "CONFIRMED" : "not confirmed",
-                       found->dopplerHz, found->codePhaseChips, found->peakRatio, found->successes,
-                       found->epoch, found->firstSample);
+                printf(
+                    "Galileo PRN%02u %s Doppler=%.1f Hz code_phase=%.6f chips peak/threshold=%.3f "
+                    "confirmation=%u/4 epoch=%" PRIu64 " sample=%" PRIu64 "\n",
+                    found->prn, found->confirmed ? "CONFIRMED" : "not confirmed", found->dopplerHz,
+                    found->codePhaseChips, found->peakRatio, found->successes, found->epoch,
+                    found->firstSample);
         }
     }
 cleanup:

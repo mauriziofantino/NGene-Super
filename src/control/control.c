@@ -49,7 +49,8 @@ struct TNgControl {
     TNgAnalysis *analysis;
     /** Receiver-worker-owned acquisition; accessed only on its ordered callbacks. */
     TNgAcquisition *acquisition;
-    TNgTrackingBank *trackingBanks[NG_CONSTELLATION_COUNT];                 /**< Run-owned composite registrations. */
+    TNgTrackingBank
+        *trackingBanks[NG_CONSTELLATION_COUNT]; /**< Run-owned composite registrations. */
     TNgAcquisition *beidouAcquisition;
     TNgAcquisition *galileoAcquisition;                /**< Galileo run-owned worker. */
     TNgAcquisitionSearchSpace galileoSearchSpaces[32]; /**< Archived Galileo maps. */
@@ -426,7 +427,8 @@ static void Progress(void *context, const TNgReceiverStats *stats)
         NgAcquisitionReadResults(c->beidouAcquisition, c->status.beidouResults);
         NgTrackingBankReadAll(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               c->status.tracking);
-        NgTrackingBankReadEgnos(c->trackingBanks[0], &c->status.tracking[NG_TRACKING_EGNOS_CHANNEL - 1]);
+        NgTrackingBankReadEgnos(c->trackingBanks[0],
+                                &c->status.tracking[NG_TRACKING_EGNOS_CHANNEL - 1]);
         NgTrackingBankReadPvt(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               &c->status.pvt);
         {
@@ -525,12 +527,13 @@ static void ReceiverWorker(void *context)
                 &c->runConfig.beidouAcquisition, &source.info, &c->beidouAcquisition,
                 &acquisitionChannels[acquisitionCount], &c->workerError);
             if (c->workerResult == NG_OK)
-                c->workerResult = NgTrackingBankCreate(
-                    &c->runConfig.tracking, &source.info, c->beidouAcquisition,
-                    &acquisitionChannels[acquisitionCount++], &c->trackingBanks[2], &c->workerError);
+                c->workerResult =
+                    NgTrackingBankCreate(&c->runConfig.tracking, &source.info, c->beidouAcquisition,
+                                         &acquisitionChannels[acquisitionCount++],
+                                         &c->trackingBanks[2], &c->workerError);
             if (c->workerResult == NG_OK)
-                c->workerResult = NgTrackingBankLink(c->trackingBanks[0], c->trackingBanks[2],
-                                                     &c->workerError);
+                c->workerResult =
+                    NgTrackingBankLink(c->trackingBanks[0], c->trackingBanks[2], &c->workerError);
         }
         if (c->workerResult == NG_OK && NgAtomicGet(&c->stop) == 0) {
             c->workerResult = NgReceiverRunEx(
@@ -544,7 +547,8 @@ static void ReceiverWorker(void *context)
         NgAcquisitionReadResults(c->beidouAcquisition, c->status.beidouResults);
         NgTrackingBankReadAll(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               c->status.tracking);
-        NgTrackingBankReadEgnos(c->trackingBanks[0], &c->status.tracking[NG_TRACKING_EGNOS_CHANNEL - 1]);
+        NgTrackingBankReadEgnos(c->trackingBanks[0],
+                                &c->status.tracking[NG_TRACKING_EGNOS_CHANNEL - 1]);
         NgTrackingBankReadPvt(c->trackingBanks[0] ? c->trackingBanks[0] : c->trackingBanks[1],
                               &c->status.pvt);
         ArchiveSearchSpaces(c);
@@ -959,7 +963,8 @@ void NgControlReadLifecycle(TNgControl *control, TNgControlLifecycle *status)
     status->commandId = control->status.commandId;
     status->completedCommandId = control->status.completedCommandId;
     memcpy(status->recordingName, control->status.recordingName, sizeof(status->recordingName));
-    memcpy(status->outputDirectory, control->status.outputDirectory, sizeof(status->outputDirectory));
+    memcpy(status->outputDirectory, control->status.outputDirectory,
+           sizeof(status->outputDirectory));
     NgMutexUnlock(&control->mutex);
 }
 

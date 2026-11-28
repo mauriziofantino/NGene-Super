@@ -7,6 +7,7 @@
 #define LAB_STRATEGY ngGalileoAcquisitionStrategy
 #define LAB_TABLE labGalileo
 #define LAB_ROWS 116
+
 static int Create(const TNgStreamInfo *stream, unsigned n, TNgSearchFftMode mode, void **out,
                   TNgError *error)
 {
@@ -17,4 +18,5 @@ static int Create(const TNgStreamInfo *stream, unsigned n, TNgSearchFftMode mode
     return NgAcquisitionGalileoWorkspace(stream, n, out, error);
 #endif
 }
+
 #include "strategy_probe.inc"

@@ -58,11 +58,10 @@ int main(void)
         TNgBroadcast b = {0};
         unsigned char bytes[40] = {0};
         uint32_t words[10];
-        bytes[8] = 0x1e; /* Data ID 1, page SV ID 56. */
+        bytes[8] = 0x1e;  /* Data ID 1, page SV ID 56. */
         bytes[10] = 0x40; /* Alpha 0 raw coefficient +1. */
         for (k = 0; k < 10; ++k)
-            words[k] = ((uint32_t)bytes[4 * k] << 24) |
-                       ((uint32_t)bytes[4 * k + 1] << 16) |
+            words[k] = ((uint32_t)bytes[4 * k] << 24) | ((uint32_t)bytes[4 * k + 1] << 16) |
                        ((uint32_t)bytes[4 * k + 2] << 8) | bytes[4 * k + 3];
         CHECK(NgBroadcastGps(&b, words, 4) == 0 && b.ionoReceived);
         CHECK(b.iono.alphaGps[0] > 0 && b.iono.alphaGps[0] < 1e-8);
@@ -95,10 +94,10 @@ int main(void)
     CHECK(n.snapshot.bitSynchronized && n.snapshot.symbols > 0);
     NgNavigationGpsPrompt(&n, 20, 0, 0, 0);
     CHECK(!n.snapshot.bitSynchronized && !n.snapshot.towValid && !n.snapshot.symbols);
-    n.snapshot.broadcast.ephemeridesReceived=1;
-    n.snapshot.broadcast.eph.sqrtA=5153.7;
-    NgNavigationGpsPrompt(&n,20,0,0,0);
-    CHECK(n.snapshot.broadcast.ephemeridesReceived && n.snapshot.broadcast.eph.sqrtA==5153.7);
+    n.snapshot.broadcast.ephemeridesReceived = 1;
+    n.snapshot.broadcast.eph.sqrtA = 5153.7;
+    NgNavigationGpsPrompt(&n, 20, 0, 0, 0);
+    CHECK(n.snapshot.broadcast.ephemeridesReceived && n.snapshot.broadcast.eph.sqrtA == 5153.7);
     for (k = 0; k < 300; ++k)
         NgNavigationGpsPrompt(&n, (k / 20) & 1u ? -1 : 1, 20, 1, k * 2400u);
     CHECK(!n.snapshot.bitSynchronized && !n.snapshot.towValid);

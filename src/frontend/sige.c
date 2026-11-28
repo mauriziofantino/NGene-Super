@@ -318,8 +318,7 @@ static int ValidateFirmware(TNgError *error)
         }
         if (record.type == 0) {
             limit = (uint32_t)record.address + record.length;
-            if (limit > 0x10000u ||
-                ((uint32_t)record.address <= FX2_CPUCS && limit > FX2_CPUCS)) {
+            if (limit > 0x10000u || ((uint32_t)record.address <= FX2_CPUCS && limit > FX2_CPUCS)) {
                 return NgFail(error, "SiGe firmware contains an invalid FX2 address");
             }
             records++;

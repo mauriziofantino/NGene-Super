@@ -40,8 +40,8 @@ static inline __m256i Coefficients(const int64_t *p, size_t stride)
                              (int)p[7 * stride]);
 }
 
-static inline void Butterfly(const int8_t *a, const int8_t *b, __m256i c, __m256i s,
-                             unsigned bits, Complex8 *top, Complex8 *bottom)
+static inline void Butterfly(const int8_t *a, const int8_t *b, __m256i c, __m256i s, unsigned bits,
+                             Complex8 *top, Complex8 *bottom)
 {
     Complex8 x = Load8(a), y = Load8(b);
     __m256i r = _mm256_sub_epi32(_mm256_mullo_epi32(y.real, c), _mm256_mullo_epi32(y.imag, s));
@@ -54,8 +54,8 @@ static inline void Butterfly(const int8_t *a, const int8_t *b, __m256i c, __m256
     bottom->imag = _mm256_sub_epi32(x.imag, i);
 }
 
-static unsigned FindShift(const int8_t *values, const int64_t *wr, const int64_t *wi,
-                          size_t n, size_t width, unsigned bits)
+static unsigned FindShift(const int8_t *values, const int64_t *wr, const int64_t *wi, size_t n,
+                          size_t width, unsigned bits)
 {
     __m256i low = _mm256_setzero_si256(), high = low;
     size_t stride = n / width;
@@ -71,7 +71,7 @@ static unsigned FindShift(const int8_t *values, const int64_t *wr, const int64_t
             __m256i highPair = _mm256_max_epi32(_mm256_max_epi32(top.real, bottom.real),
                                                 _mm256_max_epi32(top.imag, bottom.imag));
             __m256i outside = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(-256), lowPair),
-                                               _mm256_cmpgt_epi32(highPair, _mm256_set1_epi32(254)));
+                                              _mm256_cmpgt_epi32(highPair, _mm256_set1_epi32(254)));
             if (_mm256_movemask_epi8(outside))
                 return 2;
             low = _mm256_min_epi32(low, lowPair);
@@ -79,7 +79,7 @@ static unsigned FindShift(const int8_t *values, const int64_t *wr, const int64_t
         }
     }
     __m256i outside = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(-128), low),
-                                       _mm256_cmpgt_epi32(high, _mm256_set1_epi32(127)));
+                                      _mm256_cmpgt_epi32(high, _mm256_set1_epi32(127)));
     return _mm256_movemask_epi8(outside) != 0;
 }
 
@@ -103,7 +103,6 @@ unsigned Ci8FftCompactAdaptiveStageAvx2(int8_t *values, const int64_t *wr, const
     return shift;
 }
 
-
 static inline __m256i PackPair16(__m256i real, __m256i imag)
 {
     __m256i lanes = _mm256_packs_epi32(real, imag);
@@ -116,7 +115,7 @@ static inline void StoreAndReduce(int16_t *scratch, size_t a, size_t b, Complex8
     _mm256_storeu_si256((__m256i *)(void *)(scratch + a), PackPair16(top.real, top.imag));
     _mm256_storeu_si256((__m256i *)(void *)(scratch + b), PackPair16(bottom.real, bottom.imag));
     *low = _mm256_min_epi32(*low, _mm256_min_epi32(_mm256_min_epi32(top.real, bottom.real),
-                                                  _mm256_min_epi32(top.imag, bottom.imag)));
+                                                   _mm256_min_epi32(top.imag, bottom.imag)));
     *high = _mm256_max_epi32(*high, _mm256_max_epi32(_mm256_max_epi32(top.real, bottom.real),
                                                      _mm256_max_epi32(top.imag, bottom.imag)));
 }
@@ -124,17 +123,16 @@ static inline void StoreAndReduce(int16_t *scratch, size_t a, size_t b, Complex8
 static inline unsigned RequiredShift(__m256i low, __m256i high)
 {
     __m256i needTwo = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(-256), low),
-                                       _mm256_cmpgt_epi32(high, _mm256_set1_epi32(254)));
+                                      _mm256_cmpgt_epi32(high, _mm256_set1_epi32(254)));
     if (_mm256_movemask_epi8(needTwo))
         return 2;
     __m256i needOne = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_set1_epi32(-128), low),
-                                       _mm256_cmpgt_epi32(high, _mm256_set1_epi32(127)));
+                                      _mm256_cmpgt_epi32(high, _mm256_set1_epi32(127)));
     return _mm256_movemask_epi8(needOne) != 0;
 }
 
-unsigned Ci8FftCompactBufferColumnsAvx2(const int8_t *values, int16_t *scratch,
-                                        const int64_t *wr, const int64_t *wi,
-                                        size_t n, size_t width, unsigned bits,
+unsigned Ci8FftCompactBufferColumnsAvx2(const int8_t *values, int16_t *scratch, const int64_t *wr,
+                                        const int64_t *wi, size_t n, size_t width, unsigned bits,
                                         size_t first, size_t end)
 {
     __m256i low = _mm256_setzero_si256(), high = low;
@@ -162,16 +160,17 @@ void Ci8FftCompactPackBufferedAvx2(int8_t *values, const int16_t *scratch, size_
             __m256i magnitude = _mm256_add_epi16(_mm256_abs_epi16(iq), bias);
             iq = _mm256_sign_epi16(_mm256_srl_epi16(magnitude, count), iq);
         }
-        __m128i packed = _mm_packs_epi16(_mm256_castsi256_si128(iq), _mm256_extracti128_si256(iq, 1));
+        __m128i packed =
+            _mm_packs_epi16(_mm256_castsi256_si128(iq), _mm256_extracti128_si256(iq, 1));
         _mm_storeu_si128((__m128i *)(void *)(values + k), packed);
     }
 }
 
-unsigned Ci8FftCompactAdaptiveBufferedAvx2(int8_t *values, int16_t *scratch,
-                                           const int64_t *wr, const int64_t *wi,
-                                           size_t n, size_t width, unsigned bits)
+unsigned Ci8FftCompactAdaptiveBufferedAvx2(int8_t *values, int16_t *scratch, const int64_t *wr,
+                                           const int64_t *wi, size_t n, size_t width, unsigned bits)
 {
-    unsigned shift = Ci8FftCompactBufferColumnsAvx2(values, scratch, wr, wi, n, width, bits, 0, width / 2);
+    unsigned shift =
+        Ci8FftCompactBufferColumnsAvx2(values, scratch, wr, wi, n, width, bits, 0, width / 2);
     Ci8FftCompactPackBufferedAvx2(values, scratch, n, shift);
     return shift;
 }
@@ -192,8 +191,9 @@ static inline MaddTwiddles MakeMaddTwiddles(__m256i c, __m256i s)
     twiddles.cEndpoint = _mm256_cmpeq_epi32(c, positive);
     twiddles.sPositiveEndpoint = _mm256_cmpeq_epi32(s, positive);
     twiddles.sNegativeEndpoint = _mm256_cmpeq_epi32(s, negative);
-    twiddles.correct = _mm256_movemask_epi8(_mm256_or_si256(
-        twiddles.cEndpoint, _mm256_or_si256(twiddles.sPositiveEndpoint, twiddles.sNegativeEndpoint)));
+    twiddles.correct = _mm256_movemask_epi8(
+        _mm256_or_si256(twiddles.cEndpoint,
+                        _mm256_or_si256(twiddles.sPositiveEndpoint, twiddles.sNegativeEndpoint)));
     return twiddles;
 }
 
@@ -210,9 +210,9 @@ static inline void ButterflyMadd(const int8_t *a, const int8_t *b, const MaddTwi
         __m256i yr = _mm256_srai_epi32(_mm256_slli_epi32(y, 16), 16);
         __m256i yi = _mm256_srai_epi32(y, 16);
         r = _mm256_add_epi32(r, _mm256_add_epi32(_mm256_and_si256(yr, w->cEndpoint),
-                                                _mm256_and_si256(yi, w->sNegativeEndpoint)));
+                                                 _mm256_and_si256(yi, w->sNegativeEndpoint)));
         i = _mm256_add_epi32(i, _mm256_add_epi32(_mm256_and_si256(yr, w->sPositiveEndpoint),
-                                                _mm256_and_si256(yi, w->cEndpoint)));
+                                                 _mm256_and_si256(yi, w->cEndpoint)));
     }
     r = RoundShift8(r, bits);
     i = RoundShift8(i, bits);
@@ -222,9 +222,8 @@ static inline void ButterflyMadd(const int8_t *a, const int8_t *b, const MaddTwi
     bottom->imag = _mm256_sub_epi32(x.imag, i);
 }
 
-unsigned Ci8FftCompactAdaptiveMaddAvx2(int8_t *values, int16_t *scratch,
-                                       const int64_t *wr, const int64_t *wi,
-                                       size_t n, size_t width, unsigned bits)
+unsigned Ci8FftCompactAdaptiveMaddAvx2(int8_t *values, int16_t *scratch, const int64_t *wr,
+                                       const int64_t *wi, size_t n, size_t width, unsigned bits)
 {
     __m256i low = _mm256_setzero_si256(), high = low;
     size_t stride = n / width;

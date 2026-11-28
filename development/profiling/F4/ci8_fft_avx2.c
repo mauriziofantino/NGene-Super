@@ -11,8 +11,8 @@ static __m256i RoundQ15(__m256i value)
 }
 
 /* The wide CI8 bound keeps both operands within signed 32 bits. */
-void Ci8WideQ15StageAvx2(int64_t *values, const int64_t *wr, const int64_t *wi,
-                        size_t n, size_t width)
+void Ci8WideQ15StageAvx2(int64_t *values, const int64_t *wr, const int64_t *wi, size_t n,
+                         size_t width)
 {
     for (size_t base = 0; base < n; base += width) {
         for (size_t j = 0; j < width / 2; j += 2) {
@@ -25,8 +25,8 @@ void Ci8WideQ15StageAvx2(int64_t *values, const int64_t *wr, const int64_t *wi,
             __m256i swapped = _mm256_permute4x64_epi64(bottom, _MM_SHUFFLE(2, 3, 0, 1));
             __m256i real = _mm256_setr_epi64x(wr[k], wr[k], wr[k + stride], wr[k + stride]);
             __m256i imag = _mm256_setr_epi64x(-wi[k], wi[k], -wi[k + stride], wi[k + stride]);
-            __m256i product = RoundQ15(_mm256_add_epi64(
-                _mm256_mul_epi32(bottom, real), _mm256_mul_epi32(swapped, imag)));
+            __m256i product = RoundQ15(
+                _mm256_add_epi64(_mm256_mul_epi32(bottom, real), _mm256_mul_epi32(swapped, imag)));
             _mm256_storeu_si256((__m256i *)(void *)a, _mm256_add_epi64(top, product));
             _mm256_storeu_si256((__m256i *)(void *)b, _mm256_sub_epi64(top, product));
         }

@@ -84,8 +84,7 @@ void NgNavigationGalileoPrompt(TNgNavigation *n, double i, int pll, uint64_t end
        and 32 MACK bits. Publish only after the page CRC has passed. */
     n->snapshot.osnma.hkroot = (uint8_t)((decoded[2] << 2) | (decoded[3] >> 6));
     for (k = 0; k < 4; ++k)
-        n->snapshot.osnma.mack[k] = (uint8_t)((decoded[3 + k] << 2) |
-                                                 (decoded[4 + k] >> 6));
+        n->snapshot.osnma.mack[k] = (uint8_t)((decoded[3 + k] << 2) | (decoded[4 + k] >> 6));
     n->snapshot.osnma.boundarySample = endSample;
     n->snapshot.osnma.pages++;
     n->snapshot.osnma.valid = 1;

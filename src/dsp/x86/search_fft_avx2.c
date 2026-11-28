@@ -12,8 +12,8 @@ static __m256i TruncateQ30(__m256i value)
 }
 
 /* Width is a power of two >= 8. Each iteration handles four butterfly pairs. */
-void NgSearchFftInt32StageAvx2(int32_t *output, const int32_t *twiddles, size_t size,
-                              size_t width, int inverse)
+void NgSearchFftInt32StageAvx2(int32_t *output, const int32_t *twiddles, size_t size, size_t width,
+                               int inverse)
 {
     const __m256i conjugate = _mm256_set1_epi32(-inverse);
     for (size_t base = 0; base < size; base += width) {
@@ -22,8 +22,7 @@ void NgSearchFftInt32StageAvx2(int32_t *output, const int32_t *twiddles, size_t 
             int32_t *b = a + width;
             const __m256i top = _mm256_loadu_si256((const __m256i *)(const void *)a);
             const __m256i bottom = _mm256_loadu_si256((const __m256i *)(const void *)b);
-            const __m256i w =
-                _mm256_loadu_si256((const __m256i *)(const void *)(twiddles + 2 * j));
+            const __m256i w = _mm256_loadu_si256((const __m256i *)(const void *)(twiddles + 2 * j));
             __m256i wi = _mm256_srli_epi64(w, 32);
             wi = _mm256_sub_epi32(_mm256_xor_si256(wi, conjugate), conjugate);
             const __m256i bi = _mm256_srli_epi64(bottom, 32);

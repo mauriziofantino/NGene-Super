@@ -49,8 +49,8 @@ static void Pair(TNgSbasLane *lane, TNgSbasCorrections *bank, double first, doub
     for (unsigned target = 0; target < 64; ++target) {
         const unsigned lower = target >> 1;
         const unsigned upper = lower + 32;
-        const double weight = (Parity(target & 0117u) ? -first : first) +
-                              (Parity(target & 0155u) ? -second : second);
+        const double weight =
+            (Parity(target & 0117u) ? -first : first) + (Parity(target & 0155u) ? -second : second);
         const double fromLower = lane->metric[lower] + weight;
         const double fromUpper = lane->metric[upper] - weight;
         const int takeUpper = fromUpper > fromLower;

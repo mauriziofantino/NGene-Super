@@ -96,13 +96,14 @@ void NgEgnosCode(unsigned slot, int8_t chips[NG_GPS_CA_LENGTH])
         direct[k] = (uint8_t)(g1 >> 9);
         delayed[k] = (uint8_t)(g2 >> 9);
         const unsigned next1 = (g1 >> 2) ^ (g1 >> 9);
-        const unsigned next2 = (g2 >> 1) ^ (g2 >> 2) ^ (g2 >> 5) ^
-                               (g2 >> 7) ^ (g2 >> 8) ^ (g2 >> 9);
+        const unsigned next2 =
+            (g2 >> 1) ^ (g2 >> 2) ^ (g2 >> 5) ^ (g2 >> 7) ^ (g2 >> 8) ^ (g2 >> 9);
         g1 = ((g1 << 1) | (next1 & 1u)) & 1023u;
         g2 = ((g2 << 1) | (next2 & 1u)) & 1023u;
     }
     for (unsigned k = 0; k < NG_GPS_CA_LENGTH; ++k) {
-        chips[k] = (direct[k] ^ delayed[(k + NG_GPS_CA_LENGTH - delays[slot]) %
-                                        NG_GPS_CA_LENGTH]) ? -1 : 1;
+        chips[k] = (direct[k] ^ delayed[(k + NG_GPS_CA_LENGTH - delays[slot]) % NG_GPS_CA_LENGTH])
+                       ? -1
+                       : 1;
     }
 }

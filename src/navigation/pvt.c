@@ -50,21 +50,21 @@ int NgPvtSatellite(const TNgBroadcast *b, unsigned system, double tx, double x[3
     const double earth = EarthRotation(system);
     const double relativity = system == NG_CONSTELLATION_GPS ? -4.442807633e-10 : -4.442807309e-10;
     if (!b->ephemeridesReceived || !NgConstellationPrnLimit((TNgConstellation)system) ||
-        !isfinite(tx) ||
-        !isfinite(o->sqrtA) || o->sqrtA < 4000 || o->sqrtA > 7000 || !isfinite(o->eccentricity) ||
-        o->eccentricity < 0 || o->eccentricity >= 1 || fabs(Week(tx - o->toe)) > 14400)
+        !isfinite(tx) || !isfinite(o->sqrtA) || o->sqrtA < 4000 || o->sqrtA > 7000 ||
+        !isfinite(o->eccentricity) || o->eccentricity < 0 || o->eccentricity >= 1 ||
+        fabs(Week(tx - o->toe)) > 14400)
         return 0;
     dt = Week(tx - c->toc);
     *clock = (c->af[2] * dt + c->af[1]) * dt + c->af[0] - c->tGroupDelay;
     a = o->sqrtA * o->sqrtA;
     tk = Week(tx - *clock - o->toe);
-    n = sqrt((system == NG_CONSTELLATION_GPS ? 3.986005e14 : 3.986004418e14) /
-             (a * a * a)) + o->deltaN;
+    n = sqrt((system == NG_CONSTELLATION_GPS ? 3.986005e14 : 3.986004418e14) / (a * a * a)) +
+        o->deltaN;
     const double a0 = a, n0 = n;
     const double axisRate = beidou ? o->axisRate : 0;
     const double motionRate = beidou ? o->meanMotionRate : 0;
-    if (beidou && (fabs(Week(tx - c->toc)) > NG_BCNV1_MAX_BROADCAST_AGE ||
-                   !isfinite(axisRate) || !isfinite(motionRate)))
+    if (beidou && (fabs(Week(tx - c->toc)) > NG_BCNV1_MAX_BROADCAST_AGE || !isfinite(axisRate) ||
+                   !isfinite(motionRate)))
         return 0;
     unsigned iteration = 0;
     do {
@@ -75,8 +75,7 @@ int NgPvtSatellite(const TNgBroadcast *b, unsigned system, double tx, double x[3
             if (!(a > 0))
                 return 0;
         }
-        m = fmod(o->meanAnomaly0 + (n0 + 0.5 * motionRate * tk) * tk + 2 * NG_PI,
-                 2 * NG_PI);
+        m = fmod(o->meanAnomaly0 + (n0 + 0.5 * motionRate * tk) * tk + 2 * NG_PI, 2 * NG_PI);
         e = EccentricAnomaly(m, o->eccentricity);
         if (fabs(e - m - o->eccentricity * sin(e)) > 1e-10)
             return 0;
@@ -114,8 +113,9 @@ int NgPvtSatellite(const TNgBroadcast *b, unsigned system, double tx, double x[3
     if (!beidou)
         *clock += dtr;
     const double sqrtAxis = beidou ? sqrt(a) : o->sqrtA;
-    *drift = c->af[1] + 2 * c->af[2] * dt + relativity * o->eccentricity *
-             (sqrtAxis * cos(e) * ed + axisRate / (2 * sqrtAxis) * sin(e));
+    *drift = c->af[1] + 2 * c->af[2] * dt +
+             relativity * o->eccentricity *
+                 (sqrtAxis * cos(e) * ed + axisRate / (2 * sqrtAxis) * sin(e));
     return isfinite(x[0]) && isfinite(x[1]) && isfinite(x[2]) && isfinite(*clock) &&
            isfinite(v[0]) && isfinite(v[1]) && isfinite(v[2]) && isfinite(*drift);
 }
@@ -233,7 +233,7 @@ static double Troposphere(double elevation, double height)
 /** Convert calendar days since the GST origin to the month used by NeQuick. */
 static int GalileoMonth(double daysSinceGst)
 {
-    static const unsigned monthDays[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    static const unsigned monthDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     int year = 1999;
     /* GST starts on 22 August 1999. */
     unsigned day = (unsigned)floor(daysSinceGst + 233.0);
@@ -262,12 +262,13 @@ static double GpsIonosphere(const TNgBroadcast *b, double latitude, double longi
     double subLon = longitude / NG_PI + phi * sin(azimuth) / cos(NG_PI * subLat);
     double magnetic = subLat + 0.064 * cos(NG_PI * (subLon - 1.617));
     double local = fmod(tow + 43200.0 * subLon + 86400.0, 86400.0);
-    double period = b->iono.betaGps[0] + magnetic *
-                    (b->iono.betaGps[1] + magnetic *
-                     (b->iono.betaGps[2] + magnetic * b->iono.betaGps[3]));
-    double amplitude = b->iono.alphaGps[0] + magnetic *
-                       (b->iono.alphaGps[1] + magnetic *
-                        (b->iono.alphaGps[2] + magnetic * b->iono.alphaGps[3]));
+    double period = b->iono.betaGps[0] +
+                    magnetic * (b->iono.betaGps[1] +
+                                magnetic * (b->iono.betaGps[2] + magnetic * b->iono.betaGps[3]));
+    double amplitude =
+        b->iono.alphaGps[0] +
+        magnetic * (b->iono.alphaGps[1] +
+                    magnetic * (b->iono.alphaGps[2] + magnetic * b->iono.alphaGps[3]));
     double x, delay;
     period = fmax(72000.0, period);
     amplitude = fmax(0.0, amplitude);
@@ -283,19 +284,18 @@ static int Align(const TNgTrackingSnapshot *t, uint64_t epoch, uint64_t sample, 
     const TNgNavigationSnapshot *nav = &t->navigation;
     const TNgBroadcast *b = &nav->broadcast;
     const unsigned system = t->constellation;
-    if (!t->active || !t->pll || t->epoch != epoch || !nav->towValid ||
-        !b->ephemeridesReceived || b->eph.health || b->eph.galileoDataValidity ||
+    if (!t->active || !t->pll || t->epoch != epoch || !nav->towValid || !b->ephemeridesReceived ||
+        b->eph.health || b->eph.galileoDataValidity ||
         !NgSatellitePrnValid((TNgConstellation)system, t->prn) ||
-        (system != NG_CONSTELLATION_GPS && b->satelliteId &&
-         (unsigned)b->satelliteId != t->prn) ||
+        (system != NG_CONSTELLATION_GPS && b->satelliteId && (unsigned)b->satelliteId != t->prn) ||
         sample < t->endSample ||
         (double)(sample - t->endSample) >
             (system == NG_CONSTELLATION_BEIDOU ? ceil(0.01 * fs) : 0.01 * fs) ||
-        !isfinite(nav->transmitTimeSeconds) || !(t->codeRateHz > 0) ||
-        !isfinite(t->codeRateHz) || !isfinite(t->dopplerHz))
+        !isfinite(nav->transmitTimeSeconds) || !(t->codeRateHz > 0) || !isfinite(t->codeRateHz) ||
+        !isfinite(t->dopplerHz))
         return 0;
-    *native = nav->transmitTimeSeconds +
-              (double)(sample - t->endSample) / fs * t->codeRateHz / 1023000.0;
+    *native =
+        nav->transmitTimeSeconds + (double)(sample - t->endSample) / fs * t->codeRateHz / 1023000.0;
     *common = *native + (system == NG_CONSTELLATION_BEIDOU ? NG_BDT_TO_GPST_SECONDS : 0);
     *rangeRate = -t->dopplerHz * NG_C / 1575420000.0;
     return isfinite(*native) && isfinite(*rangeRate);
@@ -308,18 +308,18 @@ int NgPvtObserve(const TNgTrackingSnapshot *channel, uint64_t epoch, uint64_t sa
     if (!channel || !observation || !(sampleRate > 0) || !isfinite(sampleRate) ||
         !isfinite(receiverTow))
         return NG_ERROR;
-    if (!Align(channel, epoch, sample, sampleRate, &next.nativeTransmitTow,
-               &next.commonTransmitTow, &next.rangeRate))
+    if (!Align(channel, epoch, sample, sampleRate, &next.nativeTransmitTow, &next.commonTransmitTow,
+               &next.rangeRate))
         return NG_END;
     double position[3], velocity[3], clock, drift;
     if (!NgPvtSatellite(&channel->navigation.broadcast, channel->constellation,
                         next.nativeTransmitTow, position, velocity, &clock, &drift))
         return NG_END;
     next.pseudorange = NG_C * Week(receiverTow - next.commonTransmitTow);
-    next.commonTransmitTow -= NG_BDT_WEEK_SECONDS *
-                              floor(next.commonTransmitTow / NG_BDT_WEEK_SECONDS);
-    next.nativeTransmitTow -= NG_BDT_WEEK_SECONDS *
-                              floor(next.nativeTransmitTow / NG_BDT_WEEK_SECONDS);
+    next.commonTransmitTow -=
+        NG_BDT_WEEK_SECONDS * floor(next.commonTransmitTow / NG_BDT_WEEK_SECONDS);
+    next.nativeTransmitTow -=
+        NG_BDT_WEEK_SECONDS * floor(next.nativeTransmitTow / NG_BDT_WEEK_SECONDS);
     next.dopplerHz = channel->dopplerHz;
     next.prn = channel->prn;
     next.constellation = channel->constellation;
@@ -330,9 +330,9 @@ int NgPvtObserve(const TNgTrackingSnapshot *channel, uint64_t epoch, uint64_t sa
 }
 
 /** Align observations to one sample, then solve one code-clock bias per active system. */
-void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoch,
-                                uint64_t sample, double fs, int broadcastIonosphere,
-                            const TNgSbasCorrections *sbas, TNgPvtSnapshot *s)
+void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoch, uint64_t sample,
+                           double fs, int broadcastIonosphere, const TNgSbasCorrections *sbas,
+                           TNgPvtSnapshot *s)
 {
     double satellite[64][3], velocity[64][3], clocks[64], drifts[64], tx[64], rates[64], code[64];
     double nativeTx[64], rangeCorrection[64] = {0};
@@ -361,8 +361,8 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
             time = tx[0] + Week(time - tx[0]);
         TNgSbasCorrection sbasCorrection;
         if (sbas && t->constellation == NG_CONSTELLATION_GPS &&
-            NgSbasRead(sbas, t->prn, (unsigned)b->eph.iode2, (double)sample / fs,
-                       native, &sbasCorrection)) {
+            NgSbasRead(sbas, t->prn, (unsigned)b->eph.iode2, (double)sample / fs, native,
+                       &sbasCorrection)) {
             for (unsigned axis = 0; axis < 3; ++axis) {
                 satellite[n][axis] += sbasCorrection.position[axis];
                 velocity[n][axis] += sbasCorrection.velocity[axis];
@@ -425,14 +425,16 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
                 elevation = asin(fmax(-1, fmin(1, up)));
                 if (elevation > 0)
                     tropo = Troposphere(elevation, height);
-                if (elevation > 0 && (sbas || (broadcastIonosphere && broadcasts[k]->ionoReceived))) {
+                if (elevation > 0 &&
+                    (sbas || (broadcastIonosphere && broadcasts[k]->ionoReceived))) {
                     double east = matrix[k][0] * sin(lon) - matrix[k][1] * cos(lon);
                     double north = matrix[k][0] * sin(lat) * cos(lon) +
                                    matrix[k][1] * sin(lat) * sin(lon) - matrix[k][2] * cos(lat);
                     const double azimuth = atan2(east, north);
                     const TNgBroadcast *broadcast = broadcasts[k];
                     const int sbasIono = systems[k] == NG_CONSTELLATION_GPS &&
-                        NgSbasIonosphere(sbas, (double)sample / fs, lat, lon, azimuth, elevation, &iono);
+                                         NgSbasIonosphere(sbas, (double)sample / fs, lat, lon,
+                                                          azimuth, elevation, &iono);
                     if (sbasIono) {
                         ++egnosIonoCount;
                     } else if (broadcastIonosphere && broadcast->ionoReceived &&
@@ -443,19 +445,20 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
                                broadcast->wn >= 0 && broadcast->wn < 4096) {
                         const double rxLlh[3] = {lat, lon, height};
                         double satelliteLlh[3];
-                        const double utc = 7.0 * broadcast->wn +
-                            (broadcast->tow + Week(tx[k] - broadcast->tow) - broadcast->iono.utcLeap) /
-                            86400.0;
+                        const double utc =
+                            7.0 * broadcast->wn + (broadcast->tow + Week(tx[k] - broadcast->tow) -
+                                                   broadcast->iono.utcLeap) /
+                                                      86400.0;
                         Geodetic(rotated, &satelliteLlh[0], &satelliteLlh[1], &satelliteLlh[2]);
                         iono = NgNeQuickE1(broadcast->iono.alphaGal, GalileoMonth(utc),
-                                          24 * (utc - floor(utc)), rxLlh, satelliteLlh);
+                                           24 * (utc - floor(utc)), rxLlh, satelliteLlh);
                     } else if (broadcastIonosphere && broadcast->ionoReceived &&
                                systems[k] == NG_CONSTELLATION_BEIDOU && broadcast->wnValid) {
                         const double bdt = nativeTx[k];
                         const double mjd = 53736.0 + 7.0 * broadcast->wn +
-                            (bdt - broadcast->iono.utcLeap) / 86400.0;
-                        iono = NgBdgimDelay(broadcast->iono.alphaBds, mjd, lat, lon,
-                                          azimuth, elevation);
+                                           (bdt - broadcast->iono.utcLeap) / 86400.0;
+                        iono = NgBdgimDelay(broadcast->iono.alphaBds, mjd, lat, lon, azimuth,
+                                            elevation);
                     }
                 }
             }
@@ -565,7 +568,6 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
         s->velocityAvailable = 1;
     }
 }
-
 
 void NgPvtComputeWithIonosphere(const TNgTrackingSnapshot channels[64], uint64_t epoch,
                                 uint64_t sample, double rate, int broadcastIonosphere,

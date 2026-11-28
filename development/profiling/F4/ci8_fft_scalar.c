@@ -73,9 +73,8 @@ static int8_t FixedScale(int32_t value, unsigned *clips)
     return (int8_t)(value < -128 ? -128 : value > 127 ? 127 : value);
 }
 
-CI8_FFT_API unsigned Ci8FftCompactFixedStage(int8_t *samples, const int64_t *wr,
-                                             const int64_t *wi, size_t n, size_t width,
-                                             unsigned bits)
+CI8_FFT_API unsigned Ci8FftCompactFixedStage(int8_t *samples, const int64_t *wr, const int64_t *wi,
+                                             size_t n, size_t width, unsigned bits)
 {
     unsigned clips = 0;
     size_t stride = n / width;
@@ -98,8 +97,8 @@ static int64_t WideRoundDivide(int64_t value, int64_t divisor)
     return (value + (value < 0 ? -divisor / 2 : divisor / 2)) / divisor;
 }
 
-CI8_FFT_API void Ci8FftWideStage(int64_t *samples, const int64_t *wr, const int64_t *wi,
-                                 size_t n, size_t width, unsigned bits)
+CI8_FFT_API void Ci8FftWideStage(int64_t *samples, const int64_t *wr, const int64_t *wi, size_t n,
+                                 size_t width, unsigned bits)
 {
     const int64_t unit = INT64_C(1) << bits;
     for (size_t base = 0; base < n; base += width) {

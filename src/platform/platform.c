@@ -20,9 +20,16 @@ unsigned NgLogicalProcessorCount(void)
     DWORD_PTR available = 0, systemMask = 0;
     unsigned count = 0;
     if (GetProcessAffinityMask(GetCurrentProcess(), &available, &systemMask)) {
-        while (available) { count += (unsigned)(available & 1); available >>= 1; }
+        while (available) {
+            count += (unsigned)(available & 1);
+            available >>= 1;
+        }
     }
-    if (!count) { SYSTEM_INFO info; GetSystemInfo(&info); count = (unsigned)info.dwNumberOfProcessors; }
+    if (!count) {
+        SYSTEM_INFO info;
+        GetSystemInfo(&info);
+        count = (unsigned)info.dwNumberOfProcessors;
+    }
     return count ? count : 1u;
 #else
     long count = sysconf(_SC_NPROCESSORS_ONLN);
@@ -36,8 +43,9 @@ unsigned NgLogicalProcessorCount(void)
 void NgThreadSchedulingPriority(int priority)
 {
 #ifdef _WIN32
-    (void)SetThreadPriority(GetCurrentThread(), priority > 0 ? THREAD_PRIORITY_ABOVE_NORMAL :
-                           priority < 0 ? THREAD_PRIORITY_BELOW_NORMAL : THREAD_PRIORITY_NORMAL);
+    (void)SetThreadPriority(GetCurrentThread(), priority > 0   ? THREAD_PRIORITY_ABOVE_NORMAL
+                                                : priority < 0 ? THREAD_PRIORITY_BELOW_NORMAL
+                                                               : THREAD_PRIORITY_NORMAL);
 #elif defined(__APPLE__)
     (void)pthread_set_qos_class_self_np(priority > 0   ? QOS_CLASS_USER_INTERACTIVE
                                         : priority < 0 ? QOS_CLASS_UTILITY

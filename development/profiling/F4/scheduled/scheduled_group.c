@@ -88,4 +88,3 @@ int F4GroupWorkerWait(F4GroupWorker *worker, double *cpu)
     NgMutexUnlock(&worker->mutex);
     return status;
 }
-

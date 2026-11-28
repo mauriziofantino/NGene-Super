@@ -207,7 +207,7 @@ static void Fixture(unsigned mask, int rollover)
         CHECK((admitted[system] > 0) == ((mask & (1u << system)) != 0));
         if (admitted[system])
             CHECK(fabs((clocks[system] - clocks[active[0]]) -
-                        (biases[system] - biases[active[0]])) < 0.2);
+                       (biases[system] - biases[active[0]])) < 0.2);
     }
     for (k = 0; k < solution.skyCount; k++) {
         const TNgPvtSatelliteView *sky = &solution.sky[k];

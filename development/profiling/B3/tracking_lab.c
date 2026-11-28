@@ -12,18 +12,24 @@
 #define NG_B3_RATE_MAX 8183800u
 #define NG_B3_WINDOW_MAX (NG_B3_RATE_MAX / 1000u + 1u)
 
-#define CHECK(x) do { if (!(x)) { fprintf(stderr, "line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
+#define CHECK(x)                                                                                   \
+    do {                                                                                           \
+        if (!(x)) {                                                                                \
+            fprintf(stderr, "line %d: %s\n", __LINE__, #x);                                        \
+            exit(1);                                                                               \
+        }                                                                                          \
+    } while (0)
 
 typedef struct {
     double i, q; /**< Coherent coordinates, without magnitude conversion. */
 } TNgB3Prompt;
 
 typedef struct {
-    size_t next, origin; /**< Next sample and most recent rate-change sample. */
-    double chips, cycles; /**< Code and carrier phase at origin. */
+    size_t next, origin;      /**< Next sample and most recent rate-change sample. */
+    double chips, cycles;     /**< Code and carrier phase at origin. */
     double codeHz, carrierHz; /**< Constant rates since origin. */
-    unsigned wide; /**< Include the two half-chip guard taps when requested. */
-    TNgB3Prompt taps[7]; /**< Coherent Early, Prompt and Late, respectively. */
+    unsigned wide;            /**< Include the two half-chip guard taps when requested. */
+    TNgB3Prompt taps[7];      /**< Coherent Early, Prompt and Late, respectively. */
 } TNgB3State;
 
 typedef struct {
@@ -46,8 +52,7 @@ static double Wrap(double phase, double period)
 static void SetRate(TNgB3State *state, uint32_t rate, double doppler, double ifHz)
 {
     const size_t age = state->next - state->origin;
-    state->chips = Wrap(state->chips + (double)age * state->codeHz / rate,
-                         NG_BEIDOU_B1C_LENGTH);
+    state->chips = Wrap(state->chips + (double)age * state->codeHz / rate, NG_BEIDOU_B1C_LENGTH);
     state->cycles = Wrap(state->cycles + (double)age * state->carrierHz / rate, 1);
     state->origin = state->next;
     state->carrierHz = ifHz + doppler;
@@ -55,8 +60,8 @@ static void SetRate(TNgB3State *state, uint32_t rate, double doppler, double ifH
 }
 
 /** Process native samples using the shared SIMD phase, replica, rotation and dot kernels. */
-static int Window(TNgB3Workspace *work, TNgB3State *state, const TNgComplex *input,
-                  size_t first, size_t count, uint32_t rate)
+static int Window(TNgB3Workspace *work, TNgB3State *state, const TNgComplex *input, size_t first,
+                  size_t count, uint32_t rate)
 {
     if (state->codeHz <= 0 || first != state->next) {
         memset(state, 0, sizeof(*state));
@@ -64,8 +69,8 @@ static int Window(TNgB3Workspace *work, TNgB3State *state, const TNgComplex *inp
     }
     CHECK(count <= NG_B3_WINDOW_MAX);
     const size_t age = first - state->origin;
-    const double chip = Wrap(state->chips + (double)age * state->codeHz / rate,
-                             NG_BEIDOU_B1C_LENGTH);
+    const double chip =
+        Wrap(state->chips + (double)age * state->codeHz / rate, NG_BEIDOU_B1C_LENGTH);
     const double cycles = Wrap(state->cycles + (double)age * state->carrierHz / rate, 1);
     NgSearchCarrier(work->carrier, count, rate, state->carrierHz, cycles, 0);
     memcpy(work->rotated, input, count * sizeof(*input));
@@ -74,8 +79,8 @@ static int Window(TNgB3Workspace *work, TNgB3State *state, const TNgComplex *inp
     const unsigned taps = 3 + 2 * state->wide;
     for (unsigned tap = 0; tap < taps; ++tap) {
         double i, q;
-        NgTrackingReplica(work->signs, work->phases, count, work->halfChips,
-                          NG_BEIDOU_B1C_LENGTH, offsets[tap], 1);
+        NgTrackingReplica(work->signs, work->phases, count, work->halfChips, NG_BEIDOU_B1C_LENGTH,
+                          offsets[tap], 1);
         NgSearchCorrelate(work->rotated, work->signs, count, 1, &i, &q);
         state->taps[tap].i += i;
         state->taps[tap].q += q;
@@ -188,13 +193,11 @@ static double TapPower(TNgB3Prompt tap)
     return tap.i * tap.i + tap.q * tap.q;
 }
 
-typedef enum {
-    NG_B3_BASELINE, NG_B3_FADE, NG_B3_GAP, NG_B3_SIDE, NG_B3_ECHO
-} TNgB3Scenario;
+typedef enum { NG_B3_BASELINE, NG_B3_FADE, NG_B3_GAP, NG_B3_SIDE, NG_B3_ECHO } TNgB3Scenario;
 
 typedef struct {
     double delay, phase; /**< Echo delay in chips and phase in carrier cycles. */
-    int lateralSeed; /**< Sign of the original half-chip exception. */
+    int lateralSeed;     /**< Sign of the original half-chip exception. */
 } TNgB3Echo;
 
 /** Return the strongest configured guard tap. */
@@ -208,8 +211,8 @@ static double Guard(const TNgB3State *state)
 
 /** Exercise closed-loop tracking and supervised recovery with explicit fault injection. */
 static void ClosedLoop(TNgB3Workspace *work, uint32_t rate, unsigned prn, int direction,
-                       double ramp, float amplitude, TNgB3Scenario scenario,
-                       const TNgB3Echo *echo, unsigned geometry)
+                       double ramp, float amplitude, TNgB3Scenario scenario, const TNgB3Echo *echo,
+                       unsigned geometry)
 {
     int8_t chips[NG_BEIDOU_B1C_LENGTH];
     const size_t count = rate / 100;
@@ -237,8 +240,8 @@ static void ClosedLoop(TNgB3Workspace *work, uint32_t rate, unsigned prn, int di
     for (unsigned epoch = 0; epoch < 80; ++epoch) {
         const double doppler = trueDoppler + ramp * (double)epoch * dt;
         const double nextDopplerCycles = dt * (doppler + 0.5 * dt * ramp);
-        const double nextChip = Wrap(chip + dt * NG_BEIDOU_B1C_RATE_HZ +
-                                     nextDopplerCycles / 1540.0, NG_BEIDOU_B1C_LENGTH);
+        const double nextChip = Wrap(chip + dt * NG_BEIDOU_B1C_RATE_HZ + nextDopplerCycles / 1540.0,
+                                     NG_BEIDOU_B1C_LENGTH);
         const double nextCycles = Wrap(cycles + dt * ifHz + nextDopplerCycles, 1);
         const size_t firstSample = epoch * count;
         double energy = 0;
@@ -246,8 +249,8 @@ static void ClosedLoop(TNgB3Workspace *work, uint32_t rate, unsigned prn, int di
             if (epoch == 30) {
                 /* Accumulate the first half, then deliver an index after the gap. */
                 CHECK(pll);
-                Fixture(samples, count, chips, rate, chip, cycles, doppler, ifHz,
-                        ramp, amplitude, NULL);
+                Fixture(samples, count, chips, rate, chip, cycles, doppler, ifHz, ramp, amplitude,
+                        NULL);
                 Segment(work, &loop, samples, count / 2, rate, 1);
                 CHECK(TapPower(loop.taps[1]) > 0);
                 CHECK(Window(work, &loop, samples, firstSample + count, 1, rate) == NG_ERROR);
@@ -265,7 +268,8 @@ static void ClosedLoop(TNgB3Workspace *work, uint32_t rate, unsigned prn, int di
                     continue;
                 }
                 /* A fresh acquisition result is injected by the fixture at epoch 33. */
-                loop = (TNgB3State){.next = firstSample, .origin = firstSample,
+                loop = (TNgB3State){.next = firstSample,
+                                    .origin = firstSample,
                                     .chips = chip + direction * 0.14,
                                     .cycles = cycles + direction * 0.10,
                                     .wide = 1};
@@ -343,8 +347,7 @@ static void ClosedLoop(TNgB3Workspace *work, uint32_t rate, unsigned prn, int di
         }
         if (epoch >= 60 && amplitude > 0 && !echo) {
             phaseMax = fmax(phaseMax, fabs(phase));
-            codeMax = fmax(codeMax,
-                           fabs(remainder(loop.chips - chip, NG_BEIDOU_B1C_LENGTH)));
+            codeMax = fmax(codeMax, fabs(remainder(loop.chips - chip, NG_BEIDOU_B1C_LENGTH)));
             frequencyMax = fmax(frequencyMax, fabs(estimate - (doppler + 0.5 * dt * ramp)));
             CHECK(TapPower(prompt) > early && TapPower(prompt) > late);
         }
@@ -364,19 +367,18 @@ static void ClosedLoop(TNgB3Workspace *work, uint32_t rate, unsigned prn, int di
         cycles = nextCycles;
     }
     if (echo) {
-        printf("%u,%u,%.3f,%.2f,%d,%u,%u,%d,%u,%d,%.7g\n", rate, prn, echo->delay,
-               echo->phase, direction, geometry, pllEpoch, rejected, falsePll, pll,
-               endCodeError);
+        printf("%u,%u,%.3f,%.2f,%d,%u,%u,%d,%u,%d,%.7g\n", rate, prn, echo->delay, echo->phase,
+               direction, geometry, pllEpoch, rejected, falsePll, pll, endCodeError);
         free(reflected);
         free(samples);
         return;
     }
     if (scenario != NG_B3_BASELINE) {
-        printf("%u,%u,%d,%d,%u,%u,%u,%.7g\n", rate, prn, direction, (int)scenario,
-               pllEpoch, lossEpoch, relockEpoch, codeMax);
+        printf("%u,%u,%d,%d,%u,%u,%u,%.7g\n", rate, prn, direction, (int)scenario, pllEpoch,
+               lossEpoch, relockEpoch, codeMax);
     } else {
-        printf("%u,%u,%d,%.1f,%.3f,%u,%.7g,%.7g,%.7g\n", rate, prn, direction,
-               ramp, amplitude, pllEpoch, phaseMax, codeMax, frequencyMax);
+        printf("%u,%u,%d,%.1f,%.3f,%u,%.7g,%.7g,%.7g\n", rate, prn, direction, ramp, amplitude,
+               pllEpoch, phaseMax, codeMax, frequencyMax);
     }
     if (scenario == NG_B3_SIDE) {
         CHECK(rejected && !pllEpoch && lossEpoch == 4);
@@ -455,8 +457,7 @@ static void Cn0(TNgB3Workspace *work, uint32_t rate, unsigned prn)
         const double radicand = 2 * m2 * m2 - m4;
         CHECK(radicand > 0);
         const double signal = sqrt(radicand);
-        const double knownPhase = (meanI * meanI + meanQ * meanQ) /
-                                  ((double)windows * windows);
+        const double knownPhase = (meanI * meanI + meanQ * meanQ) / ((double)windows * windows);
         CHECK(signal < m2 && knownPhase < m2);
         const double estimate = 10 * log10(signal / ((m2 - signal) * duration));
         const double coherent = 10 * log10(knownPhase / ((m2 - knownPhase) * duration));
@@ -510,8 +511,8 @@ static void Multipath(TNgB3Workspace *work, uint32_t rate, unsigned prn)
                     else
                         lobeVeto += (unsigned)veto;
                     if ((k == 0 && veto) || (k != 0 && !veto))
-                        printf("exception,%u,%u,%.2f,%.2f,%u,%.2f\n", rate, prn,
-                               gains[g], delays[d], quadrant * 90, seed[k]);
+                        printf("exception,%u,%u,%.2f,%.2f,%u,%.2f\n", rate, prn, gains[g],
+                               delays[d], quadrant * 90, seed[k]);
                 }
                 ++cases;
             }
@@ -558,10 +559,10 @@ int main(int argc, char **argv)
         const unsigned prns[] = {1, 33, 63};
         for (unsigned k = 0; k < sizeof(rates) / sizeof(*rates); ++k)
             for (int direction = -1; direction <= 1; direction += 2) {
-                ClosedLoop(work, rates[k], prns[k], direction, direction * 8, 0.12f,
-                           NG_B3_FADE, NULL, 1);
-                ClosedLoop(work, rates[k], prns[k], direction, direction * 8, 0.12f,
-                           NG_B3_GAP, NULL, 1);
+                ClosedLoop(work, rates[k], prns[k], direction, direction * 8, 0.12f, NG_B3_FADE,
+                           NULL, 1);
+                ClosedLoop(work, rates[k], prns[k], direction, direction * 8, 0.12f, NG_B3_GAP,
+                           NULL, 1);
                 ClosedLoop(work, rates[k], prns[k], direction, 0, 1, NG_B3_SIDE, NULL, 1);
             }
         free(work);
@@ -572,13 +573,13 @@ int main(int argc, char **argv)
              "rejected,wrong_pll_epochs,pll_final,end_code_chips");
         const uint32_t rates[] = {2048000, 8000000, 8183800};
         const unsigned prns[] = {1, 33, 63};
-        const TNgB3Echo cases[] = {{0.25, 0.5, -1}, {0.5, 0, 1}, {0.5, 0.25, -1},
-                                 {0.5, 0.5, -1}, {0.5, 0.75, -1}};
+        const TNgB3Echo cases[] = {
+            {0.25, 0.5, -1}, {0.5, 0, 1}, {0.5, 0.25, -1}, {0.5, 0.5, -1}, {0.5, 0.75, -1}};
         for (unsigned rate = 0; rate < sizeof(rates) / sizeof(*rates); ++rate)
             for (unsigned c = 0; c < sizeof(cases) / sizeof(*cases); ++c)
                 for (unsigned geometry = 1; geometry <= 2; ++geometry) {
-                    ClosedLoop(work, rates[rate], prns[rate], 0, 0, 1, NG_B3_ECHO,
-                               &cases[c], geometry);
+                    ClosedLoop(work, rates[rate], prns[rate], 0, 0, 1, NG_B3_ECHO, &cases[c],
+                               geometry);
                     ClosedLoop(work, rates[rate], prns[rate], cases[c].lateralSeed, 0, 1,
                                NG_B3_ECHO, &cases[c], geometry);
                 }

@@ -12,7 +12,7 @@ typedef struct {
     unsigned lastPrn;             /**< Last PRN of the selected constellation, inclusive. */
     int squareCarrier;            /**< Squared local sin/cos instead of sinusoidal carrier. */
     int xorCorrelation;           /**< Exact SIMD code sign XOR instead of multiplication. */
-    TNgSearchFftMode fftMode;      /**< Coarse PCPS FFT arithmetic; refinement remains native. */
+    TNgSearchFftMode fftMode;     /**< Coarse PCPS FFT arithmetic; refinement remains native. */
     double cpuBudget; /**< Receiver-run search CPU (thread CPU clock), in cores per signal
                            second; 0 disables.
                            Scheduling only: it delays searches, never changes their decisions.
@@ -30,11 +30,12 @@ typedef struct {
     unsigned prn;            /**< PRN in the runner constellation. */
     int confirmed;           /**< Nonzero only after 3 successes out of 4 independent attempts. */
     double dopplerHz;        /**< Physical Doppler, excluding digital IF. */
-    double codePhaseChips;   /**< Local replica phase at firstSample, modulo the primary code length. */
-    double peakRatio;        /**< Coarse power divided by its statistical threshold. */
-    unsigned successes;      /**< Confirmation successes, 0..4. */
-    uint64_t epoch;          /**< Common-ring continuity generation. */
-    uint64_t firstSample;    /**< Capture origin, not a GNSS time. */
+    double
+        codePhaseChips; /**< Local replica phase at firstSample, modulo the primary code length. */
+    double peakRatio;   /**< Coarse power divided by its statistical threshold. */
+    unsigned successes; /**< Confirmation successes, 0..4. */
+    uint64_t epoch;     /**< Common-ring continuity generation. */
+    uint64_t firstSample; /**< Capture origin, not a GNSS time. */
 } TNgAcquisitionResult;
 
 /** Bounded display of a completed coarse search. Code cells retain the maximum of
@@ -112,8 +113,8 @@ int NgAcquisitionLink(TNgAcquisition *a, TNgAcquisition *b, TNgError *error);
 /** Receiver-owned signal clock: credit the search pool with cpuBudget seconds of CPU per
  * second of processed signal (capped). Returns the budget's stage concurrency, or zero when
  * the budget is disabled and the caller keeps its own adaptive limits. */
-unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *acquisition, uint64_t epoch,
-                                    uint64_t endSample, double sampleRate);
+unsigned NgAcquisitionAdvanceSignal(TNgAcquisition *acquisition, uint64_t epoch, uint64_t endSample,
+                                    double sampleRate);
 /** Receiver-owned adaptive global concurrency and per-constellation free-slot quota. */
 void NgAcquisitionSetParallelism(TNgAcquisition *acquisition, unsigned totalLimit, unsigned quota,
                                  unsigned executionLimit);
@@ -141,10 +142,10 @@ int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TN
  * Capture duration is in milliseconds at the native input rate. The runner supplies
  * ownership, cancellation and scheduling; the caller supplies signal DSP. */
 int NgAcquisitionCreateForConstellation(const TNgAcquisitionConfig *config,
-                                         const TNgStreamInfo *stream,
-                                         TNgConstellation constellation, unsigned durationMs,
-                                         const TNgAcquisitionStrategy *strategy, void *context,
-                                         TNgAcquisition **out, TNgChannel *channel, TNgError *error);
+                                        const TNgStreamInfo *stream, TNgConstellation constellation,
+                                        unsigned durationMs, const TNgAcquisitionStrategy *strategy,
+                                        void *context, TNgAcquisition **out, TNgChannel *channel,
+                                        TNgError *error);
 /** Copy all PRN results for the runner as one snapshot. Slot prn-1 is zero when unavailable. */
 void NgAcquisitionReadResults(TNgAcquisition *acquisition,
                               TNgAcquisitionResult results[NG_SATELLITE_MAX_PRN]);

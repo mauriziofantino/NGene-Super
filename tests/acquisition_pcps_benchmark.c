@@ -8,12 +8,12 @@
 #include <string.h>
 
 enum { PRN = 7, PERIODS = 8, CAPTURE_PERIODS = 56, WARMUPS = 5, REPEATS = 24 };
+
 static const double tau = 6.283185307179586;
 static const double dopplerHz = 1264;
 static const uint32_t seed = 20261121u;
-static const TNgSearchFftMode modes[] = {
-    NG_SEARCH_FFT_FLOAT, NG_SEARCH_FFT_INTEGER_SCALED, NG_SEARCH_FFT_INTEGER_PRECISE
-};
+static const TNgSearchFftMode modes[] = {NG_SEARCH_FFT_FLOAT, NG_SEARCH_FFT_INTEGER_SCALED,
+                                         NG_SEARCH_FFT_INTEGER_PRECISE};
 static const char *modeNames[] = {"float", "q14", "int32"};
 
 typedef struct {
@@ -96,8 +96,8 @@ static int InitFixture(TPcpsFixture *b, size_t n, const int8_t *chips)
         b->integerBaseband[2 * k] = (int16_t)lround(b->baseband[k].i * b->inputScale);
         b->integerBaseband[2 * k + 1] = (int16_t)lround(b->baseband[k].q * b->inputScale);
     }
-    printf("fixture,%zu,%u,%u,%zu,%08lx,%.12g\n", n, PRN, seed, count,
-           (unsigned long)hash, b->inputScale);
+    printf("fixture,%zu,%u,%u,%zu,%08lx,%.12g\n", n, PRN, seed, count, (unsigned long)hash,
+           b->inputScale);
     return 0;
 }
 
@@ -223,18 +223,16 @@ static int VerifyMaps(TPcpsFixture *b, double frequency)
         }
         double relativeL2 = sqrt(errorNorm / referenceNorm);
         double maxErrorOverPeak = maxError / b->reference[expectedPeak];
-        int withinTolerance = relativeL2 <= limits[m] && maxErrorOverPeak <= limits[m] &&
-                              peak == expectedPeak;
-        printf("map,%zu,%s,%.0f,%zu,%zu,%.12g,%.12g,%.9g,%.9g,%.9g,%.9g,%s\n",
-               b->n, modeNames[m], frequency, expectedPeak, peak, b->reference[expectedPeak],
-               b->power[peak], sqrt(b->power[expectedPeak] / b->reference[expectedPeak]),
-               sum / referenceSum, relativeL2, maxErrorOverPeak,
-               withinTolerance ? "within" : "outside");
+        int withinTolerance =
+            relativeL2 <= limits[m] && maxErrorOverPeak <= limits[m] && peak == expectedPeak;
+        printf("map,%zu,%s,%.0f,%zu,%zu,%.12g,%.12g,%.9g,%.9g,%.9g,%.9g,%s\n", b->n, modeNames[m],
+               frequency, expectedPeak, peak, b->reference[expectedPeak], b->power[peak],
+               sqrt(b->power[expectedPeak] / b->reference[expectedPeak]), sum / referenceSum,
+               relativeL2, maxErrorOverPeak, withinTolerance ? "within" : "outside");
         /* Experimental tolerance misses are evidence. Still fail the test for
            a broken reference path, gross scaling errors or a lost signal peak. */
-        if ((modes[m] == NG_SEARCH_FFT_FLOAT && !withinTolerance) ||
-            relativeL2 > 0.5 || maxErrorOverPeak > 0.5 ||
-            (frequency == dopplerHz && peak != expectedPeak))
+        if ((modes[m] == NG_SEARCH_FFT_FLOAT && !withinTolerance) || relativeL2 > 0.5 ||
+            maxErrorOverPeak > 0.5 || (frequency == dopplerHz && peak != expectedPeak))
             return Fail("map failed the reference contract");
     }
     return 0;
@@ -293,22 +291,22 @@ static int Measure(TPcpsFixture *b)
             capture.origin.epoch++;
             start = NgMonotonicSeconds();
             int rc = ngGalileoAcquisitionStrategy.search(workspace, &capture, PRN, &config,
-                                                          CancelAtCoarse, &checks, &result, &error);
+                                                         CancelAtCoarse, &checks, &result, &error);
             double cold = NgMonotonicSeconds() - start;
             if (rc != NG_END || checks != 0)
                 return Fail("cold search did not stop at the first Doppler row");
             checks = 1;
             start = NgMonotonicSeconds();
             rc = ngGalileoAcquisitionStrategy.search(workspace, &capture, PRN, &config,
-                                                      CancelAtCoarse, &checks, &result, &error);
+                                                     CancelAtCoarse, &checks, &result, &error);
             double warm = NgMonotonicSeconds() - start;
             if (rc != NG_END || checks != 0)
                 return Fail("warm search did not stop at the first Doppler row");
 
             capture.origin.epoch++;
             start = NgMonotonicSeconds();
-            rc = ngGalileoAcquisitionStrategy.search(workspace, &capture, PRN, &config,
-                                                      NeverCancel, NULL, &result, &error);
+            rc = ngGalileoAcquisitionStrategy.search(workspace, &capture, PRN, &config, NeverCancel,
+                                                     NULL, &result, &error);
             double full = NgMonotonicSeconds() - start;
             double expectedPhase = 4092 * (1 - 247.0 / 8192);
             if (rc != NG_OK || result.prn != PRN || !result.confirmed || result.successes != 3 ||
@@ -316,10 +314,9 @@ static int Measure(TPcpsFixture *b)
                 fabs(result.codePhaseChips - expectedPhase) > 0.6)
                 return Fail("full strategy did not reproduce the injected satellite");
             if (trial >= WARMUPS)
-                printf("time,%zu,%u,%u,%s,%.9f,%.9f,%.9f,%.9f,%.9f,%.3f,%.6f,%u\n",
-                       b->n, trial - WARMUPS + 1, position + 1, modeNames[m], codeTime,
-                       pcpsTime, cold, warm, full, result.dopplerHz, result.codePhaseChips,
-                       result.successes);
+                printf("time,%zu,%u,%u,%s,%.9f,%.9f,%.9f,%.9f,%.9f,%.3f,%.6f,%u\n", b->n,
+                       trial - WARMUPS + 1, position + 1, modeNames[m], codeTime, pcpsTime, cold,
+                       warm, full, result.dopplerHz, result.codePhaseChips, result.successes);
         }
     }
     return 0;
@@ -347,8 +344,8 @@ int BenchmarkIntegerPcps(int measure)
     size_t count = measure ? sizeof(sizes) / sizeof(sizes[0]) : 1;
     int rc = 0;
     for (size_t k = 0; k < count && !rc; ++k)
-        rc = InitFixture(&fixtures[k], sizes[k], chips) ||
-             VerifyMaps(&fixtures[k], dopplerHz) || VerifyMaps(&fixtures[k], 22000);
+        rc = InitFixture(&fixtures[k], sizes[k], chips) || VerifyMaps(&fixtures[k], dopplerHz) ||
+             VerifyMaps(&fixtures[k], 22000);
     for (size_t k = 0; k < count && measure && !rc; ++k)
         rc = Measure(&fixtures[k]);
     for (size_t k = 0; k < count; ++k)

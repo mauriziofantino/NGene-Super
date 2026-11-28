@@ -49,14 +49,14 @@ struct TNgAcquisition {
     void *contexts[NG_ACQUISITION_MAX_PARALLEL]; /**< Exclusive workspace per claimed lane. */
     unsigned contextCount;                       /**< Prepared lane count. */
     int ownsContext;                             /**< Default strategies own their workspaces. */
-    TNgConstellation constellation;     /**< Namespace of the runner's PRNs. */
+    TNgConstellation constellation;              /**< Namespace of the runner's PRNs. */
     TNgAcquisitionResult highResults[NG_SATELLITE_MAX_PRN - NG_LEGACY_MAX_PRN];
-    TNgAcquisitionSearchSpace *spaces;          /**< Completed display archives. */
-    TNgAcquisitionPool *pool;                    /**< Shared scheduler. */
+    TNgAcquisitionSearchSpace *spaces;            /**< Completed display archives. */
+    TNgAcquisitionPool *pool;                     /**< Shared scheduler. */
     unsigned nextPrn, captureLastPrn, activeJobs; /**< Published capture cursor and borrowers. */
-    unsigned nextCapturePrn;    /**< Producer cursor for bounded B1C search batches. */
-    unsigned quota;               /**< Free receiver slots, published under pool mutex. */
-    uint32_t busyContexts;        /**< Pool-mutex-protected exclusive lanes. */
+    unsigned nextCapturePrn; /**< Producer cursor for bounded B1C search batches. */
+    unsigned quota;          /**< Free receiver slots, published under pool mutex. */
+    uint32_t busyContexts;   /**< Pool-mutex-protected exclusive lanes. */
 };
 
 /** A worker has no RF cursor; it borrows one published capture and a private workspace. */
@@ -84,10 +84,10 @@ struct TNgAcquisitionPool {
     int stopping;                                   /**< Pool shutdown predicate. */
     TNgAcquisition *subscriptions[NG_CONSTELLATION_COUNT];
     unsigned subscriptionCount; /**< Stable slots, including detached subscriptions. */
-    double cpuBudget;     /**< CPU seconds per signal second; zero disables the budget. */
-    double cpuCredit;     /**< Remaining CPU seconds; may go negative by one stage. */
-    int budgetActive;     /**< A receiver advances signal time for this pool. */
-    int haveSignal;       /**< signalEpoch/signalSample hold the last credited position. */
+    double cpuBudget;           /**< CPU seconds per signal second; zero disables the budget. */
+    double cpuCredit;           /**< Remaining CPU seconds; may go negative by one stage. */
+    int budgetActive;           /**< A receiver advances signal time for this pool. */
+    int haveSignal;             /**< signalEpoch/signalSample hold the last credited position. */
     uint64_t signalEpoch, signalSample; /**< Last credited signal position. */
 };
 
@@ -278,14 +278,14 @@ static void Execute(TNgAcquisitionJob *job)
     }
     NgMutexUnlock(&a->mutex);
 #ifdef NGENE_PROFILE_ACQUISITION_JOBS
-    fprintf(stderr,
-            "f6_job,%s,%" PRIu64 ",%" PRIu64 ",%u,%d,%d,%d,%.17g,%.17g,%.17g,%.9f,%.9f,%.9f\n",
-            a->strategy == &ngGalileoAcquisitionStrategy ? "galileo" :
-            a->strategy == &ngGpsAcquisitionStrategy ? "gps" : "custom",
-            job->capture.origin.epoch, job->capture.origin.firstSample, job->prn,
-            status, published, result.confirmed, result.dopplerHz, result.codePhaseChips,
-            result.peakRatio, job->claimed - job->published, job->permitWait,
-            result.completedSeconds - job->published);
+    fprintf(
+        stderr, "f6_job,%s,%" PRIu64 ",%" PRIu64 ",%u,%d,%d,%d,%.17g,%.17g,%.17g,%.9f,%.9f,%.9f\n",
+        a->strategy == &ngGalileoAcquisitionStrategy ? "galileo"
+        : a->strategy == &ngGpsAcquisitionStrategy   ? "gps"
+                                                     : "custom",
+        job->capture.origin.epoch, job->capture.origin.firstSample, job->prn, status, published,
+        result.confirmed, result.dopplerHz, result.codePhaseChips, result.peakRatio,
+        job->claimed - job->published, job->permitWait, result.completedSeconds - job->published);
 #endif
     if (status == NG_OK && native && result.confirmed && !Cancelled(job) &&
         job->capture.displayPrn != job->prn) {
@@ -354,7 +354,8 @@ static void DestroyPool(TNgAcquisitionPool *pool)
 }
 
 /** Prepare all threads before RX; the pool never allocates in the sample path. */
-static TNgAcquisitionPool *CreatePool(TNgAcquisition *const *members, unsigned count, TNgError *error)
+static TNgAcquisitionPool *CreatePool(TNgAcquisition *const *members, unsigned count,
+                                      TNgError *error)
 {
     TNgAcquisitionPool *pool = calloc(1, sizeof(*pool));
     unsigned wanted = 0, k;
@@ -411,14 +412,14 @@ void NgAcquisitionDefaults(TNgAcquisitionConfig *config)
     config->cpuBudget = 1.0;
 }
 
-int NgAcquisitionValidateGrid(const char *signal, uint32_t rateHz, unsigned periodMs,
-                              size_t size, TNgError *error)
+int NgAcquisitionValidateGrid(const char *signal, uint32_t rateHz, unsigned periodMs, size_t size,
+                              TNgError *error)
 {
     if (periodMs == 0)
         return NgFail(error, "%s acquisition code period must be positive", signal);
     if (!NgSearchFftSupportsSize(size))
-        return NgFail(error, "%s acquisition FFT size %zu is unsupported by the search FFT",
-                      signal, size);
+        return NgFail(error, "%s acquisition FFT size %zu is unsupported by the search FFT", signal,
+                      size);
     /* The compression boundaries are floor(k * Fs * periodMs / (1000 * N)).
      * If the step is below one, the first cell is empty even when a rounded-up
      * buffer can store N native pairs. A step >= 1 makes every cell nonempty. */
@@ -444,12 +445,12 @@ static int ValidateForConstellation(const TNgAcquisitionConfig *config,
         config->lastPrn < config->firstPrn || (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
         (config->xorCorrelation != 0 && config->xorCorrelation != 1) ||
-        config->fftMode < NG_SEARCH_FFT_FLOAT ||
-        config->fftMode > NG_SEARCH_FFT_INTEGER_SCALED)
+        config->fftMode < NG_SEARCH_FFT_FLOAT || config->fftMode > NG_SEARCH_FFT_INTEGER_SCALED)
         return NgFail(error, "Invalid acquisition PRN range or mode");
     if (config->fftSize != 0 && config->fftSize != 4096 && config->fftSize != 8192 &&
         config->fftSize != 16384)
-        return NgFail(error, "Galileo acquisition FFT size must be 0 (automatic), 4096, 8192 or 16384");
+        return NgFail(error,
+                      "Galileo acquisition FFT size must be 0 (automatic), 4096, 8192 or 16384");
     if (!isfinite(config->cpuBudget) || config->cpuBudget < 0 ||
         config->cpuBudget > NG_ACQUISITION_MAX_PARALLEL)
         return NgFail(error, "Acquisition CPU budget must be 0..32 cores (0 disables it)");
@@ -512,9 +513,9 @@ static int Process(void *context, const TNgChannelId *id, TNgChannelState state,
             if (acquisition->strategy == &ngBeidouAcquisitionStrategy &&
                 acquisition->captureLastPrn - acquisition->nextPrn >= 4)
                 acquisition->captureLastPrn = acquisition->nextPrn + 3;
-            acquisition->nextCapturePrn =
-                acquisition->captureLastPrn == acquisition->config.lastPrn
-                    ? acquisition->config.firstPrn : acquisition->captureLastPrn + 1;
+            acquisition->nextCapturePrn = acquisition->captureLastPrn == acquisition->config.lastPrn
+                                              ? acquisition->config.firstPrn
+                                              : acquisition->captureLastPrn + 1;
 #ifdef NGENE_PROFILE_ACQUISITION_JOBS
             acquisition->capturePublished = NgMonotonicSeconds();
 #endif
@@ -539,7 +540,8 @@ static void FreeContexts(TNgAcquisition *a, unsigned first)
 {
     unsigned k;
     for (k = first; k < a->contextCount; ++k) {
-        if (a->strategy == &ngGalileoAcquisitionStrategy || a->strategy == &ngBeidouAcquisitionStrategy)
+        if (a->strategy == &ngGalileoAcquisitionStrategy ||
+            a->strategy == &ngBeidouAcquisitionStrategy)
             NgAcquisitionGalileoFree(a->contexts[k]);
         else if (a->strategy == &ngGpsAcquisitionStrategy)
             NgAcquisitionGpsFree(a->contexts[k]);
@@ -643,13 +645,13 @@ int NgAcquisitionCreateWithStrategy(const TNgAcquisitionConfig *config, const TN
 }
 
 int NgAcquisitionCreateForConstellation(const TNgAcquisitionConfig *config,
-                                         const TNgStreamInfo *stream,
-                                         TNgConstellation constellation, unsigned durationMs,
-                                         const TNgAcquisitionStrategy *strategy, void *context,
-                                         TNgAcquisition **out, TNgChannel *channel, TNgError *error)
+                                        const TNgStreamInfo *stream, TNgConstellation constellation,
+                                        unsigned durationMs, const TNgAcquisitionStrategy *strategy,
+                                        void *context, TNgAcquisition **out, TNgChannel *channel,
+                                        TNgError *error)
 {
-    return CreateWithDuration(config, stream, strategy, context, out, channel, error,
-                              constellation, durationMs);
+    return CreateWithDuration(config, stream, strategy, context, out, channel, error, constellation,
+                              durationMs);
 }
 
 /** Register native GPS with private SIMD workspaces on one frozen shared capture. */
@@ -682,9 +684,8 @@ int NgAcquisitionCreateGalileo(const TNgAcquisitionConfig *config, const TNgStre
     *out = NULL;
     if (NgAcquisitionValidate(config, error) != NG_OK)
         return NG_ERROR;
-    if (config->enabled &&
-        NgAcquisitionGalileoWorkspace(stream, config->fftSize, config->fftMode, &workspace,
-                                      error) != NG_OK)
+    if (config->enabled && NgAcquisitionGalileoWorkspace(stream, config->fftSize, config->fftMode,
+                                                         &workspace, error) != NG_OK)
         return NG_ERROR;
     status = CreateWithDuration(config, stream, &ngGalileoAcquisitionStrategy, workspace, out,
                                 channel, error, NG_CONSTELLATION_GALILEO, 224);
@@ -711,8 +712,8 @@ int NgAcquisitionCreateBeidou(const TNgAcquisitionConfig *config, const TNgStrea
         return NG_ERROR;
     if (config->enabled && NgAcquisitionBeidouWorkspace(stream, &workspace, error) != NG_OK)
         return NG_ERROR;
-    int status = CreateWithDuration(config, stream, &ngBeidouAcquisitionStrategy, workspace,
-                                    out, channel, error, NG_CONSTELLATION_BEIDOU, 570);
+    int status = CreateWithDuration(config, stream, &ngBeidouAcquisitionStrategy, workspace, out,
+                                    channel, error, NG_CONSTELLATION_BEIDOU, 570);
     if (*out) {
         (*out)->ownsContext = 1;
         channel->id.instanceId = NG_CONSTELLATION_BEIDOU - 1;

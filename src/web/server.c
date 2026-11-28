@@ -286,14 +286,15 @@ static void Counter(cJSON *object, const char *key, uint64_t value)
  */
 static int Headers(struct mg_connection *connection, int status, const char *type, size_t length)
 {
-    return mg_printf(connection,
-                     "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
-                     "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
-                     "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src "
-                     "'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self' ws://127.0.0.1:* "
-                     "ws://localhost:*; frame-ancestors 'none'; base-uri 'none'\r\n"
-                     "Connection: close\r\n\r\n",
-                     status, status < 400 ? "OK" : "Error", type, length);
+    return mg_printf(
+        connection,
+        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+        "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
+        "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src "
+        "'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self' ws://127.0.0.1:* "
+        "ws://localhost:*; frame-ancestors 'none'; base-uri 'none'\r\n"
+        "Connection: close\r\n\r\n",
+        status, status < 400 ? "OK" : "Error", type, length);
 }
 
 /**
@@ -387,8 +388,10 @@ static cJSON *AnalysisConfigJson(const TNgAnalysisConfig *c)
     cJSON_AddBoolToObject(o, "spectrum_enabled", c->spectrumEnabled);
     cJSON_AddBoolToObject(o, "histogram_enabled", c->histogramEnabled);
     Number(o, "fft_size", (double)c->fftSize);
-    String(o, "fft_mode", c->fftMode == NG_SEARCH_FFT_INTEGER_PRECISE ? "integer_precise" :
-                          c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED ? "integer_scaled" : "float");
+    String(o, "fft_mode",
+           c->fftMode == NG_SEARCH_FFT_INTEGER_PRECISE  ? "integer_precise"
+           : c->fftMode == NG_SEARCH_FFT_INTEGER_SCALED ? "integer_scaled"
+                                                        : "float");
     String(o, "window", NgWindowName(c->window));
     Number(o, "overlap_percent", c->overlapPercent);
     Number(o, "averages", c->averages);
@@ -579,12 +582,14 @@ static int ReadAnalysisConfig(cJSON *body, TNgAnalysisConfig *out, TNgError *err
             return NgFail(error, "Expected string: %s", key);
         }
         if (strcmp(key, "fft_mode") == 0) {
-            if (strcmp(v->valuestring, "float") == 0) out->fftMode = NG_SEARCH_FFT_FLOAT;
+            if (strcmp(v->valuestring, "float") == 0)
+                out->fftMode = NG_SEARCH_FFT_FLOAT;
             else if (strcmp(v->valuestring, "integer_precise") == 0)
                 out->fftMode = NG_SEARCH_FFT_INTEGER_PRECISE;
             else if (strcmp(v->valuestring, "integer_scaled") == 0)
                 out->fftMode = NG_SEARCH_FFT_INTEGER_SCALED;
-            else return NgFail(error, "Invalid analysis FFT arithmetic");
+            else
+                return NgFail(error, "Invalid analysis FFT arithmetic");
             continue;
         }
         if (strcmp(key, "window") == 0) {
@@ -655,7 +660,8 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             unsigned tap;
             const TNgTrackingSnapshot *t = &status->tracking[channelIndex];
             cJSON *row, *taps;
-            if (!t->channelId) continue;
+            if (!t->channelId)
+                continue;
             row = cJSON_CreateObject();
             cJSON_AddItemToArray(channels, row);
             Number(row, "channel_id", t->channelId);
@@ -665,18 +671,21 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             cJSON_AddBoolToObject(row, "tow_valid", t->navigation.towValid);
             Number(row, "tow_seconds", t->navigation.towSeconds);
             Number(row, "transmit_time_seconds", t->navigation.transmitTimeSeconds);
-            cJSON_AddBoolToObject(row, "ephemeris_valid", t->navigation.broadcast.ephemeridesReceived);
+            cJSON_AddBoolToObject(row, "ephemeris_valid",
+                                  t->navigation.broadcast.ephemeridesReceived);
             Number(row, "broadcast_week", t->navigation.broadcast.wn);
             Number(row, "subframe_id", t->navigation.subframeId);
             Counter(row, "navigation_symbols", t->navigation.symbols);
             Counter(row, "valid_subframes", t->navigation.validSubframes);
             Counter(row, "navigation_parity_errors", t->navigation.parityErrors);
             Counter(row, "navigation_boundary_sample", t->navigation.boundarySample);
-            cJSON_AddBoolToObject(row,"cn0_valid",t->cn0Valid);
-            if(t->cn0Valid) Number(row,"cn0_db_hz",t->cn0DbHz);
-            else cJSON_AddNullToObject(row,"cn0_db_hz");
-            cJSON_AddBoolToObject(row,"main_peak_verified",t->mainPeakVerified);
-            Number(row,"code_delay_chips",t->codeDelayChips);
+            cJSON_AddBoolToObject(row, "cn0_valid", t->cn0Valid);
+            if (t->cn0Valid)
+                Number(row, "cn0_db_hz", t->cn0DbHz);
+            else
+                cJSON_AddNullToObject(row, "cn0_db_hz");
+            cJSON_AddBoolToObject(row, "main_peak_verified", t->mainPeakVerified);
+            Number(row, "code_delay_chips", t->codeDelayChips);
             Number(row, "prn", t->prn);
             Number(row, "constellation", t->constellation);
             cJSON_AddBoolToObject(row, "active", t->active);
@@ -707,13 +716,18 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         cJSON *p = cJSON_AddObjectToObject(object, "pvt");
         cJSON_AddBoolToObject(p, "available", s->available);
         cJSON_AddBoolToObject(p, "velocity_available", s->velocityAvailable);
-        Number(p, "satellites", s->satellites); Number(p, "gps", s->gps); Number(p, "galileo", s->galileo);
+        Number(p, "satellites", s->satellites);
+        Number(p, "gps", s->gps);
+        Number(p, "galileo", s->galileo);
         Number(p, "beidou", s->beidou);
-        Counter(p, "epoch", s->epoch); Counter(p, "sample", s->sample);
+        Counter(p, "epoch", s->epoch);
+        Counter(p, "sample", s->sample);
         Number(p, "tow_seconds", s->towSeconds);
         cJSON_AddBoolToObject(p, "dop_available", s->dopAvailable);
         if (s->dopAvailable) {
-            Number(p, "gdop", s->gdop); Number(p, "hdop", s->hdop); Number(p, "vdop", s->vdop);
+            Number(p, "gdop", s->gdop);
+            Number(p, "hdop", s->hdop);
+            Number(p, "vdop", s->vdop);
         }
         cJSON *sky = cJSON_AddArrayToObject(p, "sky");
         for (unsigned k = 0; k < s->skyCount; ++k) {
@@ -728,11 +742,16 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         if (s->available) {
             Number(p, "latitude_deg", s->latitude * 57.29577951308232);
             Number(p, "longitude_deg", s->longitude * 57.29577951308232);
-            Number(p, "height_m", s->height); Number(p, "residual_rms_m", s->residualRms);
-            Number(p, "clock_gps_m", s->clockGps); Number(p, "clock_galileo_m", s->clockGalileo);
-            if (s->beidou) Number(p, "clock_beidou_m", s->clockBeidou);
-            Number(p, "velocity_x_mps", s->velocity[0]); Number(p, "velocity_y_mps", s->velocity[1]);
-            Number(p, "velocity_z_mps", s->velocity[2]); Number(p, "clock_drift_mps", s->clockDrift);
+            Number(p, "height_m", s->height);
+            Number(p, "residual_rms_m", s->residualRms);
+            Number(p, "clock_gps_m", s->clockGps);
+            Number(p, "clock_galileo_m", s->clockGalileo);
+            if (s->beidou)
+                Number(p, "clock_beidou_m", s->clockBeidou);
+            Number(p, "velocity_x_mps", s->velocity[0]);
+            Number(p, "velocity_y_mps", s->velocity[1]);
+            Number(p, "velocity_z_mps", s->velocity[2]);
+            Number(p, "clock_drift_mps", s->clockDrift);
         }
         cJSON *egnos = cJSON_AddObjectToObject(p, "egnos");
         Number(egnos, "geo_prn", s->egnosPrn);
@@ -763,7 +782,8 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
             for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
                 if (status->acquisition.currentPrns[lane])
-                    cJSON_AddItemToArray(prns, cJSON_CreateNumber(status->acquisition.currentPrns[lane]));
+                    cJSON_AddItemToArray(prns,
+                                         cJSON_CreateNumber(status->acquisition.currentPrns[lane]));
         }
         Counter(acquisition, "searches", status->acquisition.searches);
         Counter(acquisition, "skipped_samples", status->acquisition.skippedSamples);
@@ -803,7 +823,8 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             cJSON *prns = cJSON_AddArrayToObject(acquisition, "current_prns");
             for (unsigned lane = 0; lane < NG_ACQUISITION_MAX_PARALLEL; ++lane)
                 if (status->galileoAcquisition.currentPrns[lane])
-                    cJSON_AddItemToArray(prns, cJSON_CreateNumber(status->galileoAcquisition.currentPrns[lane]));
+                    cJSON_AddItemToArray(
+                        prns, cJSON_CreateNumber(status->galileoAcquisition.currentPrns[lane]));
         }
         Counter(acquisition, "searches", status->galileoAcquisition.searches);
         Counter(acquisition, "skipped_samples", status->galileoAcquisition.skippedSamples);
@@ -907,7 +928,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
     cJSON_AddNullToObject(object, "hardware_lost_samples");
     String(object, "device_continuity_state",
            status->receiver.frontend.deviceContinuityState == NG_DIAGNOSTIC_VALID ? "valid"
-                                                                                 : "unsupported");
+                                                                                  : "unsupported");
     if (status->receiver.frontend.deviceContinuityState == NG_DIAGNOSTIC_VALID) {
         Counter(object, "device_gap_events", status->receiver.frontend.deviceGapEvents);
         Counter(object, "device_missing_samples", status->receiver.frontend.deviceMissingSamples);
@@ -968,7 +989,9 @@ static cJSON *SearchSpaceJson(TNgControl *control, unsigned prn, int galileo)
     for (row = 0; row < space->dopplerBins; ++row) {
         unsigned column;
         cJSON *values = cJSON_CreateArray();
-        cJSON_AddItemToArray(frequencies, cJSON_CreateNumber(galileo ? -5000 + row * 87.0 : row == 15 ? 5000 : -5000 + row * 667.0));
+        cJSON_AddItemToArray(frequencies, cJSON_CreateNumber(galileo     ? -5000 + row * 87.0
+                                                             : row == 15 ? 5000
+                                                                         : -5000 + row * 667.0));
         for (column = 0; column < NG_ACQUISITION_CODE_BINS; ++column)
             cJSON_AddItemToArray(values, cJSON_CreateNumber(space->power[row][column]));
         cJSON_AddItemToArray(power, values);
@@ -1513,7 +1536,8 @@ static int Handle(struct mg_connection *connection, void *context)
             return 200;
         }
         if (strcmp(path, "/acquisition-search-space.js") == 0) {
-            Headers(connection, 200, "text/javascript; charset=utf-8", ngAcquisitionSearchSpaceJsLength);
+            Headers(connection, 200, "text/javascript; charset=utf-8",
+                    ngAcquisitionSearchSpaceJsLength);
             mg_write(connection, ngAcquisitionSearchSpaceJs, ngAcquisitionSearchSpaceJsLength);
             return 200;
         }
@@ -1685,7 +1709,8 @@ static int Handle(struct mg_connection *connection, void *context)
     }
     if (strcmp(path, "/api/v1/channels/observe") == 0) {
         cJSON *id = cJSON_GetObjectItemCaseSensitive(body, "channel_id");
-        if (!cJSON_IsNumber(id) || id->valuedouble < 0 || id->valuedouble > NG_TRACKING_EGNOS_CHANNEL ||
+        if (!cJSON_IsNumber(id) || id->valuedouble < 0 ||
+            id->valuedouble > NG_TRACKING_EGNOS_CHANNEL ||
             id->valuedouble != (double)id->valueint) {
             code = Failure(connection, 400, "Expected channel_id 0..64");
         } else {

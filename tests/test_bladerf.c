@@ -288,8 +288,9 @@ int CALL_CONV bladerf_sync_rx(struct bladerf *device, void *samples, unsigned co
     if (scenario == 5) {
         metadata->timestamp = UINT64_MAX - 3u;
     }
-    metadata->status =
-        device->calls == 0 && scenario != 7 && scenario != 10 ? (uint32_t)BLADERF_META_STATUS_OVERRUN : 0u;
+    metadata->status = device->calls == 0 && scenario != 7 && scenario != 10
+                           ? (uint32_t)BLADERF_META_STATUS_OVERRUN
+                           : 0u;
     metadata->actual_count = scenario == 2        ? count + 1u
                              : scenario == 3      ? 0u
                              : device->calls == 0 ? 32u
@@ -345,14 +346,13 @@ static void CheckStream(TNgConfig *config, unsigned testCase)
                   view.meta.count == (scenario == 10 && index == 9 ? 3u : 4u));
             for (sample = 0; sample < view.meta.count; ++sample) {
                 CHECK(NgIqComponent(&view, sample, 0) == levels[(sample + sampleOffset) % 4u]);
-                CHECK(NgIqComponent(&view, sample, 1) ==
-                      levels[3u - (sample + sampleOffset) % 4u]);
+                CHECK(NgIqComponent(&view, sample, 1) == levels[3u - (sample + sampleOffset) % 4u]);
             }
             CHECK((view.meta.flags & NG_BLOCK_HARDWARE_TIME) != 0);
             CHECK(view.meta.hardwareTimestamp == 1000u + view.meta.firstSample);
-            CHECK(view.meta.firstSample == (index < 8       ? index * 4u
+            CHECK(view.meta.firstSample == (index < 8                           ? index * 4u
                                             : (scenario == 8 || scenario == 10) ? index * 4u
-                                                            : index * 4u + 5u));
+                                                                                : index * 4u + 5u));
             if (index == 8) {
                 CHECK((view.meta.flags & NG_BLOCK_GAP) != 0);
                 CHECK(view.meta.missingKnown == (scenario != 8 && scenario != 10));
