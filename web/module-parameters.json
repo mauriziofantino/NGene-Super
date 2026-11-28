@@ -227,6 +227,259 @@
               "hint": "Byte modes require a CI8 common stream. Quantized carrier may reduce PVT accuracy."
             }
           ]
+        },
+        {
+          "title": "GPS loop filters",
+          "topic": "tracking",
+          "note": "Coefficients are recalculated for the coherent period when the channel is assigned.",
+          "fields": [
+            {
+              "key": "tracking.gps_dll_bandwidth_hz",
+              "label": "DLL bandwidth (Hz)",
+              "type": "number",
+              "default": 2,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.gps_dll_gain",
+              "label": "DLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            },
+            {
+              "key": "tracking.gps_fll_bandwidth_hz",
+              "label": "FLL bandwidth (Hz)",
+              "type": "number",
+              "default": 15,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.gps_fll_gain",
+              "label": "FLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            },
+            {
+              "key": "tracking.gps_pll_bandwidth_hz",
+              "label": "PLL bandwidth (Hz)",
+              "type": "number",
+              "default": 15,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.gps_pll_gain",
+              "label": "PLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            }
+          ]
+        },
+        {
+          "title": "Galileo loop filters",
+          "topic": "tracking",
+          "note": "Coefficients are recalculated for the coherent period when the channel is assigned.",
+          "fields": [
+            {
+              "key": "tracking.galileo_dll_bandwidth_hz",
+              "label": "DLL bandwidth (Hz)",
+              "type": "number",
+              "default": 2,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.galileo_dll_gain",
+              "label": "DLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            },
+            {
+              "key": "tracking.galileo_fll_bandwidth_hz",
+              "label": "FLL bandwidth (Hz)",
+              "type": "number",
+              "default": 15,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.galileo_fll_gain",
+              "label": "FLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            },
+            {
+              "key": "tracking.galileo_pll_bandwidth_hz",
+              "label": "PLL bandwidth (Hz)",
+              "type": "number",
+              "default": 15,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.galileo_pll_gain",
+              "label": "PLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            }
+          ]
+        },
+        {
+          "title": "BeiDou B1C loop filters",
+          "topic": "tracking",
+          "note": "BeiDou scales its 10-ms loop coefficients relative to the nominal bandwidth settings.",
+          "fields": [
+            {
+              "key": "tracking.beidou_dll_bandwidth_hz",
+              "label": "DLL bandwidth (Hz)",
+              "type": "number",
+              "default": 2,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.beidou_dll_gain",
+              "label": "DLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            },
+            {
+              "key": "tracking.beidou_fll_bandwidth_hz",
+              "label": "FLL bandwidth (Hz)",
+              "type": "number",
+              "default": 15,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.beidou_fll_gain",
+              "label": "FLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            },
+            {
+              "key": "tracking.beidou_pll_bandwidth_hz",
+              "label": "PLL bandwidth (Hz)",
+              "type": "number",
+              "default": 15,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.beidou_pll_gain",
+              "label": "PLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            }
+          ]
+        },
+        {
+          "title": "EGNOS loop filters",
+          "topic": "tracking",
+          "note": "Coefficients are recalculated for the coherent period when the channel is assigned.",
+          "fields": [
+            {
+              "key": "tracking.egnos_dll_bandwidth_hz",
+              "label": "DLL bandwidth (Hz)",
+              "type": "number",
+              "default": 2,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.egnos_dll_gain",
+              "label": "DLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            },
+            {
+              "key": "tracking.egnos_fll_bandwidth_hz",
+              "label": "FLL bandwidth (Hz)",
+              "type": "number",
+              "default": 15,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.egnos_fll_gain",
+              "label": "FLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            },
+            {
+              "key": "tracking.egnos_pll_bandwidth_hz",
+              "label": "PLL bandwidth (Hz)",
+              "type": "number",
+              "default": 15,
+              "min": 0.1,
+              "max": 50
+            },
+            {
+              "key": "tracking.egnos_pll_gain",
+              "label": "PLL gain",
+              "type": "number",
+              "default": 1,
+              "min": 0.1,
+              "max": 20
+            }
+          ]
+        },
+        {
+          "title": "FLL to PLL transition",
+          "topic": "tracking",
+          "note": "Applies to GPS, Galileo and EGNOS. BeiDou uses its B1C transition logic.",
+          "fields": [
+            {
+              "key": "tracking.fll_decision_updates",
+              "label": "FLL / PLL decision filter length (updates)",
+              "type": "number",
+              "default": 20,
+              "integer": true,
+              "min": 1,
+              "max": 1000
+            },
+            {
+              "key": "tracking.fll_decision_interval_ms",
+              "label": "FLL / PLL decision interval (ms)",
+              "type": "number",
+              "default": 100,
+              "integer": true,
+              "min": 4,
+              "max": 2000
+            },
+            {
+              "key": "tracking.fll_transition_hz",
+              "label": "FLL / PLL transition threshold (Hz)",
+              "type": "number",
+              "default": 1,
+              "min": 0.01,
+              "max": 100
+            }
+          ]
         }
       ]
     },
@@ -852,54 +1105,6 @@
             ]
           },
           {
-            "key": "GPS DLLbandwidth",
-            "label": "DLL bandwidth",
-            "value": "2",
-            "unit": "Hz",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "GPS DLLgain",
-            "label": "DLL gain",
-            "value": "1",
-            "unit": "",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "GPS FLLbandwidth",
-            "label": "FLL bandwidth",
-            "value": "15",
-            "unit": "Hz",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "GPS FLLgain",
-            "label": "FLL gain",
-            "value": "1",
-            "unit": "",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "GPS PLLbandwidth",
-            "label": "PLL bandwidth",
-            "value": "15",
-            "unit": "Hz",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "GPS PLLgain",
-            "label": "PLL gain",
-            "value": "1",
-            "unit": "",
-            "hint": "",
-            "options": null
-          },
-          {
             "key": "GPS spacing",
             "label": "Early–late spacing",
             "value": "0.8",
@@ -913,54 +1118,6 @@
       {
         "title": "Galileo tracking loops",
         "fields": [
-          {
-            "key": "Galileo DLLbandwidth",
-            "label": "DLL bandwidth",
-            "value": "2",
-            "unit": "Hz",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "Galileo DLLgain",
-            "label": "DLL gain",
-            "value": "1",
-            "unit": "",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "Galileo FLLbandwidth",
-            "label": "FLL bandwidth",
-            "value": "15",
-            "unit": "Hz",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "Galileo FLLgain",
-            "label": "FLL gain",
-            "value": "1",
-            "unit": "",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "Galileo PLLbandwidth",
-            "label": "PLL bandwidth",
-            "value": "15",
-            "unit": "Hz",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "Galileo PLLgain",
-            "label": "PLL gain",
-            "value": "1",
-            "unit": "",
-            "hint": "",
-            "options": null
-          },
           {
             "key": "Galileo spacing",
             "label": "Early–late spacing",
@@ -980,30 +1137,6 @@
             "label": "C/N₀ cutoff",
             "value": "30",
             "unit": "dB-Hz",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "FLLPLLChoiceFilter Length",
-            "label": "FLL / PLL decision filter length",
-            "value": "20",
-            "unit": "updates",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "FLLPLLChoiceFilterUpdateTime",
-            "label": "FLL / PLL decision interval",
-            "value": "100",
-            "unit": "ms",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "PLLFLLthreshold",
-            "label": "FLL / PLL transition threshold",
-            "value": "1",
-            "unit": "Hz",
             "hint": "",
             "options": null
           },

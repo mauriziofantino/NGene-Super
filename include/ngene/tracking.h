@@ -7,8 +7,18 @@
 #define NG_TRACKING_EGNOS_CHANNEL 65u
 #define NG_TRACKING_EGNOS_SIGNAL 4u /**< Presentation identifier, outside the PVT constellation enum. */
 
+typedef struct {
+    double bandwidthHz;
+    double gain;
+} TNgLoopSettings;
+
+enum { NG_LOOP_DLL, NG_LOOP_FLL, NG_LOOP_PLL, NG_LOOP_COUNT };
+
 /** Frozen per-run numerical and correlator configuration; no automatic precision changes. */
 typedef struct {
+    TNgLoopSettings loops[NG_TRACKING_EGNOS_SIGNAL][NG_LOOP_COUNT]; /**< GPS, Galileo, BeiDou and EGNOS. */
+    unsigned fllDecisionUpdates, fllDecisionIntervalMs;
+    double fllTransitionHz;
     unsigned channelCount;      /**< Total shared receiver slots, 1..64. */
     double beidouSpacingChips;  /**< BeiDou adjacent tap delay, zero inherits Galileo spacing. */
     double galileoSpacingChips; /**< Galileo adjacent tap delay, central BOC lobe. */

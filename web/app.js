@@ -1177,3 +1177,60 @@ $('pickerUse').addEventListener('click', () => {
   notice(replaySelection.metadata_available ? 'Replay metadata loaded into the draft. Review, Apply & save, then Start receiver.' : 'File selected. Set sampling rate and RF parameters, then Apply & save.');
   $('replayFileDialog').close();
 });
+
+/** Fullscreen keeps the original plot mounted so live updates and controls retain their state. */
+function addPlotFullscreen() {
+  const plots = document.querySelectorAll(
+    '.plot-wrap canvas, .histogram-grid canvas, .caf-view canvas, .tracking-panel > svg, [data-pvt-sky], [data-pvt-map]'
+  );
+  let expanded = null;
+  const update = () => {
+    for (const button of document.querySelectorAll('.plot-fullscreen-toggle')) {
+      const active = button.parentElement === document.fullscreenElement || button.parentElement === expanded;
+      button.setAttribute('aria-pressed', String(active));
+      button.title = button.getAttribute('aria-label').replace(/^(?:Exit fullscreen|Fullscreen)/, active ? 'Exit fullscreen' : 'Fullscreen');
+      button.setAttribute('aria-label', button.title);
+      button.textContent = active ? '?' : '?';
+    }
+  };
+  document.addEventListener('fullscreenchange', update);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && expanded) {
+      const button = expanded.querySelector('.plot-fullscreen-toggle');
+      expanded.classList.remove('plot-expanded');
+      expanded = null;
+      update();
+      button.focus();
+    }
+  });
+  for (const plot of plots) {
+    const panel = plot.matches('[data-pvt-map]') ? plot : plot.parentElement;
+    if (panel.classList.contains('plot-fullscreen')) continue;
+    panel.classList.add('plot-fullscreen');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'plot-fullscreen-toggle';
+    button.setAttribute('aria-label', 'Fullscreen ' + (plot.getAttribute('aria-label') ||
+      (plot.matches('[data-pvt-map]') ? 'position map' : 'sky plot')));
+    button.addEventListener('click', async () => {
+      if (document.fullscreenElement === panel) {
+        await document.exitFullscreen();
+      } else if (expanded === panel) {
+        panel.classList.remove('plot-expanded');
+        expanded = null;
+      } else {
+        try {
+          await panel.requestFullscreen();
+        } catch {
+          expanded?.classList.remove('plot-expanded');
+          expanded = panel;
+          panel.classList.add('plot-expanded');
+        }
+      }
+      update();
+    });
+    panel.append(button);
+  }
+  update();
+}
+addPlotFullscreen();

@@ -39,7 +39,8 @@ static void Prompt(void *context, double value, uint64_t sample)
     egnos->blockUntil[egnos->active - 1] = egnos->bank.blockedUntil;
 }
 
-int NgEgnosCreate(const TNgStreamInfo *stream, TNgEgnos **out, TNgError *error)
+int NgEgnosCreate(const TNgStreamInfo *stream, const TNgTrackingConfig *config,
+                  TNgEgnos **out, TNgError *error)
 {
     *out = NULL;
     TNgEgnos *egnos = calloc(1, sizeof(*egnos));
@@ -53,6 +54,10 @@ int NgEgnosCreate(const TNgStreamInfo *stream, TNgEgnos **out, TNgError *error)
     search.lastPrn = 2;
     search.cpuBudget = 0.25;
     NgTrackingDefaults(&track);
+    track.fllDecisionUpdates = config->fllDecisionUpdates;
+    track.fllDecisionIntervalMs = config->fllDecisionIntervalMs;
+    track.fllTransitionHz = config->fllTransitionHz;
+    memcpy(track.loops[0], config->loops[NG_TRACKING_EGNOS_SIGNAL - 1], sizeof(track.loops[0]));
     egnos->rate = stream->sampleRateHz;
     if (NgAcquisitionEgnosWorkspace(stream, &egnos->workspace, error) != NG_OK ||
         NgAcquisitionCreateWithStrategy(&search, stream, &egnosSearch, egnos->workspace,

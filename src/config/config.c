@@ -244,6 +244,9 @@ static int CopyText(char *out, size_t capacity, const char *text)
  *
  * @return NG_OK for an accepted value; NG_ERROR for unknown keys or invalid values.
  */
+static const char *const loopSignals[] = {"gps", "galileo", "beidou", "egnos"};
+static const char *const loopNames[] = {"dll", "fll", "pll"};
+
 static int Apply(TNgConfig *c, const char *key, const char *value)
 {
     uint64_t n;
@@ -272,6 +275,23 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("receiver.auto_priority", tracking.autoPriority)
     REAL_KEY("tracking.galileo_spacing_chips", tracking.galileoSpacingChips)
     REAL_KEY("tracking.beidou_spacing_chips", tracking.beidouSpacingChips)
+    UINT_KEY("tracking.fll_decision_updates", tracking.fllDecisionUpdates)
+    UINT_KEY("tracking.fll_decision_interval_ms", tracking.fllDecisionIntervalMs)
+    REAL_KEY("tracking.fll_transition_hz", tracking.fllTransitionHz)
+    if (strncmp(key, "tracking.", 9) == 0) {
+        for (unsigned signal = 0; signal < NG_TRACKING_EGNOS_SIGNAL; ++signal) {
+            for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
+                char option[48];
+                TNgLoopSettings *settings = &c->tracking.loops[signal][loop];
+                snprintf(option, sizeof(option), "%s_%s_bandwidth_hz", loopSignals[signal], loopNames[loop]);
+                if (strcmp(key + 9, option) == 0)
+                    return ParseReal(value, &settings->bandwidthHz);
+                snprintf(option, sizeof(option), "%s_%s_gain", loopSignals[signal], loopNames[loop]);
+                if (strcmp(key + 9, option) == 0)
+                    return ParseReal(value, &settings->gain);
+            }
+        }
+    }
     if (strcmp(key, "tracking.galileo_spacing_slots") == 0) {
         double slots;
         if (ParseReal(value, &slots) != NG_OK)
@@ -852,6 +872,17 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
                    "galileo_spacing_slots=%.17g\ndoppler_smoothing_ms=%u\n",config->tracking.workers,
             config->tracking.tapCount,config->tracking.spacingChips,
             2.0 * config->tracking.galileoSpacingChips,config->tracking.dopplerSmoothingMs);
+    for (unsigned signal = 0; signal < NG_TRACKING_EGNOS_SIGNAL; ++signal) {
+        for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
+            const TNgLoopSettings settings = config->tracking.loops[signal][loop];
+            fprintf(output, "%s_%s_bandwidth_hz=%.17g\n%s_%s_gain=%.17g\n",
+                    loopSignals[signal], loopNames[loop], settings.bandwidthHz,
+                    loopSignals[signal], loopNames[loop], settings.gain);
+        }
+    }
+    fprintf(output, "fll_decision_updates=%u\nfll_decision_interval_ms=%u\nfll_transition_hz=%.17g\n",
+            config->tracking.fllDecisionUpdates, config->tracking.fllDecisionIntervalMs,
+            config->tracking.fllTransitionHz);
     fprintf(output, "beidou_spacing_chips=%.17g\n", config->tracking.beidouSpacingChips);
     fprintf(output, "egnos=%s\n", config->tracking.egnosEnabled ? "true" : "false");
     fprintf(output, "broadcast_ionosphere=%s\n",

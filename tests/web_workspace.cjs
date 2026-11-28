@@ -221,7 +221,7 @@ histogram_update_hz=20
     for (const [name, expected] of Object.entries({
       'Number of supported Galileo channels':'8', 'Number of supported EGNOS channels':'1',
       'Galileo Doppler Frequency step (Hz)':'87',
-      'GPS DLLbandwidth':'2', 'GPS PLLbandwidth':'15', 'Galileo DLLbandwidth':'2', 'Galileo PLLbandwidth':'15',
+
       'GPS spacing':'0.8', 'Galileo spacing':'0.4', 'PVT rate':'1'
     })) assert.equal(await page.locator(`[data-reference-param="${name}"]`).inputValue(), expected,
       `${name} must use the original NGene shipped example`);
@@ -292,6 +292,8 @@ histogram_update_hz=20
     await page.locator('[data-settings="tracking"]').click();
     assert(await page.locator('[name="dsp.tracking_mixer_bits"]').isVisible());
     await page.locator('[name="tracking.beidou_spacing_chips"]').fill('0.21');
+    await page.locator('[name="tracking.gps_pll_bandwidth_hz"]').fill("14");
+    await page.locator('[name="tracking.galileo_fll_gain"]').fill("1.25");
     const ionosphere = page.locator('[name="tracking.broadcast_ionosphere"]');
     assert.equal(await ionosphere.inputValue(), 'true');
     await ionosphere.selectOption('false');
@@ -324,6 +326,8 @@ histogram_update_hz=20
     assert.equal(await pfa.inputValue(), '1e-9');
     await page.locator('[data-settings="analysis"]').click();
     assert(await page.locator('#analysis_fft_mode').isVisible());
+    assert.match(applied.ini, /gps_pll_bandwidth_hz=14(?:\r?\n|$)/);
+    assert.match(applied.ini, /galileo_fll_gain=1.25(?:\r?\n|$)/);
     assert.match(applied.ini, /egnos=true(?:\r?\n|$)/);
     assert.match(applied.ini, /broadcast_ionosphere=false(?:\r?\n|$)/);
     assert.match(applied.ini, /ring_blocks=32(?:\r?\n|$)/, 'Implemented receiver buffer change reaches the service');
@@ -348,6 +352,12 @@ histogram_update_hz=20
     await select('rf');
     assert(sequence(first) > 0n && histogramSequence(first) > 0n, 'Both real diagnostic producers must advance');
     assert(Math.abs(first.analysis.peak_hz - 240000) <= first.analysis.bin_hz / 2 + 1, 'RF spectrum must reflect the deterministic CI8 input');
+    const fullscreen = page.locator('#waterfall3DWrap .plot-fullscreen-toggle');
+    await fullscreen.click();
+    await until(async () => (await fullscreen.getAttribute('aria-pressed')) === 'true', 'waterfall fullscreen');
+    assert((await page.locator('#waterfall3DWrap').boundingBox()).height >= 700);
+    await fullscreen.click();
+    await until(async () => (await fullscreen.getAttribute('aria-pressed')) === 'false', 'waterfall fullscreen exit');
     await screenshot('workspace-rf-real-replay.png');
 
     await select('setup');

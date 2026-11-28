@@ -408,7 +408,7 @@ int NgTrackingBankCreate(const TNgTrackingConfig *config, const TNgStreamInfo *s
     bank->system = channel->id.constellation - 1;
     pool->config = *config;
     if (bank->system == 0 && config->egnosEnabled &&
-        NgEgnosCreate(stream, &pool->egnos, error) != NG_OK) {
+        NgEgnosCreate(stream, config, &pool->egnos, error) != NG_OK) {
         NgTrackingBankDestroy(bank);
         return NG_ERROR;
     }

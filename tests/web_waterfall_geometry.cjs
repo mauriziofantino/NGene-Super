@@ -18,7 +18,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs');
  assert.deepEqual([mesh.matrix[0],mesh.matrix[4],mesh.matrix[8]],[0,0,1],'The shader projects time directly onto screen X');
  assert(upper.y>lower.y&&upper.depth>lower.depth,'The vertical frequency direction tilts into depth');
  assert.equal(upper.x,lower.x,'Tilting frequency preserves horizontal row alignment');
- assert(Math.abs(Math.atan2(upper.depth-lower.depth,upper.y-lower.y)*180/Math.PI-60)<1e-5);
+ assert(Math.abs(Math.atan2(upper.depth-lower.depth,upper.y-lower.y)*180/Math.PI-38)<1e-5);
  for(const frequency of [-1,1])for(const level of [0,1]){
   const corner=projectSurfacePoint(frequency,level,.5,mesh);
   assert(Math.abs(corner.y)<1&&Math.abs(corner.depth)<1,'Full power relief fits at each frequency edge');

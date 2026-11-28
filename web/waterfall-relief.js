@@ -1,6 +1,6 @@
 /* Fixed 3D frequency/power/time mesh: real geometry, depth testing,
  * directional lighting and time traces. The global power scale is shared. */
-const surfaceTilt=60,surfaceHeight=0.5;
+const surfaceTilt=38,surfaceHeight=0.78;
 const stops=[[0,12,85],[0,34,145],[0,76,215],[0,141,245],[38,207,255],[197,247,255]];
 export const reliefPalette=Array.from({length:256},(_,n)=>{const x=n/255*5,i=Math.min(4,Math.floor(x)),f=x-i;return stops[i].map((v,k)=>Math.round(v+(stops[i+1][k]-v)*f));});
 const levelOf=(v,lo,hi)=>Number.isFinite(v)?Math.max(0,Math.min(1,(v-lo)/(hi-lo))):0;
@@ -42,7 +42,7 @@ export function buildWaterfallMesh(history,columns,capacity,lo,hi){
  }
  // Tilt the frequency/power plane around the horizontal time axis.
  // Leave a small margin for relief at the upper and lower frequency edges.
- const frequencyScale=0.98;
+ const frequencyScale=0.95;
  const matrix=new Float32Array([0,frequencyScale*c,frequencyScale*s,0,0,s,-c,0,1,0,0,0,0,0,0,1]);
  return {rows,gridRows,columns,positions,normals,levels,matrix};
 }

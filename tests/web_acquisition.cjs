@@ -98,6 +98,9 @@ async function until(fn, label) {
     await until(async ()=>await page.locator('[data-satellite-view]').isVisible(),'satellite detail page');
     assert.equal(new URL(page.url()).hash,`#tracking/${tracked.channel_id}`);
     assert.match(await page.locator('[data-satellite-title]').textContent(),/GPS 7/);
+    const scatter = await page.locator('[data-tracking-scatter]').boundingBox();
+    const signed = await page.locator('[data-tracking-prompt]').boundingBox();
+    assert(Math.abs(scatter.y + scatter.height - signed.y - signed.height) < 1, 'Prompt plots share the lower edge');
     const taps=testTracking?9:3;
     await until(async ()=>await page.locator('[data-tracking-shape] circle').count()===taps,'measured tap points');
     assert.equal(await page.locator('[data-tracking-shape] polyline').count(),1,'Measured tap curve');

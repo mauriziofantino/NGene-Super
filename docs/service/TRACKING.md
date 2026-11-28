@@ -256,3 +256,16 @@ windows flush. Tests compare37-pair fragments with2048-pair windows bit for bit.
 
 See PERFORMANCE_NAVIGATION_2026-11-15.md for the observed RTL recovery/PVT and
 remaining stream-continuity limits. Historical sections above retain their dates.
+
+### Configurable loop filters
+
+EVO recalculates DLL, FLL and PLL coefficients from per-signal bandwidth and
+gain when it assigns a channel. The default settings reproduce the previous
+recurrences and preserve the GPS, Galileo, BeiDou and EGNOS coherent periods.
+GPS, Galileo and EGNOS use the Classic coefficient formula. BeiDou scales its
+existing proportional and integral terms relative to the default profile.
+
+Project note from the user. The loop coefficients published by Kai Borre
+require independent derivation and validation. Maintaining lock under some
+conditions does not validate those coefficients. Keep the current formula as
+a compatibility baseline until the filter design is qualified.

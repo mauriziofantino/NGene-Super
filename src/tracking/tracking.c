@@ -54,6 +54,7 @@ struct TNgTracking {
     double smoothedDopplerHz;     /**< Filtered output; carrier NCO stays untouched. */
     double initialCarrier;        /**< Carrier anchor for Classic loop. */
     double initialCode;           /**< Code-rate anchor for Classic loop. */
+    double loopStep[NG_LOOP_COUNT], loopIntegral[NG_LOOP_COUNT];
     double carrierNco, codeNco, oldCarrierError, oldDllError;      /**< Loop memories. */
     double oldI, oldQ;                                             /**< Previous prompt for FLL. */
     double meanFrequency, oldMean;                                 /**< FLL transition smoothing. */
@@ -65,10 +66,43 @@ struct TNgTracking {
     double prefix[2 * (NG_TRACKING_CHUNK + 1)]; /**< Running (I, Q) sums of mixed samples. */
 };
 
+/** Recalculate the legacy filters at assignment for the signal's coherent period. */
+static void CalculateLoopCoefficients(TNgTracking *t)
+{
+    const double delta = (double)t->period / 1023000.0;
+    const TNgLoopSettings *settings = t->config.loops[t->system - 1];
+    for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
+        const double bw = settings[loop].bandwidthHz;
+        const double gain = settings[loop].gain;
+        if (t->system == NG_CONSTELLATION_BEIDOU) {
+            /* Keep the B1C 10-ms first-order frequency/code and PI carrier laws.
+             * Scale their existing gains relative to the configured nominal bandwidth. */
+            const double ratio = bw / (loop == NG_LOOP_DLL ? 2.0 : 15.0);
+            t->loopStep[loop] = (loop == NG_LOOP_DLL ? 0.075 : loop == NG_LOOP_FLL ? 0.55 : 0.48) *
+                                ratio / gain;
+            t->loopIntegral[loop] = 0.12 * ratio * ratio / gain;
+        } else {
+            const double wn = bw / 0.53;
+            const double t1 = (gain * (loop == NG_LOOP_PLL ? delta * 1000.0 : 1.0)) / (wn * wn);
+            const double t2 = sqrt(2.0) / wn;
+            t->loopStep[loop] = t2 / t1;
+            t->loopIntegral[loop] = delta / t1;
+        }
+    }
+}
+
 /** Set independent precise defaults. */
 void NgTrackingDefaults(TNgTrackingConfig *config)
 {
     memset(config, 0, sizeof(*config));
+    for (unsigned signal = 0; signal < NG_TRACKING_EGNOS_SIGNAL; ++signal) {
+        for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
+            config->loops[signal][loop] = (TNgLoopSettings){loop == NG_LOOP_DLL ? 2.0 : 15.0, 1.0};
+        }
+    }
+    config->fllDecisionUpdates = 20;
+    config->fllDecisionIntervalMs = 100;
+    config->fllTransitionHz = 1.0;
     config->channelCount = 16;
     config->galileoSpacingChips = 0.2;
     config->gpsChannels = 0;
@@ -93,6 +127,9 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
         config->beidouSpacingChips >= 1.0 / 3.0 ||
         config->galileoChannels > 32 || config->beidouChannels > NG_SATELLITE_MAX_PRN ||
         config->autoPriority > NG_CONSTELLATION_COUNT ||
+        config->fllDecisionUpdates < 1 || config->fllDecisionUpdates > 1000 ||
+        config->fllDecisionIntervalMs < 4 || config->fllDecisionIntervalMs > 2000 ||
+        !(config->fllTransitionHz >= 0.01 && config->fllTransitionHz <= 100) ||
         !config->workers || config->workers > 16 ||
         (config->enabled != 0 && config->enabled != 1) ||
         (config->squareCarrier != 0 && config->squareCarrier != 1) ||
@@ -103,6 +140,14 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
         config->tapCount > NG_TRACKING_MAX_TAPS || !(config->tapCount & 1u) ||
         !isfinite(config->spacingChips) || config->spacingChips <= 0 || config->spacingChips > 1)
         return NgFail(error, "Invalid tracking modes or multi-correlator geometry");
+    for (unsigned signal = 0; signal < NG_TRACKING_EGNOS_SIGNAL; ++signal) {
+        for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
+            const TNgLoopSettings settings = config->loops[signal][loop];
+            if (!(settings.bandwidthHz >= 0.1 && settings.bandwidthHz <= 50) ||
+                !(settings.gain >= 0.1 && settings.gain <= 20))
+                return NgFail(error, "Invalid tracking filter bandwidth or gain");
+        }
+    }
     return NG_OK;
 }
 
@@ -182,6 +227,7 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     tracking->meanFrequency = tracking->initialCarrier;
     tracking->oldMean = 0;
     tracking->initialCode = 1023000.0 * (1.0 + result->dopplerHz / 1575420000.0);
+    CalculateLoopCoefficients(tracking);
     tracking->snapshot.codeRateHz = tracking->initialCode;
     tracking->snapshot.active = 1;
     tracking->snapshot.prn = result->prn;
@@ -223,14 +269,9 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     return NG_OK;
 }
 
-/** Classic second-order recurrence; coefficients retain zeta=1/sqrt(2), wn=B/0.53. */
-static double Loop(double previous, double error, double oldError, double bandwidth, double gain,
-                   double delta)
+static double Loop(const TNgTracking *t, unsigned loop, double previous, double error, double oldError)
 {
-    double wn = bandwidth / 0.53;
-    double t1 = gain / (wn * wn);
-    double t2 = sqrt(2.0) / wn;
-    return previous + t2 / t1 * (error - oldError) + delta / t1 * error;
+    return previous + t->loopStep[loop] * (error - oldError) + t->loopIntegral[loop] * error;
 }
 
 /** Classic M2/M4 moment estimator, adapted to a full precision complex carrier.
@@ -325,7 +366,7 @@ static void BeidouLoops(TNgTracking *t, double i, double q, double dll,
     const double power = i * i + q * q;
     const int centered = power > 1.3 * fmax(early, late);
     if (!t->snapshot.pll && t->snapshot.integrations) {
-        t->carrierHz += 0.55 * residual;
+        t->carrierHz += t->loopStep[NG_LOOP_FLL] * residual;
         if (centered && fabs(residual) < 3)
             ++t->beidouStable;
         else
@@ -334,13 +375,13 @@ static void BeidouLoops(TNgTracking *t, double i, double q, double dll,
             t->snapshot.pll = 1;
     }
     if (t->snapshot.pll) {
-        t->carrierHz += 0.12 * phase / duration;
-        t->carrierPhase = fmod(t->carrierPhase + 0.48 * phase + 1.0, 1.0);
+        t->carrierHz += t->loopIntegral[NG_LOOP_PLL] * phase / duration;
+        t->carrierPhase = fmod(t->carrierPhase + t->loopStep[NG_LOOP_PLL] * phase + 1.0, 1.0);
     }
     const double doppler = t->carrierHz - (double)t->stream.digitalIfHz;
     /* Apply the code phase correction over the next period so that the decoder
      * sees exactly one coherent prompt for every primary-code boundary. */
-    t->snapshot.codeRateHz = 1023000 * (1 + doppler / 1575420000.0) + 0.075 * dll / duration;
+    t->snapshot.codeRateHz = 1023000 * (1 + doppler / 1575420000.0) + t->loopStep[NG_LOOP_DLL] * dll / duration;
     *reportedError = phase;
 }
 
@@ -353,7 +394,6 @@ static void Complete(TNgTracking *t)
     const int beidou = t->system == NG_CONSTELLATION_BEIDOU;
     double i = beidou ? t->sumQ[p] : t->sumI[p];
     double q = beidou ? -t->sumI[p] : t->sumQ[p];
-    double delta = (double)t->period / 1023000.0;
     double error = 0;
     double dll = e + l > 0 ? (t->system == 1 ? 0.5 : 1.0 / 6.0) * (e - l) / (e + l) : 0;
     if (beidou) {
@@ -369,9 +409,9 @@ static void Complete(TNgTracking *t)
                 error = -atan(cross / dot) / 6.2831853071795864769;
         }
         /* Complex exp(-j phase) reverses the Classic IF Q convention. */
-        t->carrierNco = Loop(t->carrierNco, error, t->oldCarrierError, 15,
-                             t->snapshot.pll ? delta * 1000.0 : 1.0, delta);
-        t->codeNco = Loop(t->codeNco, dll, t->oldDllError, 2, 1, delta);
+        t->carrierNco = Loop(t, t->snapshot.pll ? NG_LOOP_PLL : NG_LOOP_FLL,
+                             t->carrierNco, error, t->oldCarrierError);
+        t->codeNco = Loop(t, NG_LOOP_DLL, t->codeNco, dll, t->oldDllError);
         t->carrierHz = t->initialCarrier - t->carrierNco;
         t->snapshot.codeRateHz = t->initialCode + t->codeNco;
         t->oldCarrierError = error;
@@ -380,9 +420,11 @@ static void Complete(TNgTracking *t)
     t->oldI = i;
     t->oldQ = q;
     t->snapshot.integrations++;
-    t->meanFrequency += (t->carrierHz - t->meanFrequency) / 20.0;
-    if (!beidou && !t->snapshot.pll && (t->snapshot.integrations * (t->period / 1023u)) % 100u == 0) {
-        if (fabs(t->meanFrequency - t->oldMean) < 1.0) {
+    t->meanFrequency += (t->carrierHz - t->meanFrequency) / t->config.fllDecisionUpdates;
+    const unsigned periodMs = t->period / 1023u;
+    const unsigned decisionUpdates = (t->config.fllDecisionIntervalMs + periodMs - 1) / periodMs;
+    if (!beidou && !t->snapshot.pll && t->snapshot.integrations % decisionUpdates == 0) {
+        if (fabs(t->meanFrequency - t->oldMean) < t->config.fllTransitionHz) {
             t->snapshot.pll = 1;
             t->initialCarrier = t->carrierHz;
             t->carrierNco = t->oldCarrierError = 0;
