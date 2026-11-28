@@ -2,8 +2,9 @@
 #include "ngene/sbas.h"
 #include <math.h>
 #include <string.h>
+#include "navigation/sbas_igp.h"
 
-/** Extract an MSB-first field of at most 12 bits. */
+/** Extract an MSB-first field from the packed frame. */
 static unsigned Bits(const uint8_t *data, unsigned bit, unsigned size)
 {
     unsigned value = 0;
@@ -63,12 +64,12 @@ static void Mask(TNgSbasCorrections *bank, const uint8_t *data, double now)
 
 /** Store each mask-relative fast correction and its current UDRE status. */
 static void Fast(TNgSbasCorrections *bank, const uint8_t *data, unsigned block, unsigned count,
-                 unsigned base, unsigned issue, double now)
+                 unsigned iodp, unsigned iodf, double now)
 {
-    const unsigned iodf = Bits(data, issue + 2, 2);
-    if (bank->iodp != Bits(data, issue, 2)) {
+    if (bank->iodp != iodp) {
         return;
     }
+    const unsigned base = count == 6 ? 14u : 18u;
     for (unsigned k = 0; k < count && 13 * block + k < bank->count; ++k) {
         const unsigned slot = 13 * block + k;
         bank->fast[slot].range = 0.125 * Signed(data, base + 12 * k, 12);
@@ -109,6 +110,45 @@ static void LongTerm(TNgSbasCorrections *bank, const uint8_t *data, unsigned sta
     }
 }
 
+/** Update the indicated band's mask or the corresponding block of 15 delays. */
+static void IonoMessage(TNgSbasCorrections *bank, const uint8_t *data, unsigned type, double now)
+{
+    if (type == 18 && !Bits(data, 14, 4)) {
+        memset(bank->ionosphere, 0, sizeof(bank->ionosphere));
+        return;
+    }
+    const unsigned band = Bits(data, type == 18 ? 18u : 14u, 4);
+    if (band >= 9) {
+        return;
+    }
+    TNgSbasIonoBand *grid = &bank->ionosphere[band];
+    if (type == 18) {
+        uint8_t mask[201] = {0};
+        unsigned count = 0;
+        for (unsigned i = 0; i < (band == 8 ? 200u : 201u); ++i) {
+            if (Bits(data, 24 + i, 1)) {
+                mask[count++] = (uint8_t)i;
+            }
+        }
+        const unsigned issue = Bits(data, 22, 2);
+        if (grid->issue != issue || grid->count != count || memcmp(grid->mask, mask, sizeof(mask))) {
+            memset(grid, 0, sizeof(*grid));
+        }
+        memcpy(grid->mask, mask, sizeof(mask));
+        grid->issue = issue;
+        grid->count = count;
+        grid->maskTime = now;
+    } else if (Bits(data, 217, 2) == grid->issue && now - grid->maskTime <= 600) {
+        const unsigned start = 15 * Bits(data, 18, 4);
+        for (unsigned i = 0; i < 15 && start + i < grid->count; ++i) {
+            const unsigned delay = Bits(data, 22 + 13 * i, 9);
+            const unsigned give = Bits(data, 31 + 13 * i, 4);
+            grid->delay[start + i] = (uint16_t)(delay == 511 ? UINT16_MAX : give == 15 ? 0 : delay + 1);
+            grid->time[start + i] = now;
+        }
+    }
+}
+
 int NgSbasPushFrame(TNgSbasCorrections *bank, const uint8_t data[NG_SBAS_FRAME_BYTES],
                     double now)
 {
@@ -121,6 +161,7 @@ int NgSbasPushFrame(TNgSbasCorrections *bank, const uint8_t data[NG_SBAS_FRAME_B
     const unsigned type = Bits(data, 8, 6);
     if (type == 0) {
         bank->count = 0;
+        memset(bank->ionosphere, 0, sizeof(bank->ionosphere));
         memset(bank->fast, 0, sizeof(bank->fast));
         memset(bank->orbit, 0, sizeof(bank->orbit));
         bank->blockedUntil = now + 60;
@@ -128,18 +169,7 @@ int NgSbasPushFrame(TNgSbasCorrections *bank, const uint8_t data[NG_SBAS_FRAME_B
         if (type == 1) {
             Mask(bank, data, now);
         } else if (type >= 2 && type <= 5) {
-            /* MT2-5 carry IODF then IODP, MT24 reverses the issue-field order. */
-            const unsigned iodp = Bits(data, 16, 2);
-            if (iodp == bank->iodp) {
-                const unsigned iodf = Bits(data, 14, 2);
-                for (unsigned k = 0; k < 13 && (type - 2) * 13 + k < bank->count; ++k) {
-                    const unsigned slot = (type - 2) * 13 + k;
-                    bank->fast[slot].range = 0.125 * Signed(data, 18 + 12 * k, 12);
-                    bank->fast[slot].valid = Bits(data, 174 + 4 * k, 4) < 14;
-                    bank->fast[slot].iodf = iodf;
-                    bank->fast[slot].time = now;
-                }
-            }
+            Fast(bank, data, type - 2, 13, Bits(data, 16, 2), Bits(data, 14, 2), now);
         } else if (type == 6) {
             for (unsigned k = 0; k < bank->count; ++k) {
                 unsigned issue = Bits(data, 14 + 2 * (k / 13), 2);
@@ -148,8 +178,10 @@ int NgSbasPushFrame(TNgSbasCorrections *bank, const uint8_t data[NG_SBAS_FRAME_B
                     bank->fast[k].valid = 0;
                 }
             }
+        } else if (type == 18 || type == 26) {
+            IonoMessage(bank, data, type, now);
         } else if (type == 24) {
-            Fast(bank, data, Bits(data, 112, 2), 6, 14, 110, now);
+            Fast(bank, data, Bits(data, 112, 2), 6, Bits(data, 110, 2), Bits(data, 114, 2), now);
             LongTerm(bank, data, 120, now);
         } else if (type == 25) {
             LongTerm(bank, data, 14, now);
@@ -188,6 +220,109 @@ int NgSbasRead(const TNgSbasCorrections *bank, unsigned prn, unsigned iode, doub
             out->position[axis] = bank->orbit[k].xyz[axis] + dt * out->velocity[axis];
         }
         return 1;
+    }
+    return 0;
+}
+
+/** Interpolate a rectangle or a triangle that contains the pierce point. */
+static int GridCell(const TNgSbasCorrections *bank, double now, double x, double y,
+                    int west, int south, int width, int height, double *delay)
+{
+    if (south < 0 || south + height > 30) {
+        return 0;
+    }
+    const unsigned w = (unsigned)(west + 72) % 72;
+    const unsigned e = (unsigned)(west + width + 72) % 72;
+    const unsigned corners[4] = {1 + 31 * w + south, 1 + 31 * w + south + height,
+                                 1 + 31 * e + south, 1 + 31 * e + south + height};
+    unsigned found = 0, issue = 0;
+    double values[4] = {0};
+    for (unsigned b = 0; b < 9 && found != 15; ++b) {
+        const TNgSbasIonoBand *grid = &bank->ionosphere[b];
+        if (now - grid->maskTime > 600 || (found && grid->issue != issue)) {
+            continue;
+        }
+        for (unsigned i = 0; i < grid->count && found != 15; ++i) {
+            if (!grid->delay[i] || now < grid->time[i] || now - grid->time[i] > 600) {
+                continue;
+            }
+            const unsigned point = gridPoint[b][grid->mask[i]];
+            for (unsigned k = 0; k < 4; ++k) {
+                if (point == corners[k] && !(found & (1u << k))) {
+                    if (grid->delay[i] == UINT16_MAX) {
+                        return 0;
+                    }
+                    issue = grid->issue;
+                    values[k] = (grid->delay[i] - 1) * 0.125;
+                    found |= 1u << k;
+                }
+            }
+        }
+    }
+    const double dx = (x - west) / width, dy = (y - south) / height;
+    double weights[4] = {(1 - dx) * (1 - dy), (1 - dx) * dy, dx * (1 - dy), dx * dy};
+    switch (found) {
+    case 15: break;
+    case 14: weights[1] = 1 - dx; weights[2] = 1 - dy; weights[3] = dx + dy - 1; break;
+    case 13: weights[0] = 1 - dx; weights[2] = dx - dy; weights[3] = dy; break;
+    case 11: weights[0] = 1 - dy; weights[1] = dy - dx; weights[3] = dx; break;
+    case 7: weights[0] = 1 - dx - dy; weights[1] = dy; weights[2] = dx; break;
+    default: return 0;
+    }
+    double value = 0;
+    for (unsigned k = 0; k < 4; ++k) {
+        if (found & (1u << k)) {
+            if (weights[k] < 0) {
+                return 0;
+            }
+            value += weights[k] * values[k];
+        }
+    }
+    *delay = value;
+    return found == 15 ? 2 : 1;
+}
+
+int NgSbasIonosphere(const TNgSbasCorrections *bank, double now, double latitude,
+                    double longitude, double azimuth, double elevation, double *delay)
+{
+    const double degree = 0.017453292519943295;
+    if (!bank || !delay || !(elevation > 0) || !isfinite(latitude) || !isfinite(longitude) ||
+        !isfinite(azimuth) || !isfinite(now) || now < bank->blockedUntil ||
+        now < bank->lastFrame || now - bank->lastFrame > 4) {
+        return 0;
+    }
+    const double ratio = 6378.1363 / (6378.1363 + 350);
+    const double zenith = ratio * cos(elevation);
+    const double psi = 90 * degree - elevation - asin(zenith);
+    const double phi = asin(fmax(-1, fmin(1, sin(latitude) * cos(psi) +
+                               cos(latitude) * sin(psi) * cos(azimuth))));
+    const double lambda = longitude + atan2(sin(psi) * sin(azimuth),
+                        cos(latitude) * cos(psi) - sin(latitude) * sin(psi) * cos(azimuth));
+    const double y = (phi / degree + 75) / 5;
+    if (y < 0 || y >= 30) {
+        return 0;
+    }
+    const double x = (remainder(lambda / degree, 360) + 180) / 5;
+    const int firstWidth = fabs(phi / degree) <= 60 ? 1 : 2;
+    for (int height = 1; height <= 2; ++height) {
+        const int width = height == 1 ? firstWidth : 2;
+        int best = 0;
+        double value = 0;
+        for (int row = 0; row < height && best != 2; ++row) {
+            for (int col = 0; col < width && best != 2; ++col) {
+                double cell;
+                const int kind = GridCell(bank, now, x, y, (int)x - col, (int)y - row,
+                                          width, height, &cell);
+                if (kind > best) {
+                    best = kind;
+                    value = cell;
+                }
+            }
+        }
+        if (best) {
+            *delay = value / sqrt(1 - zenith * zenith);
+            return 1;
+        }
     }
     return 0;
 }

@@ -50,6 +50,10 @@ static void Frame(uint8_t *bytes, unsigned preamble, unsigned type)
         Pack(bytes, 14, 2, 1);
         Pack(bytes, 16, 2, 2);
         Pack(bytes, 18, 12, 40);
+    } else if (type == 24) {
+        Pack(bytes, 14, 12, 48);
+        Pack(bytes, 110, 2, 2);
+        Pack(bytes, 114, 2, 1);
     } else if (type == 25) {
         Pack(bytes, 15, 6, 1);
         Pack(bytes, 21, 8, 73);
@@ -102,9 +106,60 @@ static void Stream(unsigned shift, int polarity)
     CHECK(result.clock == ldexp(80, -31));
 }
 
+static void Ionosphere(void)
+{
+    TNgSbasCorrections bank = {0};
+    uint8_t frame[NG_SBAS_FRAME_BYTES] = {0};
+    const unsigned points[] = {122, 123, 148, 149};
+    const double degree = 0.017453292519943295;
+    double delay;
+    Pack(frame, 0, 8, 0x53);
+    Pack(frame, 8, 6, 18);
+    Pack(frame, 14, 4, 1);
+    Pack(frame, 18, 4, 4);
+    Pack(frame, 22, 2, 2);
+    for (unsigned i = 0; i < 4; ++i) {
+        Pack(frame, 23 + points[i], 1, 1);
+    }
+    Seal(frame);
+    CHECK(NgSbasPushFrame(&bank, frame, 1));
+    CHECK(!NgSbasIonosphere(&bank, 1, 42.5 * degree, 2.5 * degree, 0, 90 * degree, &delay));
+    for (unsigned issue = 1; issue <= 2; ++issue) {
+        memset(frame, 0, sizeof(frame));
+        Pack(frame, 0, 8, 0x9a);
+        Pack(frame, 8, 6, 26);
+        Pack(frame, 14, 4, 4);
+        Pack(frame, 217, 2, issue);
+        for (unsigned i = 0; i < 4; ++i) {
+            Pack(frame, 22 + 13 * i, 9, 8 * (i + 1));
+        }
+        Seal(frame);
+        CHECK(NgSbasPushFrame(&bank, frame, 1 + issue));
+        CHECK(NgSbasIonosphere(&bank, 1 + issue, 42.5 * degree, 2.5 * degree, 0,
+                               90 * degree, &delay) == (issue == 2));
+    }
+    CHECK(fabs(delay - 2.5) < 1e-12);
+    memset(frame, 0, sizeof(frame));
+    Pack(frame, 0, 8, 0xc6);
+    Pack(frame, 8, 6, 26);
+    Pack(frame, 14, 4, 4);
+    Pack(frame, 217, 2, 2);
+    for (unsigned i = 0; i < 3; ++i) {
+        Pack(frame, 22 + 13 * i, 9, 8 * (i + 1));
+    }
+    Pack(frame, 70, 4, 15);
+    Seal(frame);
+    CHECK(NgSbasPushFrame(&bank, frame, 4));
+    CHECK(NgSbasIonosphere(&bank, 4, 41 * degree, degree, 0, 90 * degree, &delay));
+    CHECK(fabs(delay - 1.6) < 1e-12);
+    CHECK(!NgSbasIonosphere(&bank, 4, 44 * degree, 4 * degree, 0, 90 * degree, &delay));
+    CHECK(!NgSbasIonosphere(&bank, 9, 42.5 * degree, 2.5 * degree, 0, 90 * degree, &delay));
+}
+
 /** Exercise corruption, issue matching, test-mode suppression and decoder phase. */
 int main(void)
 {
+    Ionosphere();
     for (unsigned k = 0; k < 4; ++k) {
         Stream(k, 1);
         Stream(k, -1);
@@ -124,11 +179,14 @@ int main(void)
     CHECK(NgSbasRead(&bank, 7, 73, 4.0, 0, &result));
     CHECK(!NgSbasRead(&bank, 7, 74, 4.0, 0, &result));
     CHECK(!NgSbasRead(&bank, 7, 73, 16.0, 0, &result));
-    Frame(frame, 0x53, 0);
+    Frame(frame, 0x53, 24);
     CHECK(NgSbasPushFrame(&bank, frame, 4.0));
-    CHECK(!NgSbasRead(&bank, 7, 73, 4.0, 0, &result));
+    CHECK(NgSbasRead(&bank, 7, 73, 4.0, 0, &result) && result.range == 6);
+    Frame(frame, 0x53, 0);
+    CHECK(NgSbasPushFrame(&bank, frame, 5.0));
+    CHECK(!NgSbasRead(&bank, 7, 73, 5.0, 0, &result));
     Frame(frame, 0x9a, 1);
-    CHECK(NgSbasPushFrame(&bank, frame, 5.0) && bank.count == 0);
+    CHECK(NgSbasPushFrame(&bank, frame, 6.0) && bank.count == 0);
     puts("EGNOS FEC, corrections, CRC, aging, and test-mode suppression passed");
     return 0;
 }

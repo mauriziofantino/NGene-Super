@@ -337,7 +337,7 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
     double satellite[64][3], velocity[64][3], clocks[64], drifts[64], tx[64], rates[64], code[64];
     double nativeTx[64], rangeCorrection[64] = {0};
     const TNgBroadcast *broadcasts[64];
-    unsigned ionosphereCorrected[3];
+    unsigned ionosphereCorrected[3], egnosIonoCount = 0;
     unsigned systems[64], prns[64], n = 0, k, j, iteration, cols = 3;
     unsigned counts[NG_CONSTELLATION_COUNT] = {0}, clockColumn[NG_CONSTELLATION_COUNT] = {0};
     double nominal = 0, pos[NG_PVT_COLUMNS] = {0}, matrix[64][NG_PVT_COLUMNS], rhs[64];
@@ -397,6 +397,7 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
         code[k] = NG_C * (nominal - tx[k]) + rangeCorrection[k];
     for (iteration = 0; iteration < 20; ++iteration) {
         residual = 0;
+        egnosIonoCount = 0;
         memset(ionosphereCorrected, 0, sizeof(ionosphereCorrected));
         if (iteration)
             Geodetic(pos, &lat, &lon, &height);
@@ -424,15 +425,21 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
                 elevation = asin(fmax(-1, fmin(1, up)));
                 if (elevation > 0)
                     tropo = Troposphere(elevation, height);
-                if (broadcastIonosphere && elevation > 0 && broadcasts[k]->ionoReceived) {
+                if (elevation > 0 && (sbas || (broadcastIonosphere && broadcasts[k]->ionoReceived))) {
                     double east = matrix[k][0] * sin(lon) - matrix[k][1] * cos(lon);
                     double north = matrix[k][0] * sin(lat) * cos(lon) +
                                    matrix[k][1] * sin(lat) * sin(lon) - matrix[k][2] * cos(lat);
                     const double azimuth = atan2(east, north);
                     const TNgBroadcast *broadcast = broadcasts[k];
-                    if (systems[k] == NG_CONSTELLATION_GPS) {
+                    const int sbasIono = systems[k] == NG_CONSTELLATION_GPS &&
+                        NgSbasIonosphere(sbas, (double)sample / fs, lat, lon, azimuth, elevation, &iono);
+                    if (sbasIono) {
+                        ++egnosIonoCount;
+                    } else if (broadcastIonosphere && broadcast->ionoReceived &&
+                               systems[k] == NG_CONSTELLATION_GPS) {
                         iono = GpsIonosphere(broadcast, lat, lon, azimuth, elevation, tx[k]);
-                    } else if (systems[k] == NG_CONSTELLATION_GALILEO && broadcast->wnValid &&
+                    } else if (broadcastIonosphere && broadcast->ionoReceived &&
+                               systems[k] == NG_CONSTELLATION_GALILEO && broadcast->wnValid &&
                                broadcast->wn >= 0 && broadcast->wn < 4096) {
                         const double rxLlh[3] = {lat, lon, height};
                         double satelliteLlh[3];
@@ -442,7 +449,8 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
                         Geodetic(rotated, &satelliteLlh[0], &satelliteLlh[1], &satelliteLlh[2]);
                         iono = NgNeQuickE1(broadcast->iono.alphaGal, GalileoMonth(utc),
                                           24 * (utc - floor(utc)), rxLlh, satelliteLlh);
-                    } else if (systems[k] == NG_CONSTELLATION_BEIDOU && broadcast->wnValid) {
+                    } else if (broadcastIonosphere && broadcast->ionoReceived &&
+                               systems[k] == NG_CONSTELLATION_BEIDOU && broadcast->wnValid) {
                         const double bdt = nativeTx[k];
                         const double mjd = 53736.0 + 7.0 * broadcast->wn +
                             (bdt - broadcast->iono.utcLeap) / 86400.0;
@@ -482,6 +490,7 @@ void NgPvtComputeAugmented(const TNgTrackingSnapshot channels[64], uint64_t epoc
         s->clockBeidou = pos[clockColumn[NG_CONSTELLATION_BEIDOU - 1]];
     s->residualRms = sqrt(residual / n);
     memcpy(s->ionosphereCorrected, ionosphereCorrected, sizeof(ionosphereCorrected));
+    s->egnosIonosphereCorrected = egnosIonoCount;
     s->available = 1;
     memset(matrix, 0, sizeof(matrix));
     for (k = 0; k < n; ++k) {

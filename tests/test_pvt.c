@@ -171,6 +171,36 @@ static void Fixture(unsigned mask, int rollover)
         for (k = 0; k < 10; ++k)
             channels[k].navigation.broadcast.ionoReceived = 0;
     }
+    if (mask & 1u) {
+        TNgPvtSnapshot biased, augmented;
+        TNgSbasCorrections sbas = {0};
+        sbas.count = 1;
+        sbas.prn[0] = channels[0].prn;
+        sbas.fast[0].valid = sbas.orbit[0].valid = 1;
+        sbas.fast[0].range = 30;
+        sbas.orbit[0].iode = 73;
+        channels[0].navigation.broadcast.eph.iode2 = 73;
+        channels[0].navigation.transmitTimeSeconds += 30 / C;
+        NgPvtCompute(channels, 7, 2400000, 2400000, &biased);
+        NgPvtComputeAugmented(channels, 7, 2400000, 2400000, 1, &sbas, &augmented);
+        CHECK(biased.available && biased.residualRms > 1);
+        CHECK(augmented.available && augmented.egnosCorrected == 1);
+        CHECK(augmented.residualRms < 0.02);
+        channels[0].navigation.transmitTimeSeconds -= 30 / C;
+        for (unsigned band = 0; band < 9; ++band) {
+            TNgSbasIonoBand *grid = &sbas.ionosphere[band];
+            grid->count = 201;
+            for (unsigned point = 0; point < grid->count; ++point) {
+                grid->mask[point] = (uint8_t)point;
+                grid->delay[point] = 41;
+            }
+        }
+        sbas.count = 0;
+        NgPvtComputeAugmented(channels, 7, 2400000, 2400000, 0, &sbas, &augmented);
+        CHECK(augmented.available && augmented.egnosIonosphereCorrected > 0);
+        CHECK(augmented.egnosIonosphereCorrected == augmented.ionosphereCorrected[0]);
+        CHECK(fabs(augmented.clockGps - solution.clockGps) > 0.1);
+    }
     const unsigned admitted[] = {solution.gps, solution.galileo, solution.beidou};
     const double clocks[] = {solution.clockGps, solution.clockGalileo, solution.clockBeidou};
     for (unsigned system = 0; system < 3; ++system) {

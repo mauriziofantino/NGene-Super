@@ -147,8 +147,19 @@ remains pending.
 The broadcast PVT uses GPS Klobuchar, Galileo E1 NeQuick G and BeiDou B1C
 BDGIM when the required coefficients are available. The receiver profile
 can disable these corrections and the PVT view reports their per-system
-counts. SBAS remains pending, including both EGNOS GEO reception and
-online EDAS/SISNeT. [Ionosphere models](BEIDOU_PVT.md#ionosfera-broadcast-a-frequenza-singola)
+counts. The optional EGNOS L1 receiver can search GEO PRNs 121 and 136.
+Enable it under Tracking in the receiver profile. GPS PVT uses fresh fast
+range and long-term orbit/clock corrections with matching broadcast IODE.
+The PVT view reports the GEO, accepted frames and corrected GPS observations.
+Windows x64 replay of the 27 November RTL-SDR recording accepted frames
+from both GEOs. Two replay windows produced fixes with one GPS observation
+corrected by PRN 121 and two GPS observations corrected by PRN 136. Synthetic CI8 replay independently exercised PRN 121 from
+acquisition through CRC validation. GPS L1 can also use MT18/MT26 delays
+when fresh grid points enclose the GPS L1 pierce point, at latitudes up to
+75 degrees. Unavailable or unsupported cells fall back to the configured
+broadcast model. Replay from the start of the 27 November RTL-SDR capture
+produced a GPS fix with two differential corrections and one ionospheric
+correction from GEO PRN 121. EDAS/SISNeT is deferred. [Ionosphere models](BEIDOU_PVT.md#ionosfera-broadcast-a-frequenza-singola)
 
 The F6 mixed GPS/Galileo replay matrix measures the existing tracking pool
 and acquisition permits at fixed precision. More acquisition permits reduced

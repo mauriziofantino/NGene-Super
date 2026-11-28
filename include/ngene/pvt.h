@@ -26,6 +26,7 @@ typedef struct {
     unsigned skyCount;                         /**< Number of real solved lines of sight. */
     TNgPvtSatelliteView sky[64];               /**< Solution-epoch satellite sky geometry. */
     unsigned egnosPrn, egnosFrames, egnosCorrected; /**< GEO and EGNOS data used at this epoch. */
+    unsigned egnosIonosphereCorrected; /**< GPS observations using the SBAS ionosphere grid. */
     unsigned ionosphereCorrected[3]; /**< Applied delays for GPS, Galileo and BeiDou. */
     unsigned beidou; /**< Admitted B1C measurements. */
     double clockBeidou; /**< Independent B1C receiver code bias [m]. */

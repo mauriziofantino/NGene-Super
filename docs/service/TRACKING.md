@@ -61,7 +61,8 @@ of the public API at CMake configuration time. There is no dynamic plugin ABI.
 
 `src/tracking/bank.c` allocates bounded receiver slots per enabled constellation,
 not a tracking channel for every detected PRN. Default capacities follow Classic's
-sample GNSS_RX.conf: eight GPS slots and eight Galileo slots; SBAS is not integrated.
+sample GNSS_RX.conf: eight GPS slots and eight Galileo slots. Optional EGNOS L1
+uses an auxiliary tracking channel outside the position-channel pool.
 Counts are independently configurable in 0..32. A slot retains its channel ID when
 assigned a PRN and when recycled after discontinuity. Waiting, acquisition and
 tracking are independently represented; the same PRN cannot occupy two tracking

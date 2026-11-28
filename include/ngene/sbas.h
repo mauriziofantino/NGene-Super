@@ -6,12 +6,20 @@
 #define NG_SBAS_FRAME_BYTES 32u
 #define NG_SBAS_MASK_SIZE 51u
 
+typedef struct {
+    uint8_t mask[201];
+    uint16_t delay[201];
+    double time[201], maskTime;
+    unsigned count, issue;
+} TNgSbasIonoBand;
+
 /** One GEO's correction bank, initialized to zero on a source or continuity change. */
 typedef struct {
     unsigned count, iodp;
     unsigned prn[NG_SBAS_MASK_SIZE];
     double maskTime, lastFrame, blockedUntil;
     unsigned frameCount;
+    TNgSbasIonoBand ionosphere[9];
     struct {
         double range, time;
         unsigned iodf, valid;
@@ -33,4 +41,7 @@ int NgSbasPushFrame(TNgSbasCorrections *bank, const uint8_t data[NG_SBAS_FRAME_B
 /** Return zero when integrity, age, PRN or GPS broadcast issue fails applicability. */
 int NgSbasRead(const TNgSbasCorrections *bank, unsigned prn, unsigned iode, double signalTime,
                double gpsTransmitTow, TNgSbasCorrection *correction);
+/** Return one for an available GPS L1 slant delay in metres. Angles are in radians. */
+int NgSbasIonosphere(const TNgSbasCorrections *bank, double signalTime, double latitude,
+                    double longitude, double azimuth, double elevation, double *delay);
 #endif

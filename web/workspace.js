@@ -388,7 +388,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
       const term = document.createElement('dt');
       const description = document.createElement('dd');
       term.textContent = 'EGNOS';
-      description.textContent = `PRN ${pvt.egnos.geo_prn} · ${pvt.egnos.valid_frames} valid frames · ${pvt.egnos.corrected_gps} GPS corrected`;
+      description.textContent = `PRN ${pvt.egnos.geo_prn} · ${pvt.egnos.valid_frames} valid frames · ${pvt.egnos.corrected_gps} GPS differential ? ${pvt.egnos.ionosphere_gps ?? 0} GPS ionosphere`;
       pvtValues.append(term, description);
     }
     if (pvt?.available && pvt.ionosphere_corrected) {

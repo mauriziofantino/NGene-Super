@@ -737,6 +737,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
         Number(egnos, "geo_prn", s->egnosPrn);
         Number(egnos, "valid_frames", s->egnosFrames);
         Number(egnos, "corrected_gps", s->available ? s->egnosCorrected : 0);
+        Number(egnos, "ionosphere_gps", s->egnosIonosphereCorrected);
         cJSON *ionosphere = cJSON_AddObjectToObject(p, "ionosphere_corrected");
         Number(ionosphere, "gps", s->ionosphereCorrected[0]);
         Number(ionosphere, "galileo", s->ionosphereCorrected[1]);
