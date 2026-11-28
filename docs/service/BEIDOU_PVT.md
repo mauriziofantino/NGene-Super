@@ -39,9 +39,9 @@ resta da qualificare.
 [Galileo OS SIS ICD](https://www.gsc-europa.eu/sites/default/files/sites/all/files/Galileo_OS_SIS_ICD_v2.2.pdf) ·
 [NeQuick G, Annex E](https://www.gsc-europa.eu/sites/default/files/sites/all/files/Galileo_Ionospheric_Model.pdf)
 
-In Receiver configuration → Tracking, **Broadcast ionosphere correction**
+In Receiver configuration → Navigation & PVT, **Broadcast ionosphere correction**
 controlla i modelli broadcast GPS, Galileo e BeiDou. Il profilo INI salva
-`tracking.broadcast_ionosphere`, attivo anche per i profili precedenti che
+`navigation.broadcast_ionosphere`, attivo anche per i profili precedenti che
 omettono il campo. La pagina PVT mostra i conteggi effettivi per soluzione.
 La correzione troposferica Hopfield continua sul percorso separato.
 

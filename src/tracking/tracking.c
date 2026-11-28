@@ -54,6 +54,8 @@ struct TNgTracking {
     double smoothedDopplerHz;     /**< Filtered output; carrier NCO stays untouched. */
     double initialCarrier;        /**< Carrier anchor for Classic loop. */
     double initialCode;           /**< Code-rate anchor for Classic loop. */
+    double coherentI[3], coherentQ[3];
+    unsigned coherentPrompts;
     double loopStep[NG_LOOP_COUNT], loopIntegral[NG_LOOP_COUNT];
     double carrierNco, codeNco, oldCarrierError, oldDllError;      /**< Loop memories. */
     double oldI, oldQ;                                             /**< Previous prompt for FLL. */
@@ -67,9 +69,10 @@ struct TNgTracking {
 };
 
 /** Recalculate the legacy filters at assignment for the signal's coherent period. */
-static void CalculateLoopCoefficients(TNgTracking *t)
+static void CalculateLoopCoefficients(TNgTracking *t, unsigned milliseconds)
 {
-    const double delta = (double)t->period / 1023000.0;
+    const double delta = (double)milliseconds / 1000.0;
+    t->snapshot.loopCoherentMs = milliseconds;
     const TNgLoopSettings *settings = t->config.loops[t->system - 1];
     for (unsigned loop = 0; loop < NG_LOOP_COUNT; ++loop) {
         const double bw = settings[loop].bandwidthHz;
@@ -104,6 +107,8 @@ void NgTrackingDefaults(TNgTrackingConfig *config)
     config->fllDecisionIntervalMs = 100;
     config->fllTransitionHz = 1.0;
     config->channelCount = 16;
+    config->gpsCoherentMs = 1;
+    config->gpsTransitionChecks = 5;
     config->galileoSpacingChips = 0.2;
     config->gpsChannels = 0;
     config->galileoChannels = 0;
@@ -112,6 +117,7 @@ void NgTrackingDefaults(TNgTrackingConfig *config)
     config->enabled = 1;
     config->tapCount = 3;
     config->spacingChips = 0.4;
+    config->egnosSpacingChips = 0.4;
     config->broadcastIonosphere = 1;
     config->dopplerSmoothingMs = 200;
 }
@@ -123,10 +129,14 @@ int NgTrackingValidate(const TNgTrackingConfig *config, TNgError *error)
         config->gpsChannels + config->galileoChannels + config->beidouChannels > config->channelCount ||
         !isfinite(config->galileoSpacingChips) || config->galileoSpacingChips <= 0 ||
         config->galileoSpacingChips >= 1.0 / 3.0 || config->gpsChannels > 32 ||
+        !(config->egnosSpacingChips > 0 && config->egnosSpacingChips <= 1) ||
+        !(config->cn0CutoffDbHz >= 0 && config->cn0CutoffDbHz <= 60) ||
         !isfinite(config->beidouSpacingChips) || config->beidouSpacingChips < 0 ||
         config->beidouSpacingChips >= 1.0 / 3.0 ||
         config->galileoChannels > 32 || config->beidouChannels > NG_SATELLITE_MAX_PRN ||
         config->autoPriority > NG_CONSTELLATION_COUNT ||
+        !config->gpsCoherentMs || 20u % config->gpsCoherentMs != 0 ||
+        config->gpsTransitionChecks < 1 || config->gpsTransitionChecks > 100 ||
         config->fllDecisionUpdates < 1 || config->fllDecisionUpdates > 1000 ||
         config->fllDecisionIntervalMs < 4 || config->fllDecisionIntervalMs > 2000 ||
         !(config->fllTransitionHz >= 0.01 && config->fllTransitionHz <= 100) ||
@@ -227,7 +237,8 @@ int NgTrackingSeed(TNgTracking *tracking, const TNgAcquisitionResult *result, TN
     tracking->meanFrequency = tracking->initialCarrier;
     tracking->oldMean = 0;
     tracking->initialCode = 1023000.0 * (1.0 + result->dopplerHz / 1575420000.0);
-    CalculateLoopCoefficients(tracking);
+    tracking->coherentPrompts = 0;
+    CalculateLoopCoefficients(tracking, tracking->period / 1023u);
     tracking->snapshot.codeRateHz = tracking->initialCode;
     tracking->snapshot.active = 1;
     tracking->snapshot.prn = result->prn;
@@ -385,6 +396,44 @@ static void BeidouLoops(TNgTracking *t, double i, double q, double dll,
     *reportedError = phase;
 }
 
+/** Extend GPS PLL/DLL integration only over aligned, same-bit prompt groups.
+ * One-ms navigation prompts, measurements and lock supervision continue independently. */
+static int GpsLoopPrompt(TNgTracking *t, unsigned p, double *i, double *q, double *dll)
+{
+    const unsigned wanted = t->config.gpsCoherentMs;
+    if (wanted == 1 || t->system != NG_CONSTELLATION_GPS || t->egnosPrompt) {
+        return 1;
+    }
+    const int synchronized = t->snapshot.pll && t->navigation.snapshot.bitSynchronized;
+    if (!synchronized) {
+        t->coherentPrompts = 0;
+        if (t->snapshot.loopCoherentMs != 1)
+            CalculateLoopCoefficients(t, 1);
+        return 1;
+    }
+    if (!t->coherentPrompts) {
+        if (t->navigation.bitMs % wanted != 0)
+            return 1;
+        memset(t->coherentI, 0, sizeof(t->coherentI));
+        memset(t->coherentQ, 0, sizeof(t->coherentQ));
+    }
+    for (unsigned k = 0; k < 3; ++k) {
+        t->coherentI[k] += t->sumI[p - 1 + k];
+        t->coherentQ[k] += t->sumQ[p - 1 + k];
+    }
+    if (++t->coherentPrompts < wanted)
+        return 0;
+    t->coherentPrompts = 0;
+    if (t->snapshot.loopCoherentMs != wanted)
+        CalculateLoopCoefficients(t, wanted);
+    *i = t->coherentI[1];
+    *q = t->coherentQ[1];
+    const double early = t->coherentI[0] * t->coherentI[0] + t->coherentQ[0] * t->coherentQ[0];
+    const double late = t->coherentI[2] * t->coherentI[2] + t->coherentQ[2] * t->coherentQ[2];
+    *dll = early + late > 0 ? 0.5 * (early - late) / (early + late) : 0;
+    return 1;
+}
+
 /** Commit one coherent integration and update the channel loops. */
 static void Complete(TNgTracking *t)
 {
@@ -396,12 +445,13 @@ static void Complete(TNgTracking *t)
     double q = beidou ? -t->sumI[p] : t->sumQ[p];
     double error = 0;
     double dll = e + l > 0 ? (t->system == 1 ? 0.5 : 1.0 / 6.0) * (e - l) / (e + l) : 0;
+    double loopI = i, loopQ = q;
     if (beidou) {
         BeidouLoops(t, i, q, dll * 6, e, l, &error);
-    } else {
+    } else if (GpsLoopPrompt(t, p, &loopI, &loopQ, &dll)) {
         if (t->snapshot.pll) {
-            if (i != 0)
-                error = -atan(q / i) / 6.2831853071795864769;
+            if (loopI != 0)
+                error = -atan(loopQ / loopI) / 6.2831853071795864769;
         } else if (t->snapshot.integrations) {
             double dot = t->oldI * i + t->oldQ * q;
             double cross = t->oldI * q - i * t->oldQ;
@@ -450,7 +500,9 @@ static void Complete(TNgTracking *t)
             double ratio = total > 0 ? (t->lockI - t->lockQ) / total : 0;
             if (!t->qualified && ratio > 0.8) t->qualified = 1;
             if (t->qualified) {
-                if (ratio < 0.4) t->failureMs += 100;
+                const int belowCutoff = t->config.cn0CutoffDbHz > 0 && t->snapshot.cn0Valid &&
+                                        t->snapshot.cn0DbHz < t->config.cn0CutoffDbHz;
+                if (ratio < 0.4 || belowCutoff) t->failureMs += 100;
                 else if (ratio > 0.8) t->failureMs = 0;
                 if (t->failureMs > 1000) t->snapshot.active = 0;
             }
@@ -467,7 +519,8 @@ static void Complete(TNgTracking *t)
             t->egnosPrompt(t->egnosContext, i / (double)t->accumulated, t->expected);
         }
     } else if (t->system == 1) {
-        NgNavigationGpsPrompt(&t->navigation, i, q, t->snapshot.pll, t->expected);
+        NgNavigationGpsPromptWithChecks(&t->navigation, i, q, t->snapshot.pll, t->expected,
+                                        t->config.gpsTransitionChecks);
         t->snapshot.navigation = t->navigation.snapshot;
     } else if (t->system == NG_CONSTELLATION_GALILEO) {
         NgNavigationGalileoPrompt(&t->navigation, i, t->snapshot.pll, t->expected);

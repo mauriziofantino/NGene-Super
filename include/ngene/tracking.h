@@ -17,9 +17,12 @@ enum { NG_LOOP_DLL, NG_LOOP_FLL, NG_LOOP_PLL, NG_LOOP_COUNT };
 /** Frozen per-run numerical and correlator configuration; no automatic precision changes. */
 typedef struct {
     TNgLoopSettings loops[NG_TRACKING_EGNOS_SIGNAL][NG_LOOP_COUNT]; /**< GPS, Galileo, BeiDou and EGNOS. */
+    unsigned gpsCoherentMs, gpsTransitionChecks;
     unsigned fllDecisionUpdates, fllDecisionIntervalMs;
     double fllTransitionHz;
     unsigned channelCount;      /**< Total shared receiver slots, 1..64. */
+    double egnosSpacingChips;  /**< EGNOS adjacent tap delay in chips. */
+    double cn0CutoffDbHz;       /**< Zero disables the optional tracking admission cutoff. */
     double beidouSpacingChips;  /**< BeiDou adjacent tap delay, zero inherits Galileo spacing. */
     double galileoSpacingChips; /**< Galileo adjacent tap delay, central BOC lobe. */
     unsigned gpsChannels;       /**< Slots reserved for GPS; remaining slots are shared. */
@@ -63,6 +66,7 @@ typedef struct {
     double codeRateHz;                   /**< Estimated chips per second. */
     double dllError;                     /**< Classic normalized power discriminator. */
     double carrierError;                 /**< Classic Costas discriminator in cycles. */
+    unsigned loopCoherentMs;             /**< Effective loop update interval. */
     unsigned tapCount;                   /**< Valid entries of offset/i/q. */
     double offset[NG_TRACKING_MAX_TAPS]; /**< Replica delay in chips. */
     double i[NG_TRACKING_MAX_TAPS];      /**< Mean coherent I. */

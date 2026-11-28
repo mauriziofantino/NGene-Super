@@ -89,47 +89,7 @@ async function until(page,predicate){for(let k=0;k<100;k++){if(await page.evalua
   await page.evaluate(()=>{window.geometryWorkspace.setView('pvt');window.geometrySnapshot.status.pvt={available:false};window.geometryWorkspace.update(window.geometrySnapshot);});
   assert.equal(await page.locator('[data-pvt-sky] circle').count(),0,'No fabricated sky positions without a fix');
   await page.evaluate(()=>window.geometryWorkspace.setView('tracking'));
-  await page.getByRole('button',{name:'Preview BeiDou B1C'}).click();
-  assert.match(page.url(),/[?&]preview=beidou/);
-  assert(await page.locator('#trackingView [data-beidou-preview-notice]').isVisible());
-  const previewRows=page.locator('.channel-list tbody tr');
-  assert.equal(await previewRows.count(),9);
-  assert.deepEqual(await stages(previewRows.nth(0)),['Confirmed','—','—','—'],
-    'GPS PRN 12 membership does not include BeiDou PRN 12');
-  assert.deepEqual(await stages(previewRows.nth(1)),['Confirmed','Tracking','—','—']);
-  assert.deepEqual(await stages(previewRows.nth(2)),['Confirmed','Tracking','Decoded','—']);
-  assert.deepEqual(await stages(previewRows.nth(6)),['Confirmed','Tracking','Decoded','Used in PVT']);
-  assert.deepEqual(await stages(previewRows.nth(7)),['Confirmed','Tracking','Decoded','Used in PVT']);
-  let cafRequests=0;
-  page.on('request',req=>{if(req.url().includes('/acquisition/search-space'))cafRequests++;});
-  await previewRows.nth(6).getByRole('link').click();
-  await page.locator('#trackingView [data-satellite-title]').filter({hasText:'BeiDou B1C 63'}).waitFor();
-  assert.equal(await page.locator('[data-tracking-component]').count(),0);
-  assert.equal(await page.locator('[data-tracking-shape] circle[data-tap="P"]').count(),1);
-  assert.equal(await page.locator('[data-tracking-scatter] circle').count(),1);
-  assert(Number(await page.locator('[data-tracking-prompt] circle').getAttribute('cy'))<125,
-   'Positive prompt I is plotted above zero');
-  assert.match(await page.locator('[data-satellite-stages]').textContent(),/Confirmed.*Tracking.*Decoded.*Used in PVT/);
-  assert.match(await page.locator('[data-satellite-acquisition]').textContent(),/confirmed/);
-  assert.equal(await page.locator('[data-tracking-shape] [data-tap]').count(),3);
-  assert.equal(cafRequests,0,'Synthetic PRN 63 does not call the live search-space API');
-  assert((await page.evaluate(()=>window.channelInterest)).every(id=>id===0),'Preview never acquires a live observation lease');
-  await page.evaluate(()=>window.geometryWorkspace.setView('navigation'));
-  assert.match(await page.locator('[data-navigation-status]').textContent(),/BeiDou B1C 63.*B-CNAV1.*Page 3.*BDT/);
-  await page.evaluate(()=>{window.geometryWorkspace.setView('pvt');window.geometryWorkspace.update(window.geometrySnapshot);});
-  await page.setViewportSize({width:390,height:850});
-  assert(await page.locator('#pvtView [data-beidou-preview-notice]').isVisible());
-  assert.match(await page.locator('[data-pvt-counts]').textContent(),/Used measurements: 6 \(GPS 1, Galileo 1, BeiDou 4\)/);
-  assert.match(await page.locator('[data-pvt-values]').textContent(),/BeiDou clock bias27\.60 m/);
-  assert.match(await page.locator('[data-pvt-values]').textContent(),/GPS clock bias30\.20 mGalileo clock bias33\.50 m/);
-  assert.match(await page.locator('[data-pvt-sky]').textContent(),/C63/);
-  assert.match(await page.locator('[data-pvt-sky]').textContent(),/G12.*E24/);
-  assert(!(await page.locator('[data-pvt-map]').isVisible()),'Preview position is not displayed on the live map');
-  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Preview fits a mobile viewport');
-  await page.screenshot({path:path.resolve('build/beidou-ui-preview.png'),fullPage:true});
-  await page.getByRole('button',{name:'Exit BeiDou preview'}).click();
-  assert(!page.url().includes('preview=beidou'));
-  assert.equal(await page.locator('[data-pvt-sky] circle').count(),0);
+  assert.equal(await page.getByRole('button',{name:'Preview BeiDou B1C'}).count(),0);
   await page.setViewportSize({width:1100,height:850});
   await page.evaluate(()=>{
    const snapshot=window.geometrySnapshot;

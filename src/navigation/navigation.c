@@ -94,7 +94,8 @@ void NgNavigationGpsBit(TNgNavigation *n, unsigned bit, uint64_t endSample)
 /** Preserve Classic's five transition intervals and low PLL quality threshold (0.4).
  * Prompt intervals remain one millisecond; only data demodulation sums twenty epochs.
  */
-void NgNavigationGpsPrompt(TNgNavigation *n, double i, double q, int pll, uint64_t endSample)
+void NgNavigationGpsPromptWithChecks(TNgNavigation *n, double i, double q, int pll,
+                                     uint64_t endSample, unsigned transitionChecks)
 {
     if (!pll || !isfinite(i) || !isfinite(q)) {
         NgNavigationLoseTiming(n);
@@ -120,7 +121,7 @@ void NgNavigationGpsPrompt(TNgNavigation *n, double i, double q, int pll, uint64
         else
             n->transitions++;
         n->transition = n->epochs;
-        if (n->transitions >= 5) {
+        if ((unsigned)n->transitions >= transitionChecks) {
             n->snapshot.bitSynchronized = 1;
             n->sum = 0;
             n->bitMs = 0;
@@ -135,4 +136,9 @@ void NgNavigationGpsPrompt(TNgNavigation *n, double i, double q, int pll, uint64
             n->bitMs = 0;
         }
     }
+}
+
+void NgNavigationGpsPrompt(TNgNavigation *n, double i, double q, int pll, uint64_t endSample)
+{
+    NgNavigationGpsPromptWithChecks(n, i, q, pll, endSample, 5);
 }

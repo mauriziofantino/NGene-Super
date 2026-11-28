@@ -257,7 +257,8 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     if (strcmp(key, "receiver.egnos") == 0 || strcmp(key, "tracking.egnos") == 0) {
         return ParseBool(value, &c->tracking.egnosEnabled);
     }
-    if (strcmp(key, "tracking.broadcast_ionosphere") == 0) {
+    if (strcmp(key, "navigation.broadcast_ionosphere") == 0 ||
+        strcmp(key, "tracking.broadcast_ionosphere") == 0) {
         return ParseBool(value, &c->tracking.broadcastIonosphere);
     }
     if (strcmp(key, "pvt.carrier_smoothing_length") == 0) {
@@ -275,6 +276,10 @@ static int Apply(TNgConfig *c, const char *key, const char *value)
     UINT_KEY("receiver.auto_priority", tracking.autoPriority)
     REAL_KEY("tracking.galileo_spacing_chips", tracking.galileoSpacingChips)
     REAL_KEY("tracking.beidou_spacing_chips", tracking.beidouSpacingChips)
+    REAL_KEY("tracking.egnos_spacing_chips", tracking.egnosSpacingChips)
+    REAL_KEY("tracking.cn0_cutoff_db_hz", tracking.cn0CutoffDbHz)
+    UINT_KEY("tracking.gps_coherent_ms", tracking.gpsCoherentMs)
+    UINT_KEY("tracking.gps_transition_checks", tracking.gpsTransitionChecks)
     UINT_KEY("tracking.fll_decision_updates", tracking.fllDecisionUpdates)
     UINT_KEY("tracking.fll_decision_interval_ms", tracking.fllDecisionIntervalMs)
     REAL_KEY("tracking.fll_transition_hz", tracking.fllTransitionHz)
@@ -604,7 +609,7 @@ int NgConfigRead(FILE *input, TNgConfig *config, TNgError *error)
                  strcmp(section, "replay") != 0 && strcmp(section, "analysis") != 0 &&
                  strcmp(section, "rtlsdr") != 0 && strcmp(section, "bladerf") != 0 &&
                  strcmp(section, "tracking") != 0 && strcmp(section, "dsp") != 0 &&
-                 strcmp(section, "pvt") != 0 && strcmp(section, "acquisition") != 0 && strcmp(section, "galileo_acquisition") != 0 &&
+                 strcmp(section, "navigation") != 0 && strcmp(section, "pvt") != 0 && strcmp(section, "acquisition") != 0 && strcmp(section, "galileo_acquisition") != 0 &&
                  strcmp(section, "beidou_acquisition") != 0)) {
                 return NgFail(error, "Unknown section at line %zu", number);
             }
@@ -881,11 +886,15 @@ int NgConfigWrite(FILE *output, const TNgConfig *config, TNgError *error)
                     loopSignals[signal], loopNames[loop], settings.gain);
         }
     }
+    fprintf(output, "gps_coherent_ms=%u\ngps_transition_checks=%u\n",
+            config->tracking.gpsCoherentMs, config->tracking.gpsTransitionChecks);
     fprintf(output, "fll_decision_updates=%u\nfll_decision_interval_ms=%u\nfll_transition_hz=%.17g\n",
             config->tracking.fllDecisionUpdates, config->tracking.fllDecisionIntervalMs,
             config->tracking.fllTransitionHz);
     fprintf(output, "beidou_spacing_chips=%.17g\n", config->tracking.beidouSpacingChips);
-    fprintf(output, "broadcast_ionosphere=%s\n",
+    fprintf(output, "egnos_spacing_chips=%.17g\ncn0_cutoff_db_hz=%.17g\n",
+            config->tracking.egnosSpacingChips, config->tracking.cn0CutoffDbHz);
+    fprintf(output, "\n[navigation]\nbroadcast_ionosphere=%s\n",
             config->tracking.broadcastIonosphere ? "true" : "false");
     fprintf(output,"\n[acquisition]\nfirst_prn=%u\nlast_prn=%u\npfa=%.17g\ncpu_budget=%.17g\n",
             config->acquisition.firstPrn,config->acquisition.lastPrn,config->acquisition.falseAlarmProbability,

@@ -145,6 +145,14 @@
               "max": 0.3333333333333333,
               "exclusiveMax": true,
               "hint": "Zero uses the Galileo spacing. Enter a positive spacing to configure BeiDou independently."
+            },
+            {
+              "key": "tracking.egnos_spacing_chips",
+              "label": "EGNOS adjacent tap spacing (chips)",
+              "type": "number",
+              "default": 0.4,
+              "min": 0.001,
+              "max": 1
             }
           ]
         },
@@ -480,6 +488,69 @@
               "max": 100
             }
           ]
+        },
+        {
+          "title": "Lock quality",
+          "topic": "tracking",
+          "fields": [
+            {
+              "key": "tracking.cn0_cutoff_db_hz",
+              "label": "C/N0 cutoff (dB-Hz)",
+              "type": "number",
+              "default": 0,
+              "min": 0,
+              "max": 60,
+              "hint": "Zero disables the cutoff. With a valid estimate, sustained low C/N0 releases the channel."
+            }
+          ]
+        },
+        {
+          "title": "GPS coherent loop integration",
+          "topic": "tracking",
+          "note": "Pull-in and LNAV use 1 ms prompts. The configured PLL and DLL interval starts after bit synchronization.",
+          "fields": [
+            {
+              "key": "tracking.gps_coherent_ms",
+              "label": "GPS coherent loop integration (ms)",
+              "type": "select",
+              "default": "1",
+              "options": [
+                {
+                  "value": "1",
+                  "label": "1"
+                },
+                {
+                  "value": "2",
+                  "label": "2"
+                },
+                {
+                  "value": "4",
+                  "label": "4"
+                },
+                {
+                  "value": "5",
+                  "label": "5"
+                },
+                {
+                  "value": "10",
+                  "label": "10"
+                },
+                {
+                  "value": "20",
+                  "label": "20"
+                }
+              ]
+            },
+            {
+              "key": "tracking.gps_transition_checks",
+              "label": "GPS bit synchronization transition checks",
+              "type": "number",
+              "default": 5,
+              "min": 1,
+              "max": 100,
+              "integer": true
+            }
+          ]
         }
       ]
     },
@@ -511,10 +582,10 @@
       "groups": [
         {
           "title": "Ionospheric corrections",
-          "topic": "tracking",
+          "topic": "navigation",
           "fields": [
             {
-              "key": "tracking.broadcast_ionosphere",
+              "key": "navigation.broadcast_ionosphere",
               "label": "Broadcast ionosphere correction",
               "type": "select",
               "default": "true",
@@ -1061,154 +1132,6 @@
             "label": "Required successes (M)",
             "value": "3",
             "unit": "",
-            "hint": "",
-            "options": null
-          }
-        ],
-        "note": ""
-      }
-    ],
-    "tracking": [
-      {
-        "title": "GPS tracking loops",
-        "fields": [
-          {
-            "key": "GPS userIntperiod",
-            "label": "Coherent integration period",
-            "value": "1",
-            "unit": "ms",
-            "hint": "",
-            "options": [
-              [
-                "1",
-                "1"
-              ],
-              [
-                "2",
-                "2"
-              ],
-              [
-                "4",
-                "4"
-              ],
-              [
-                "5",
-                "5"
-              ],
-              [
-                "10",
-                "10"
-              ],
-              [
-                "20",
-                "20"
-              ]
-            ]
-          },
-          {
-            "key": "GPS spacing",
-            "label": "Early–late spacing",
-            "value": "0.8",
-            "unit": "chip",
-            "hint": "Total distance between Early and Late; original range is greater than 0 and at most 2 chips.",
-            "options": null
-          }
-        ],
-        "note": ""
-      },
-      {
-        "title": "Galileo tracking loops",
-        "fields": [
-          {
-            "key": "Galileo spacing",
-            "label": "Early–late spacing",
-            "value": "0.4",
-            "unit": "chip",
-            "hint": "Total distance between Early and Late; original range is greater than 0 and at most 2 chips.",
-            "options": null
-          }
-        ],
-        "note": "The original Galileo tracking integration period is fixed at 4 ms."
-      },
-      {
-        "title": "Lock and integration control",
-        "fields": [
-          {
-            "key": "CN0 cutoff",
-            "label": "C/N₀ cutoff",
-            "value": "30",
-            "unit": "dB-Hz",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "changePeriodCtrlLength",
-            "label": "Integration transition checks",
-            "value": "5",
-            "unit": "transitions",
-            "hint": "Checks valid data transitions before switching to the requested integration period.",
-            "options": null
-          },
-          {
-            "key": "EGNOS userIntperiod",
-            "label": "EGNOS integration period",
-            "value": "1",
-            "unit": "ms",
-            "hint": "EGNOS reuses the GPS tracking loop parameters.",
-            "options": null
-          }
-        ],
-        "note": ""
-      },
-      {
-        "title": "Additional correlators",
-        "fields": [
-          {
-            "key": "Multiple Correlators Flag",
-            "label": "Enable multiple correlators",
-            "value": "0",
-            "unit": "",
-            "hint": "",
-            "options": [
-              [
-                "0",
-                "Disabled"
-              ],
-              [
-                "1",
-                "Enabled"
-              ]
-            ]
-          },
-          {
-            "key": "Number Of Multiple Correlators",
-            "label": "Number of correlators",
-            "value": "5",
-            "unit": "",
-            "hint": "The original parser uses an odd count of at least three.",
-            "options": null
-          },
-          {
-            "key": "Multiple Correlators GPS Spacing",
-            "label": "GPS correlator spacing",
-            "value": "4",
-            "unit": "samples",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "Multiple Correlators Galileo Spacing",
-            "label": "Galileo correlator spacing",
-            "value": "2",
-            "unit": "samples",
-            "hint": "",
-            "options": null
-          },
-          {
-            "key": "Multiple Correlators EGNOS Spacing",
-            "label": "EGNOS correlator spacing",
-            "value": "4",
-            "unit": "samples",
             "hint": "",
             "options": null
           }

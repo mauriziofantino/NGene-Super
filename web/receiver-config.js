@@ -8,7 +8,7 @@ export function createReceiverConfiguration(container, sectionsFromFile) {
     const note = document.createElement('p'); note.className = 'receiver-reference-note';
     note.textContent = ['receiver','acquisition'].includes(topic)
       ? 'Historical NGene settings for other signals and future modules. Operational GPS L1 C/A and Galileo E1-B settings are in the acquisition forms. These reference values are not applied or saved.'
-      : 'GNSS module not integrated. These are original NGene reference values; they are not applied or saved by this receiver build.';
+      : 'Classic reference parameters are shown separately from the applied receiver settings.';
     const holder = document.createElement('div'); holder.className = 'receiver-parameter-groups';
     for (const {title, fields, note: description} of groups) {
       const fieldset = document.createElement('fieldset'); fieldset.className = 'receiver-parameter-group'; fieldset.disabled = true;

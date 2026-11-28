@@ -59,6 +59,8 @@ int NgNavigationGpsParity(uint32_t *word);
 /** Feed one GPS data bit; used by the prompt demodulator and deterministic fixtures. */
 void NgNavigationGpsBit(TNgNavigation *navigation, unsigned bit, uint64_t endSample);
 /** Feed each complete 1-ms GPS prompt exactly once; FLL epochs never contribute bits. */
+void NgNavigationGpsPromptWithChecks(TNgNavigation *navigation, double i, double q, int pll,
+                                     uint64_t endSample, unsigned transitionChecks);
 void NgNavigationGpsPrompt(TNgNavigation *navigation, double i, double q, int pll,
                            uint64_t endSample);
 /** Feed each coherent 4-ms E1-B prompt once; page parity/CRC establishes data validity. */

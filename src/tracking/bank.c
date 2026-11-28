@@ -469,8 +469,10 @@ void NgTrackingBankReadEgnos(TNgTrackingBank *bank, TNgTrackingSnapshot *snapsho
 
 void NgTrackingBankObserve(TNgTrackingBank *bank, unsigned channelId)
 {
-    if (bank)
+    if (bank) {
         bank->pool->observedChannel = channelId;
+        NgEgnosObserve(bank->pool->egnos, channelId == NG_TRACKING_EGNOS_CHANNEL);
+    }
 }
 
 int NgTrackingBankBackgroundAllowed(TNgTrackingBank *bank)

@@ -688,6 +688,7 @@ static cJSON *StatusJson(TNgControl *control, unsigned mask)
             Counter(row, "integrations", t->integrations);
             Number(row, "doppler_hz", t->dopplerHz);
             Number(row, "code_rate_hz", t->codeRateHz);
+            Number(row, "loop_coherent_ms", t->loopCoherentMs);
             Number(row, "dll_error", t->dllError);
             Number(row, "carrier_error", t->carrierError);
             Number(row, "sample_rate_hz", status->actualSampleRateHz);

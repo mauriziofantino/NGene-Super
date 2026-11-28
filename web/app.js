@@ -188,6 +188,10 @@ function parseIni(text) {
     parsed['receiver.egnos'] ??= parsed['tracking.egnos'];
     delete parsed['tracking.egnos'];
   }
+  if (Object.hasOwn(parsed, 'tracking.broadcast_ionosphere')) {
+    parsed['navigation.broadcast_ionosphere'] ??= parsed['tracking.broadcast_ionosphere'];
+    delete parsed['tracking.broadcast_ionosphere'];
+  }
   return parsed;
 }
 function toIni(object) {
@@ -213,7 +217,7 @@ const settingsTopics = {
   receiver: ['Receiver & signals', 'Configure shared channels and reservations for GPS, Galileo and BeiDou.', 'Before start'],
   acquisition: ['Acquisition', 'Configure the GPS, Galileo and BeiDou searches.', 'Before start'],
   tracking: ['Tracking', 'Configure worker allocation and multi-correlator geometry.', 'Before start'],
-  navigation: ['Navigation & PVT', 'Configure solution rate, satellite selection, smoothing and navigation corrections.', 'Module unavailable'],
+  navigation: ['Navigation & PVT', 'Configure corrections used by the navigation solution.', 'Before start'],
   recording: ['Capture to disk', 'Choose a name, receiver-side folder and pre/post capture point.', 'Before start'],
   analysis: ['Diagnostic processing', 'NGene computes PSD and histograms. Apply these settings during reception.', 'Runtime'],
   display: ['Plot appearance', 'Adjust axes, colours and history in this browser.', 'Display only'],
@@ -338,7 +342,7 @@ function updateSourceFields() {
   if(tuning){tuning.min=(caps?.frequency_min_hz||0)/1e6;tuning.max=(caps?.frequency_max_hz||(source==='rtlsdr'?4294967295:6000000000))/1e6;}
   for(const key of ['frontend.sample_rate_hz','frontend.center_frequency_hz','frontend.signal_frequency_hz','hackrf.bandwidth_hz']) {const input=document.querySelector(`[name="${key}"]`);if(input)input.disabled=!editable()||source==='sige';}
   const bandwidth=document.querySelector('[name="hackrf.bandwidth_hz"]');if(bandwidth)bandwidth.closest('.field')?.classList.toggle('hidden',source==='sige');
-  $('sigeInfo').classList.toggle('hidden',source!=='sige');
+  $('sigeInfo').classList.toggle('hidden',source!=='sige'||selectedSettings!=='source');
   for (const group of document.querySelectorAll('[data-group]')) {
     const kind = {'HackRF':'hackrf','RTL-SDR':'rtlsdr','bladeRF':'bladerf','File replay':'file'}[group.dataset.group];
     group.classList.toggle('hidden', Boolean(kind && source !== kind));

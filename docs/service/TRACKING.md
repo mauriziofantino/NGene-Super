@@ -269,3 +269,10 @@ Project note from the user. The loop coefficients published by Kai Borre
 require independent derivation and validation. Maintaining lock under some
 conditions does not validate those coefficients. Keep the current formula as
 a compatibility baseline until the filter design is qualified.
+
+GPS can extend PLL and DLL coherent integration to 2, 4, 5, 10 or 20 ms.
+The loops first acquire at 1 ms and extend only over aligned groups within a
+synchronized LNAV bit. Demodulation and observations retain their original
+1-ms cadence. The default remains 1 ms. The optional C/N0 cutoff uses valid
+estimates in the existing qualified-lock failure window and defaults to off.
+EGNOS has independent tap spacing and shares the configured tap count.

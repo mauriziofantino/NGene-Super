@@ -166,8 +166,8 @@ histogram_update_hz=20
       await page.screenshot({path:path.join(process.env.NGENE_WORKSPACE_SCREENSHOTS, name), fullPage:true});
     };
     const configurationTopics = ['source', 'receiver', 'acquisition', 'tracking', 'navigation', 'recording', 'analysis', 'display', 'profile'];
-    const referenceTopics = ['receiver', 'acquisition', 'tracking', 'navigation'];
-    const referenceOnlyTopics = ['navigation'];
+    const referenceTopics = ['receiver', 'acquisition', 'navigation'];
+    const referenceOnlyTopics = [];
     const referencesDisabled = async () => {
       assert(await page.locator('[data-reference-param]').count() > 30, 'Original receiver configuration exposes meaningful GNSS parameters');
       assert.deepEqual(await page.locator('[data-reference-param]').evaluateAll(controls => controls
@@ -182,7 +182,7 @@ histogram_update_hz=20
         assert.equal(await page.locator(`[data-receiver-settings="${reference}"]`).isVisible(), reference === topic,
           `Only the selected GNSS configuration section is displayed (${topic}/${reference})`);
       }
-      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'tracking', 'recording'].includes(topic),
+      assert.equal(await page.locator('#configForm').isVisible(), ['source', 'receiver', 'acquisition', 'tracking', 'navigation', 'recording'].includes(topic),
         'Only topics with real receiver parameters expose the operational form');
       await referencesDisabled();
     };
@@ -222,7 +222,7 @@ histogram_update_hz=20
       'Number of supported Galileo channels':'8', 'Number of supported EGNOS channels':'1',
       'Galileo Doppler Frequency step (Hz)':'87',
 
-      'GPS spacing':'0.8', 'Galileo spacing':'0.4', 'PVT rate':'1'
+      'PVT rate':'1'
     })) assert.equal(await page.locator(`[data-reference-param="${name}"]`).inputValue(), expected,
       `${name} must use the original NGene shipped example`);
     assert.equal(writes.length, beforeConfiguration, 'Browsing GNSS reference settings must not issue mutations');
@@ -294,7 +294,9 @@ histogram_update_hz=20
     await page.locator('[name="tracking.beidou_spacing_chips"]').fill('0.21');
     await page.locator('[name="tracking.gps_pll_bandwidth_hz"]').fill("14");
     await page.locator('[name="tracking.galileo_fll_gain"]').fill("1.25");
-    const ionosphere = page.locator('[name="tracking.broadcast_ionosphere"]');
+    assert(!(await page.locator('[name="navigation.broadcast_ionosphere"]').isVisible()));
+    await page.locator('[data-settings="navigation"]').click();
+    const ionosphere = page.locator('[name="navigation.broadcast_ionosphere"]');
     assert.equal(await ionosphere.inputValue(), 'true');
     await ionosphere.selectOption('false');
     await page.locator('[data-settings="receiver"]').click();
@@ -337,7 +339,7 @@ histogram_update_hz=20
     const referenceNames = await page.locator('[data-reference-param]').evaluateAll(controls => controls.map(control => control.dataset.referenceParam));
     for (const name of referenceNames) assert(!applied.ini.includes(`${name}=`), `Reference parameter ${name} must never enter the INI`);
     assert.match(applied.ini, /^\[acquisition\]/m, 'Integrated acquisition parameters remain in the saved profile');
-    assert.doesNotMatch(applied.ini, /^\[(?:navigation|pvt)\]/m, 'Unimplemented modules do not enter the saved operational profile');
+    assert.match(applied.ini, /^\[navigation\]\r?\nbroadcast_ionosphere=false/m);
     assert.equal(await page.locator('#configForm [aria-invalid="true"]').count(), 0, 'Disabled GNSS references must not introduce hidden form validation errors');
 
     // Real file replay drives RF, while no GNSS processing result is manufactured.

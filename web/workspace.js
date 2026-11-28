@@ -29,56 +29,7 @@ const CONSTELLATIONS = {
   3: {name: 'BeiDou B1C', prefix: 'C', colour: '#c8a4ff', acquisition: 'beidou_acquisition'},
   4: {name: 'EGNOS L1', prefix: 'S', colour: '#64d9a2'}
 };
-const previewButton = '<button type="button" data-beidou-preview aria-pressed="false">Preview BeiDou B1C</button>';
-const previewNotice = '<p class="workspace-callout" data-beidou-preview-notice role="status" hidden>BeiDou B1C preview · Synthetic telemetry. Receiver controls still apply to the live session.</p>';
 const beidouAvailability = '<p class="muted" data-beidou-availability hidden>Live BeiDou B1C unavailable in this receiver build.</p>';
-
-/** Presentation fixture. It never enters receiver telemetry or sends observation requests. */
-function createBeidouPreview() {
-  const epoch = '1', sample = '8000000';
-  const beidouSky = [
-    {prn: 24, azimuth_deg: 20, elevation_deg: 58},
-    {prn: 33, azimuth_deg: 106, elevation_deg: 39},
-    {prn: 61, azimuth_deg: 210, elevation_deg: 50},
-    {prn: 63, azimuth_deg: 301, elevation_deg: 27}
-  ].map(sat => ({...sat, constellation: 3, used: true}));
-  const tracking = [12, 44, 35, ...beidouSky.map(sat => sat.prn)].map((prn, index) => {
-    const active = index > 0, decoded = index > 1;
-    return {
-      channel_id: index + 1, constellation: 3, reservation: 0, prn, active,
-      state: active ? 2 : 1, pll: decoded, cn0_valid: active, cn0_db_hz: 36 + index,
-      doppler_hz: 1200 - 220 * index, code_rate_hz: 1023000.5, code_delay_chips: 0,
-      main_peak_verified: decoded, epoch, end_sample: sample, first_sample: '7920000',
-      tracking_start_sample: '7500000',
-      integrations: active ? '1' : '0', sample_rate_hz: 8000000, bit_synchronized: decoded,
-      navigation_symbols: decoded ? '1800' : '0', valid_subframes: decoded ? '3' : '0',
-      tow_valid: decoded, tow_seconds: 12340, ephemeris_valid: index > 2, subframe_id: decoded ? 3 : 0,
-      taps: active ? [{offset_chips: -0.25, i: 0.8, q: 0.4}, {offset_chips: 0, i: 2.0, q: 0.6},
-        {offset_chips: 0.25, i: 0.9, q: 0.3}] : []
-    };
-  });
-  const otherSky = [
-    {prn: 12, constellation: 1, azimuth_deg: 55, elevation_deg: 35, used: true},
-    {prn: 24, constellation: 2, azimuth_deg: 153, elevation_deg: 66, used: true}
-  ];
-  const sky = [...beidouSky, ...otherSky];
-  return {
-    preview: true, state: 'running', run_id: 'beidou-preview',
-    tracking: [...tracking, ...otherSky.map(({prn, constellation}, index) => ({
-      ...tracking[3], channel_id: tracking.length + index + 1, prn, constellation
-    }))],
-    beidou_acquisition: {results: tracking.map(({prn, doppler_hz}) => ({
-      prn, doppler_hz, epoch, confirmed: true, code_phase_chips: 190.125, successes: 3
-    }))},
-    pvt: {available: true, satellites: sky.length, gps: 1, galileo: 1, beidou: beidouSky.length,
-      latitude_deg: 45.07, longitude_deg: 7.69, height_m: 250, residual_rms_m: 1.8,
-      tow_seconds: 12354.08, clock_gps_m: 30.2, clock_galileo_m: 33.5, clock_beidou_m: 27.6,
-      epoch, sample, sky,
-      dop_available: true, gdop: 3.4, hdop: 1.6, vdop: 2.7,
-      model: 'Synthetic GPS, Galileo and BeiDou solution for interface testing.'}
-  };
-}
-
 
 const badge = (text = 'Module unavailable') => `<span class="badge workspace-label">${text}</span>`;
 const field = (name, placeholder = UNAVAILABLE) => `<span data-workspace-field="${name}">${placeholder}</span>`;
@@ -105,7 +56,7 @@ function journeyMarkup() {
 }
 
 function trackingMarkup() {
-  return heading('GNSS / RECEIVER', 'Channels', 'One receiver pool: reserved slots and first-confirmed assignments share the same channel state machine.', settingsButton('receiver', 'Channel allocation') + previewButton) + previewNotice + beidouAvailability +
+  return heading('GNSS / RECEIVER', 'Channels', 'One receiver pool: reserved slots and first-confirmed assignments share the same channel state machine.', settingsButton('receiver', 'Channel allocation')) + beidouAvailability +
     '<section class="card tracking-panel" data-channel-overview><div data-tracking-table></div><p>Select a channel to open its satellite page.</p></section>' +
     '<section data-satellite-view hidden><div class="card tracking-panel"><button type="button" data-channel-back>Back to channels</button><h2 data-satellite-title>Satellite</h2><p data-satellite-stages></p><div class="caf-controls"><label>Channel <select data-tracking-channel aria-label="Tracking channel"></select></label><label>Vertical range (ADC units) <input data-tracking-range type="number" min="0.000001" step="any" aria-label="Correlator vertical range"></label><button type="button" data-tracking-autoscale>Automatic range</button></div><p data-tracking-detail></p><p data-satellite-acquisition></p></div>' +
     '<section class="card tracking-panel"><h2>Acquisition of this satellite</h2><div data-channel-search-space></div></section>' +
@@ -115,7 +66,7 @@ function trackingMarkup() {
 function navigationMarkup() {
   return heading('NAVIGATION DATA', 'Broadcast navigation messages',
     'Parity and CRC validate messages. Consistent orbit and clock issues feed common-epoch observables.',
-    settingsButton('navigation','Navigation & PVT settings')+button('tracking','Inspect channels')+button('pvt','PVT solution')+previewButton)+previewNotice+beidouAvailability+
+    settingsButton('navigation','Navigation & PVT settings')+button('tracking','Inspect channels')+button('pvt','PVT solution'))+beidouAvailability+
     '<section class="card tracking-panel"><h2>Broadcast navigation</h2><div class="channel-list-wrap" data-navigation-status></div><p>UTC conversion, authentication and integrity qualification are not available.</p></section>';
 }
 
@@ -126,7 +77,7 @@ function emptySkyplot() {
 function pvtMarkup() {
   return heading('POSITION, VELOCITY & TIME', 'Broadcast PVT',
     'Code and Doppler measurements share one input epoch. Each contributing constellation has its own code clock bias.',
-    settingsButton('navigation', 'Navigation & PVT settings') + button('tracking', 'Inspect channels') + previewButton) + previewNotice + beidouAvailability +
+    settingsButton('navigation', 'Navigation & PVT settings') + button('tracking', 'Inspect channels')) + beidouAvailability +
     '<div class="pvt-overview"><section class="card tracking-panel"><h2 data-pvt-state>No solution available</h2><p data-pvt-counts></p><dl data-pvt-values></dl><p data-pvt-model></p></section>' +
     '<section class="card tracking-panel pvt-sky-panel"><h2>Satellite skyplot</h2><p>GPS in blue, Galileo in amber, BeiDou in violet. The edge is the horizon.</p><div data-pvt-sky></div></section></div>' +
     '<section class="card tracking-panel"><h2>Receiver position and track</h2><div data-pvt-map></div></section>';
@@ -255,20 +206,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
   const previous = tour.querySelector('[data-tour="previous"]'), next = tour.querySelector('[data-tour="next"]');
   let selected = 'rf', guided = false, tourIndex = 0;
   let acquisitionSnapshot = {};
-  const previewStatus = createBeidouPreview();
-  const isPreviewUrl = () => new URL(location.href).searchParams.get('preview') === 'beidou';
-  let beidouPreview = isPreviewUrl();
-  const previewButtons = [...document.querySelectorAll('[data-beidou-preview]')];
-  const previewNotices = [...document.querySelectorAll('[data-beidou-preview-notice]')];
   const availabilityNotices = [...document.querySelectorAll('[data-beidou-availability]')];
-  const mapPanel = document.querySelector('[data-pvt-map]').closest('section');
-  for (const control of previewButtons) control.addEventListener('click', () => {
-    beidouPreview = !beidouPreview;
-    const url = new URL(location.href);
-    if (beidouPreview) url.searchParams.set('preview', 'beidou'); else url.searchParams.delete('preview');
-    history.replaceState(null, '', url);
-    update(acquisitionSnapshot);
-  });
   satelliteSearchSpace = createAcquisitionSearchSpace(document.querySelector('[data-channel-search-space]'));
   const pvtMap = createPvtMap(document.querySelector('[data-pvt-map]'));
   document.querySelector('[data-channel-search-space] select').setAttribute('aria-label','Channel search space satellite');
@@ -302,7 +240,7 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     updateTour();
     satelliteSearchSpace?.setVisible(view === 'tracking' && /^#tracking[/][0-9]+$/.test(location.hash));
     onViewChange(view);
-    pvtMap.setVisible(view === 'pvt' && !beidouPreview);
+    pvtMap.setVisible(view === 'pvt');
     if(view!=='tracking')onChannelInterest(0);
     if (focus) {
       const panel = document.getElementById(ROUTES[view].id), title = panel?.querySelector('h1,h2');
@@ -311,7 +249,6 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     return true;
   }
   function fromHash() {
-    beidouPreview = isPreviewUrl();
     const requested=location.hash.slice(1).split('/')[0];
     const view=requested==='acquisition'?'tracking':requested;
     show(Object.hasOwn(ROUTES,view)?view:'rf',{},false);
@@ -344,20 +281,15 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     acquisitionSnapshot = snapshot;
     const {status, capabilities, profile = {}, draft = {}, revision, dirty = false, connected = false} = snapshot;
     const live = connected && status ? status : null;
-    const display = beidouPreview ? previewStatus : live;
-    for (const control of previewButtons) {
-      control.setAttribute('aria-pressed', String(beidouPreview));
-      control.textContent = beidouPreview ? 'Exit BeiDou preview' : 'Preview BeiDou B1C';
-    }
-    for (const notice of previewNotices) notice.hidden = !beidouPreview;
+    const display = live;
     for (const notice of availabilityNotices)
-      notice.hidden = !connected || beidouPreview || capabilities?.beidou_b1c_operational === true;
+      notice.hidden = !connected || capabilities?.beidou_b1c_operational === true;
     let channelRows=display?.tracking||[];
     if(!channelRows.length && connected && display?.state==='stopped') {
       const total=Number(profile['receiver.channels']||16),gps=Number(profile['receiver.gps_reserved']||0),gal=Number(profile['receiver.galileo_reserved']||0),bds=Number(profile['receiver.beidou_reserved']||0);
       channelRows=Array.from({length:total},(_,k)=>({channel_id:k+1,reservation:k<gps?1:k<gps+gal?2:k<gps+gal+bds?3:0,state:0,constellation:0,prn:0,active:false,taps:[]}));
     }
-    if (!beidouPreview && connected && display?.state === 'stopped') {
+    if (connected && display?.state === 'stopped') {
       if (profile['receiver.egnos'] === 'true' && !channelRows.some(t => t.constellation === 4)) {
         channelRows = [...channelRows, {channel_id:65,reservation:0,constellation:4,state:0,prn:0,active:false,taps:[]}];
       } else if (profile['receiver.egnos'] !== 'true') {
@@ -381,11 +313,10 @@ export function createReceiverWorkspace({onViewChange = () => {}, onOpenSettings
     }
     if(!nb.rows.length){const cell=nb.insertRow().insertCell();cell.colSpan=nh.cells.length;cell.textContent='No navigation data available';}
     navigationTable.append(nt);
-    const observed=!beidouPreview&&selected==='tracking'&&live?.state==='running'?location.hash.match(/^#tracking[/]([0-9]+)$/):null;
+    const observed=selected==='tracking'&&live?.state==='running'?location.hash.match(/^#tracking[/]([0-9]+)$/):null;
     onChannelInterest(observed?Number(observed[1]):0);
     const pvt=display?.pvt, pvtState=document.querySelector('[data-pvt-state]');
-    mapPanel.hidden = beidouPreview;
-    pvtMap.setVisible(selected === 'pvt' && !beidouPreview);
+    pvtMap.setVisible(selected === 'pvt');
     pvtMap.update(live?.pvt, live?.run_id, live?.state === 'running');
     renderSkyplot(pvt);
     pvtState.textContent=pvt?.available?'Broadcast least-squares solution':'No solution available';
@@ -613,7 +544,7 @@ function renderTracking(t,history,status) {
   note.textContent=found?`Acquisition: ${found.confirmed?'confirmed':'not confirmed'} | Doppler ${found.doppler_hz.toFixed(2)} Hz | code ${found.code_phase_chips.toFixed(4)} chips | ${found.successes}/4 confirmations`:
     t?.state===1?'Acquisition search/refinement/confirmation in progress.':
       t?.active?'Acquisition confirmed for this assignment.':'No completed acquisition for this assignment.';
-  const showMap=!!t?.prn && t.constellation!==4 && system!=='beidou' && !status?.preview;
+  const showMap=!!t?.prn && t.constellation!==4 && system!=='beidou';
   document.querySelector('[data-channel-search-space]').closest('section').hidden=!showMap;
   satelliteSearchSpace?.update(showMap&&status?{...status,signal:system,acquisition:{...acq,results:found?[found]:[]}}:null);
   satelliteSearchSpace?.setVisible(showMap);

@@ -54,6 +54,9 @@ int NgEgnosCreate(const TNgStreamInfo *stream, const TNgTrackingConfig *config,
     search.lastPrn = 2;
     search.cpuBudget = 0.25;
     NgTrackingDefaults(&track);
+    track.spacingChips = config->egnosSpacingChips;
+    track.cn0CutoffDbHz = config->cn0CutoffDbHz;
+    track.tapCount = config->tapCount;
     track.fllDecisionUpdates = config->fllDecisionUpdates;
     track.fllDecisionIntervalMs = config->fllDecisionIntervalMs;
     track.fllTransitionHz = config->fllTransitionHz;
@@ -159,6 +162,12 @@ const TNgSbasCorrections *NgEgnosCorrections(const TNgEgnos *egnos)
 unsigned NgEgnosPrn(const TNgEgnos *egnos)
 {
     return !egnos || !egnos->active ? 0 : egnos->active == 1 ? 121u : 136u;
+}
+
+void NgEgnosObserve(TNgEgnos *egnos, int observed)
+{
+    if (egnos)
+        NgTrackingObserve(egnos->tracker, observed);
 }
 
 /** Snapshot the auxiliary slot, including search state before a PRN is assigned. */

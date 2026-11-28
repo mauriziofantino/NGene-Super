@@ -88,7 +88,7 @@ static TNgTrackingSnapshot Run(int square, int xorMode, size_t split, int observ
 
 /** Independent long waveform exercises loop polarity and Galileo BOC replicas. */
 static void Convergence(unsigned system, int inverted, int offsetSign, double codeError,
-                        unsigned seconds, double codeDrift)
+                        unsigned seconds, double codeDrift, unsigned coherentMs)
 {
     TNgTrackingConfig config;
     TNgStreamInfo stream = {0};
@@ -103,6 +103,7 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     unsigned period = system == 1 ? 1023u : 4092u;
     double codeRate = 1023000.0 * (1.0 + 350.0 / 1575420000.0) + codeDrift;
     NgTrackingDefaults(&config);
+    config.gpsCoherentMs = coherentMs;
     stream.sampleRateHz = 2048000;
     stream.digitalIfHz = -210000;
     stream.spectrumInverted = inverted;
@@ -144,6 +145,7 @@ static void Convergence(unsigned system, int inverted, int offsetSign, double co
     fprintf(stderr, "system %u inverted %d sign %d Doppler %.6f DLL %.6f PLL %d\n", system,
             inverted, offsetSign, snapshot.dopplerHz, snapshot.dllError, snapshot.pll);
     CHECK(snapshot.active && snapshot.pll);
+    if (system == NG_CONSTELLATION_GPS) CHECK(snapshot.loopCoherentMs == coherentMs);
     CHECK(fabs(snapshot.dopplerHz - 350) < 0.5);
     CHECK(fabs(snapshot.dllError) < 0.05);
     if (seconds > 1) {
@@ -471,14 +473,15 @@ int main(void)
     QuantizedMixContract();
     RunCorrelationContract();
     LanesContract();
-    Convergence(1, 0, 1, 0.05, 1, 0);
-    Convergence(1, 1, -1, -0.05, 1, 0);
-    Convergence(2, 0, 1, 0.05, 1, 0);
-    Convergence(2, 1, -1, -0.05, 1, 0);
-    Convergence(2, 0, 1, 0.5, 1, 0);
-    Convergence(2, 1, -1, -0.5, 1, 0);
-    Convergence(1, 0, 1, 0.12, 40, -0.5);
-    Convergence(2, 0, 1, 0.05, 40, -0.25);
+    Convergence(1, 0, 1, 0.05, 1, 0, 1);
+    Convergence(1, 0, 1, 0.05, 2, 0, 5);
+    Convergence(1, 1, -1, -0.05, 1, 0, 1);
+    Convergence(2, 0, 1, 0.05, 1, 0, 1);
+    Convergence(2, 1, -1, -0.05, 1, 0, 1);
+    Convergence(2, 0, 1, 0.5, 1, 0, 1);
+    Convergence(2, 1, -1, -0.5, 1, 0, 1);
+    Convergence(1, 0, 1, 0.12, 40, -0.5, 1);
+    Convergence(2, 0, 1, 0.05, 40, -0.25, 1);
     puts("tracking contracts passed");
     return 0;
 }
